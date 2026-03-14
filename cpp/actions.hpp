@@ -6,8 +6,12 @@
 #include <sstream>
 #include <stdio.h>
 #include <cmath>
+#include <unordered_map>
+#include <algorithm>
+#include <memory>
 
 #include "llama.h"
+#include "llama-chat-tree.h"
 #include "ggml-backend.h"
 #include "helpers/wcommon.h"
 #include "helpers/wsampling.h"
@@ -29,6 +33,12 @@ struct app_t
   llama_batch batch = llama_batch_init(512, 0, 1);
   llama_tokens tokens;
   int32_t seed = LLAMA_DEFAULT_SEED;
+
+  // KV Cache slot storage for prefix-tree chat.
+  // slot_id >= 1 maps to a copy of the KV state (seq_id = slot_id) plus its
+  // associated token list.  slot_id == 0 is always the live sequence.
+  std::unordered_map<int32_t, llama_tokens> slot_tokens;
+  std::unique_ptr<llama_chat_tree> tree;
 };
 
 inline std::vector<char> convert_string_to_buf(std::string &input)
@@ -301,6 +311,11 @@ glue_msg_load_res action_load(app_t &app, const char *req_raw)
   res.add_eos_token.value = llama_vocab_get_add_eos(app.vocab) == 1;
   res.has_encoder.value = llama_model_has_encoder(app.model);
   res.token_decoder_start.value = llama_model_decoder_start_token(app.model);
+
+  app.tokens.clear();
+  app.slot_tokens.clear();
+  app.tree.reset();
+
   return res;
 }
 
@@ -999,4 +1014,544 @@ glue_msg_chat_format_res action_chat_format(app_t &app, const char *req_raw)
     res.message.value = std::string(e.what());
     return res;
   }
+}
+
+//////////////////////////////////////////
+// Prefix tree engine helpers (delegated to llama.cpp core)
+
+inline static void tree_remove_slot(app_t &app, int32_t slot_id)
+{
+  if (slot_id < 1 || app.ctx == nullptr)
+  {
+    return;
+  }
+  auto *mem = llama_get_memory(app.ctx);
+  llama_memory_seq_rm(mem, slot_id, -1, -1);
+  app.slot_tokens.erase(slot_id);
+}
+
+glue_msg_tree_init_res action_tree_init(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_init_req);
+  glue_msg_tree_init_res res;
+
+  if (app.ctx == nullptr || app.model == nullptr)
+  {
+    res.success.value = false;
+    res.message.value = "Model is not loaded";
+    return res;
+  }
+
+  if (!app.tree)
+  {
+    app.tree = std::make_unique<llama_chat_tree>(app.ctx);
+  }
+
+  llama_memory_clear(llama_get_memory(app.ctx), true);
+  app.tokens.clear();
+  app.slot_tokens.clear();
+  app.tree->init(req.memory_cap_bytes.value);
+
+  res.success.value = true;
+  return res;
+}
+
+glue_msg_tree_state_res action_tree_state(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_state_req);
+  glue_msg_tree_state_res res;
+
+  if (!app.tree || !app.tree->initialized())
+  {
+    if (!app.tree)
+    {
+      app.tree = std::make_unique<llama_chat_tree>(app.ctx);
+    }
+    app.tree->init(1024 * 1024 * 1024);
+  }
+
+  std::vector<int32_t> ids;
+  ids.reserve(app.tree->nodes().size());
+  for (const auto &entry : app.tree->nodes())
+  {
+    ids.push_back(entry.first);
+  }
+  std::sort(ids.begin(), ids.end());
+
+  res.success.value = true;
+  res.child_offsets.arr.push_back(0);
+  for (int32_t id : ids)
+  {
+    const auto *node = app.tree->find_node(id);
+    if (!node)
+    {
+      continue;
+    }
+    res.ids.arr.push_back(node->id);
+    res.parent_ids.arr.push_back(node->parent_id);
+    res.user_texts.arr.push_back(node->user_text);
+    res.assistant_texts.arr.push_back(node->assistant_text);
+    res.statuses.arr.push_back(node->status);
+    res.prefix_token_counts.arr.push_back(node->prefix_token_count);
+    res.generation_time_ms.arr.push_back(node->generation_time_ms);
+    res.cached_token_counts.arr.push_back(node->cached_token_count);
+    res.snapshot_token_bytes.arr.push_back(node->snapshot_token_bytes);
+    res.created_at_s.arr.push_back(node->created_at_s);
+    res.last_accessed_at_s.arr.push_back(node->last_accessed_at_s);
+    res.child_ids.arr.insert(res.child_ids.arr.end(), node->child_ids.begin(), node->child_ids.end());
+    res.child_offsets.arr.push_back((int32_t)res.child_ids.arr.size());
+  }
+
+  res.root_id.value = app.tree->root_id();
+  res.active_node_id.value = app.tree->active_node_id();
+  res.next_id.value = app.tree->next_id();
+  res.context_memory_bytes.value = app.tree->context_memory_bytes();
+  res.memory_cap_bytes.value = app.tree->memory_cap_bytes();
+  res.total_snapshot_token_bytes.value = app.tree->total_snapshot_token_bytes();
+  res.last_pruned_node_ids.arr = app.tree->last_pruned_node_ids();
+  res.last_pruned_at_s.value = app.tree->last_pruned_at_s();
+  return res;
+}
+
+glue_msg_tree_switch_res action_tree_switch(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_switch_req);
+  glue_msg_tree_switch_res res;
+
+  if (!app.tree)
+  {
+    app.tree = std::make_unique<llama_chat_tree>(app.ctx);
+  }
+
+  const int32_t node_id = req.node_id.value;
+  std::string err;
+  if (!app.tree->chat_set_active(node_id, err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  if (node_id == app.tree->root_id())
+  {
+    llama_memory_clear(llama_get_memory(app.ctx), true);
+    app.tokens.clear();
+    res.success.value = true;
+    return res;
+  }
+
+  const auto *node = app.tree->find_node(node_id);
+  if (!node)
+  {
+    res.success.value = false;
+    res.message.value = "Tree node not found: " + std::to_string(node_id);
+    return res;
+  }
+
+  auto *mem = llama_get_memory(app.ctx);
+  llama_memory_seq_rm(mem, 0, -1, -1);
+  llama_memory_seq_cp(mem, node_id, 0, 0, node->prefix_token_count);
+  app.tokens = app.slot_tokens[node_id];
+  if ((int32_t)app.tokens.size() > node->prefix_token_count)
+  {
+    app.tokens.resize(node->prefix_token_count);
+  }
+
+  res.success.value = true;
+  return res;
+}
+
+glue_msg_tree_prepare_turn_res action_tree_prepare_turn(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_prepare_turn_req);
+  glue_msg_tree_prepare_turn_res res;
+
+  if (!app.tree || !app.tree->initialized())
+  {
+    res.success.value = false;
+    res.message.value = "Tree is not initialized";
+    return res;
+  }
+
+  int32_t node_id = -1;
+  std::string err;
+  if (!app.tree->chat_start(req.parent_id.value, req.user_text.value, node_id, err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  res.success.value = true;
+  res.node_id.value = node_id;
+  return res;
+}
+
+glue_msg_tree_finish_turn_res action_tree_finish_turn(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_finish_turn_req);
+  glue_msg_tree_finish_turn_res res;
+
+  if (!app.tree || !app.tree->initialized())
+  {
+    res.success.value = false;
+    res.message.value = "Tree is not initialized";
+    return res;
+  }
+
+  std::vector<int32_t> pruned_ids;
+  std::vector<int32_t> deleted_ids;
+  std::string err;
+  const int32_t n_past = (int32_t)app.tokens.size();
+  if (!app.tree->chat_finish(
+        req.node_id.value,
+        req.assistant_text.value,
+        req.generation_time_ms.value,
+        n_past,
+        (int32_t)(app.tokens.size() * sizeof(llama_token)),
+        false,
+        pruned_ids,
+        deleted_ids,
+        err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  auto *mem = llama_get_memory(app.ctx);
+  llama_memory_seq_rm(mem, req.node_id.value, -1, -1);
+  llama_memory_seq_cp(mem, 0, req.node_id.value, 0, n_past);
+  app.slot_tokens[req.node_id.value] = app.tokens;
+
+  for (int32_t pruned_id : pruned_ids)
+  {
+    tree_remove_slot(app, pruned_id);
+  }
+
+  res.success.value = true;
+  return res;
+}
+
+glue_msg_tree_delete_res action_tree_delete(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_delete_req);
+  glue_msg_tree_delete_res res;
+
+  if (!app.tree || !app.tree->initialized())
+  {
+    res.success.value = false;
+    res.message.value = "Tree is not initialized";
+    return res;
+  }
+
+  std::vector<int32_t> deleted_ids;
+  std::string err;
+  if (!app.tree->chat_delete(req.node_id.value, deleted_ids, err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  for (int32_t delete_id : deleted_ids)
+  {
+    tree_remove_slot(app, delete_id);
+  }
+
+  res.success.value = true;
+  return res;
+}
+
+glue_msg_tree_reset_res action_tree_reset(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_reset_req);
+  glue_msg_tree_reset_res res;
+
+  if (app.ctx != nullptr)
+  {
+    llama_memory_clear(llama_get_memory(app.ctx), true);
+  }
+  app.tokens.clear();
+  app.slot_tokens.clear();
+  if (!app.tree)
+  {
+    app.tree = std::make_unique<llama_chat_tree>(app.ctx);
+  }
+  app.tree->reset();
+
+  res.success.value = true;
+  return res;
+}
+
+glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_chat_start_req);
+  glue_msg_tree_chat_start_res res;
+
+  // High-level transaction entrypoint.
+  if (!app.tree)
+  {
+    app.tree = std::make_unique<llama_chat_tree>(app.ctx);
+  }
+
+  std::string err;
+  if (!app.tree->chat_set_active(app.tree->root_id(), err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  const int32_t parent_id = req.parent_id.value;
+  const auto *parent = app.tree->find_node(parent_id);
+  if (!parent)
+  {
+    res.success.value = false;
+    res.message.value = "Tree node not found: " + std::to_string(parent_id);
+    return res;
+  }
+
+  if (parent_id == app.tree->root_id())
+  {
+    llama_memory_clear(llama_get_memory(app.ctx), true);
+    app.tokens.clear();
+  }
+  else
+  {
+    auto tok_it = app.slot_tokens.find(parent_id);
+    if (tok_it == app.slot_tokens.end())
+    {
+      res.success.value = false;
+      res.message.value = "KV slot not found for parent node: " + std::to_string(parent_id);
+      return res;
+    }
+
+    auto *mem = llama_get_memory(app.ctx);
+    const int32_t n_past = std::max(0, parent->prefix_token_count);
+    llama_memory_seq_rm(mem, 0, -1, -1);
+    llama_memory_seq_cp(mem, parent_id, 0, 0, n_past);
+    app.tokens = tok_it->second;
+    if ((int32_t)app.tokens.size() > n_past)
+    {
+      app.tokens.resize(n_past);
+    }
+  }
+
+  int32_t node_id = -1;
+  if (!app.tree->chat_start(parent_id, req.user_text.value, node_id, err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  if (!app.tree->collect_chat_messages(node_id, res.roles.arr, res.contents.arr, err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  std::string formatted_chat;
+  if (!app.tree->chat_format_prompt(node_id, "", true, formatted_chat, err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+  res.formatted_chat.value = formatted_chat;
+
+  res.success.value = true;
+  res.node_id.value = node_id;
+  return res;
+}
+
+glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_chat_finish_req);
+  glue_msg_tree_chat_finish_res res;
+
+  if (!app.tree)
+  {
+    app.tree = std::make_unique<llama_chat_tree>(app.ctx);
+  }
+
+  std::vector<int32_t> pruned_ids;
+  std::vector<int32_t> deleted_ids;
+  std::string err;
+  const int32_t n_past = (int32_t)app.tokens.size();
+
+  if (!app.tree->chat_finish(
+        req.node_id.value,
+        req.assistant_text.value,
+        req.generation_time_ms.value,
+        n_past,
+        (int32_t)(app.tokens.size() * sizeof(llama_token)),
+        req.aborted_or_error.value,
+        pruned_ids,
+        deleted_ids,
+        err))
+  {
+    res.success.value = false;
+    res.message.value = err;
+    return res;
+  }
+
+  auto *mem = llama_get_memory(app.ctx);
+  if (!req.aborted_or_error.value)
+  {
+    llama_memory_seq_rm(mem, req.node_id.value, -1, -1);
+    llama_memory_seq_cp(mem, 0, req.node_id.value, 0, n_past);
+    app.slot_tokens[req.node_id.value] = app.tokens;
+  }
+
+  for (int32_t id : deleted_ids)
+  {
+    tree_remove_slot(app, id);
+  }
+  for (int32_t id : pruned_ids)
+  {
+    tree_remove_slot(app, id);
+  }
+
+  res.success.value = true;
+  return res;
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// KV Cache Slot Operations  (for prefix-tree chat)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * action_kv_seq_save
+ *
+ * Snapshot the current live sequence (seq_id=0) into slot <slot_id>.
+ * Internally we copy seq 0 → slot_id using llama_memory_seq_cp.
+ * Any previous snapshot in that slot is freed first.
+ *
+ * After this call:
+ *   - slot_id's KV cells hold a copy of seq 0 (positions 0..n_past-1)
+ *   - slot_tokens[slot_id] records the token list for that snapshot
+ *   - seq 0 is untouched
+ */
+glue_msg_kv_seq_save_res action_kv_seq_save(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_kv_seq_save_req);
+  const int32_t slot_id = req.slot_id.value;
+
+  glue_msg_kv_seq_save_res res;
+
+  if (slot_id < 1)
+  {
+    res.success.value = false;
+    res.message.value = "slot_id must be >= 1";
+    return res;
+  }
+
+  auto *mem = llama_get_memory(app.ctx);
+  const int32_t n_past = (int32_t)app.tokens.size();
+
+  // Free existing snapshot in this slot (if any)
+  llama_memory_seq_rm(mem, slot_id, -1, -1);
+
+  // Copy seq 0 → slot_id for positions [0, n_past)
+  // llama_memory_seq_cp(mem, src_seq, dst_seq, p0, p1)
+  //   copies cells where position is in [p0, p1)
+  llama_memory_seq_cp(mem, 0, slot_id, 0, n_past);
+
+  // Record token list
+  app.slot_tokens[slot_id] = app.tokens;
+
+  res.success.value = true;
+  res.n_past.value  = n_past;
+  return res;
+}
+
+/**
+ * action_kv_seq_restore
+ *
+ * Restore a previously saved slot back into the live sequence (seq_id=0).
+ *
+ * Steps:
+ *   1. Clear seq 0 from KV cache
+ *   2. Copy slot_id → seq 0
+ *   3. Trim seq 0 to [0, n_past) in case the slot was longer
+ *   4. Restore app.tokens from slot_tokens[slot_id], trimmed to n_past
+ */
+glue_msg_kv_seq_restore_res action_kv_seq_restore(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_kv_seq_restore_req);
+  const int32_t slot_id = req.slot_id.value;
+  const int32_t n_past  = req.n_past.value;
+
+  glue_msg_kv_seq_restore_res res;
+
+  if (slot_id < 1)
+  {
+    res.success.value = false;
+    res.message.value = "slot_id must be >= 1";
+    return res;
+  }
+
+  auto it = app.slot_tokens.find(slot_id);
+  if (it == app.slot_tokens.end())
+  {
+    res.success.value = false;
+    res.message.value = "slot_id not found: " + std::to_string(slot_id);
+    return res;
+  }
+
+  const llama_tokens &slot_toks = it->second;
+  const int32_t slot_n_past = (int32_t)slot_toks.size();
+  const int32_t actual_n_past = std::min(n_past, slot_n_past);
+
+  auto *mem = llama_get_memory(app.ctx);
+
+  // 1. Clear the current live sequence from KV
+  llama_memory_seq_rm(mem, 0, -1, -1);
+
+  // 2. Copy slot → seq 0 for positions [0, actual_n_past)
+  llama_memory_seq_cp(mem, slot_id, 0, 0, actual_n_past);
+
+  // 3. If the slot is longer than requested, trim seq 0
+  if (actual_n_past < slot_n_past)
+  {
+    llama_memory_seq_rm(mem, 0, actual_n_past, -1);
+  }
+
+  // 4. Restore app.tokens
+  app.tokens.assign(slot_toks.begin(), slot_toks.begin() + actual_n_past);
+
+  res.success.value = true;
+  res.n_past.value  = actual_n_past;
+  return res;
+}
+
+/**
+ * action_kv_seq_rm
+ *
+ * Release a slot: remove its KV cells and drop its token record.
+ */
+glue_msg_kv_seq_rm_res action_kv_seq_rm(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_kv_seq_rm_req);
+  const int32_t slot_id = req.slot_id.value;
+
+  glue_msg_kv_seq_rm_res res;
+
+  if (slot_id < 1)
+  {
+    res.success.value = false;
+    res.message.value = "slot_id must be >= 1";
+    return res;
+  }
+
+  auto *mem = llama_get_memory(app.ctx);
+  llama_memory_seq_rm(mem, slot_id, -1, -1);
+  app.slot_tokens.erase(slot_id);
+
+  res.success.value = true;
+  return res;
 }

@@ -905,3 +905,217 @@ struct glue_msg_chat_format_res
   GLUE_FIELD(str, message)
   GLUE_FIELD(str, formatted_chat)
 };
+
+/////////
+// KV Cache sequence slot operations
+// Used by the prefix-tree chat feature to snapshot/restore KV state per node.
+// slot_id must be >= 1 (0 is reserved for the active sequence).
+
+// Save current seq-0 KV state into an in-memory slot.
+// After this call, the slot holds an exact copy of seq-0 up to n_past tokens.
+struct glue_msg_kv_seq_save_req
+{
+  GLUE_HANDLER("kvss_req")
+  GLUE_FIELD(int, slot_id)   // destination slot (>= 1)
+};
+
+struct glue_msg_kv_seq_save_res
+{
+  GLUE_HANDLER("kvss_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(int, n_past)    // number of tokens saved
+};
+
+/////////
+
+// Restore a previously saved slot back into seq-0.
+// The caller provides n_past so we can verify / trim after restore.
+struct glue_msg_kv_seq_restore_req
+{
+  GLUE_HANDLER("kvsr_req")
+  GLUE_FIELD(int, slot_id)   // source slot (>= 1)
+  GLUE_FIELD(int, n_past)    // expected number of tokens after restore
+};
+
+struct glue_msg_kv_seq_restore_res
+{
+  GLUE_HANDLER("kvsr_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(int, n_past)    // actual n_past after restore
+};
+
+/////////
+
+// Release (free) a slot so its KV memory can be reused.
+struct glue_msg_kv_seq_rm_req
+{
+  GLUE_HANDLER("kvsm_req")
+  GLUE_FIELD(int, slot_id)   // slot to release (>= 1)
+};
+
+struct glue_msg_kv_seq_rm_res
+{
+  GLUE_HANDLER("kvsm_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
+/////////
+// Prefix tree engine operations
+
+struct glue_msg_tree_init_req
+{
+  GLUE_HANDLER("trin_req")
+  GLUE_FIELD(int, memory_cap_bytes)
+};
+
+struct glue_msg_tree_init_res
+{
+  GLUE_HANDLER("trin_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
+struct glue_msg_tree_state_req
+{
+  GLUE_HANDLER("trst_req")
+};
+
+struct glue_msg_tree_state_res
+{
+  GLUE_HANDLER("trst_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(arr_int, ids)
+  GLUE_FIELD(arr_int, parent_ids)
+  GLUE_FIELD(arr_str, user_texts)
+  GLUE_FIELD(arr_str, assistant_texts)
+  GLUE_FIELD(arr_str, statuses)
+  GLUE_FIELD(arr_int, prefix_token_counts)
+  GLUE_FIELD(arr_int, generation_time_ms)
+  GLUE_FIELD(arr_int, cached_token_counts)
+  GLUE_FIELD(arr_int, snapshot_token_bytes)
+  GLUE_FIELD(arr_int, created_at_s)
+  GLUE_FIELD(arr_int, last_accessed_at_s)
+  GLUE_FIELD(arr_int, child_offsets)
+  GLUE_FIELD(arr_int, child_ids)
+  GLUE_FIELD(int, root_id)
+  GLUE_FIELD(int, active_node_id)
+  GLUE_FIELD(int, next_id)
+  GLUE_FIELD(int, context_memory_bytes)
+  GLUE_FIELD(int, memory_cap_bytes)
+  GLUE_FIELD(int, total_snapshot_token_bytes)
+  GLUE_FIELD(arr_int, last_pruned_node_ids)
+  GLUE_FIELD(int, last_pruned_at_s)
+};
+
+struct glue_msg_tree_switch_req
+{
+  GLUE_HANDLER("trsw_req")
+  GLUE_FIELD(int, node_id)
+};
+
+struct glue_msg_tree_switch_res
+{
+  GLUE_HANDLER("trsw_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
+struct glue_msg_tree_prepare_turn_req
+{
+  GLUE_HANDLER("trpr_req")
+  GLUE_FIELD(int, parent_id)
+  GLUE_FIELD(str, user_text)
+};
+
+struct glue_msg_tree_prepare_turn_res
+{
+  GLUE_HANDLER("trpr_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(int, node_id)
+};
+
+struct glue_msg_tree_finish_turn_req
+{
+  GLUE_HANDLER("trfn_req")
+  GLUE_FIELD(int, node_id)
+  GLUE_FIELD(str, assistant_text)
+  GLUE_FIELD(int, generation_time_ms)
+};
+
+struct glue_msg_tree_finish_turn_res
+{
+  GLUE_HANDLER("trfn_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
+struct glue_msg_tree_delete_req
+{
+  GLUE_HANDLER("trde_req")
+  GLUE_FIELD(int, node_id)
+};
+
+struct glue_msg_tree_delete_res
+{
+  GLUE_HANDLER("trde_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
+struct glue_msg_tree_reset_req
+{
+  GLUE_HANDLER("trrs_req")
+};
+
+struct glue_msg_tree_reset_res
+{
+  GLUE_HANDLER("trrs_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
+/////////
+// Application-level tree chat transaction API (OpenAI-style workflow)
+
+// Start a chat-completions transaction from parent node and create a pending turn node.
+// Returns fully materialized messages for downstream chat completion generation.
+struct glue_msg_tree_chat_start_req
+{
+  GLUE_HANDLER("tchs_req")
+  GLUE_FIELD(int, parent_id)
+  GLUE_FIELD(str, user_text)
+};
+
+struct glue_msg_tree_chat_start_res
+{
+  GLUE_HANDLER("tchs_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(int, node_id)
+  GLUE_FIELD(arr_str, roles)
+  GLUE_FIELD(arr_str, contents)
+  GLUE_FIELD(str, formatted_chat)
+};
+
+// Finish a transaction. If aborted_or_error = true, backend rolls back by
+// deleting the pending node instead of committing KV snapshot.
+struct glue_msg_tree_chat_finish_req
+{
+  GLUE_HANDLER("tchf_req")
+  GLUE_FIELD(int, node_id)
+  GLUE_FIELD(str, assistant_text)
+  GLUE_FIELD(int, generation_time_ms)
+  GLUE_FIELD(bool, aborted_or_error)
+};
+
+struct glue_msg_tree_chat_finish_res
+{
+  GLUE_HANDLER("tchf_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};

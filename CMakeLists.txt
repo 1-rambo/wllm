@@ -22,6 +22,7 @@ set(WLLAMA_SRC cpp/wllama.cpp
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/cpp)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/cpp/helpers)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/src)
 
 add_executable(wllama ${WLLAMA_SRC})
 target_link_libraries(wllama PRIVATE ggml llama ${CMAKE_THREAD_LIBS_INIT})

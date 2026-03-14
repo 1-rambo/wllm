@@ -21,6 +21,9 @@ import type {
   GlueMsgGetKvRemoveRes,
   GlueMsgGetLogitsRes,
   GlueMsgGetVocabRes,
+  GlueMsgKvSeqRmRes,
+  GlueMsgKvSeqRestoreRes,
+  GlueMsgKvSeqSaveRes,
   GlueMsgLoadRes,
   GlueMsgLookupTokenRes,
   GlueMsgPerfContextRes,
@@ -32,6 +35,13 @@ import type {
   GlueMsgTestBenchmarkRes,
   GlueMsgTestPerplexityRes,
   GlueMsgTokenizeRes,
+  GlueMsgTreeDeleteRes,
+  GlueMsgTreeChatFinishRes,
+  GlueMsgTreeChatStartRes,
+  GlueMsgTreeInitRes,
+  GlueMsgTreeResetRes,
+  GlueMsgTreeStateRes,
+  GlueMsgTreeSwitchRes,
 } from './glue/messages';
 import { LIBLLAMA_VERSION } from './workers-code/generated';
 
@@ -259,6 +269,41 @@ export interface LoadedContextInfo {
   add_bos_token: boolean;
   add_eos_token: boolean;
 }
+
+export interface WllamaTreeNode {
+  id: number;
+  parentId: number | null;
+  childIds: number[];
+  turn: {
+    user: string;
+    assistant: string;
+  };
+  status: string;
+  prefixTokenCount: number;
+  generationTimeMs: number;
+  cachedTokenCount: number;
+  snapshotTokenBytes: number;
+  createdAt: number;
+  lastAccessedAt: number;
+}
+
+export interface WllamaTreeState {
+  nodes: Map<number, WllamaTreeNode>;
+  rootId: number;
+  activeNodeId: number;
+  nextId: number;
+  contextMemoryBytes: number;
+  memoryCapBytes: number;
+  totalSnapshotTokenBytes: number;
+  lastPrunedNodeIds: number[];
+  lastPrunedAt: number;
+}
+
+export interface WllamaChatFromNodeOptions extends ChatCompletionOptions {
+  onChunk?: (piece: string, fullText: string) => void;
+}
+
+export interface WllamaChatSessionOptions extends WllamaChatFromNodeOptions {}
 
 /**
  * Logger preset with debug messages suppressed
@@ -1282,6 +1327,381 @@ export class Wllama {
       throw new WllamaError('kvClear unknown error');
     }
     this.nCachedTokens = 0;
+  }
+
+  /**
+   * Save the current live KV cache (seq 0) as a named slot in VRAM.
+   *
+   * Used by the prefix-tree chat feature to snapshot the KV state at each
+   * conversation node so it can be restored cheaply when switching branches.
+   *
+   * @param slotId  Integer >= 1 identifying the slot. The caller is
+   *                responsible for managing slot IDs (e.g. using node IDs).
+   * @returns Number of tokens saved into the slot (= nCachedTokens).
+   */
+  async kvSeqSave(slotId: number): Promise<number> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgKvSeqSaveRes>(
+      'kv_seq_save',
+      {
+        _name: 'kvss_req',
+        slot_id: slotId,
+      }
+    );
+    if (!result.success) {
+      throw new WllamaError(`kvSeqSave(${slotId}) failed: ${result.message}`);
+    }
+    return result.n_past;
+  }
+
+  /**
+   * Restore a previously saved KV slot back into the live sequence (seq 0).
+   *
+   * After this call:
+   *   - The KV cache contains exactly `nPast` tokens from the saved slot.
+   *   - `nCachedTokens` is updated accordingly.
+   *   - Any tokens that were in seq 0 before the call are discarded.
+   *
+   * @param slotId  Slot to restore (must have been saved with kvSeqSave).
+   * @param nPast   Number of prefix tokens to restore. Must be <= the number
+   *                of tokens that were in seq 0 when kvSeqSave was called.
+   */
+  async kvSeqRestore(slotId: number, nPast: number): Promise<void> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgKvSeqRestoreRes>(
+      'kv_seq_restore',
+      {
+        _name: 'kvsr_req',
+        slot_id: slotId,
+        n_past: nPast,
+      }
+    );
+    if (!result.success) {
+      throw new WllamaError(
+        `kvSeqRestore(${slotId}, ${nPast}) failed: ${result.message}`
+      );
+    }
+    this.nCachedTokens = result.n_past;
+  }
+
+  /**
+   * Release a KV slot, freeing its VRAM.
+   *
+   * @param slotId  Slot to release (>= 1).
+   */
+  async kvSeqRm(slotId: number): Promise<void> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgKvSeqRmRes>(
+      'kv_seq_rm',
+      {
+        _name: 'kvsm_req',
+        slot_id: slotId,
+      }
+    );
+    if (!result.success) {
+      throw new WllamaError(`kvSeqRm(${slotId}) failed: ${result.message}`);
+    }
+  }
+
+  private mapTreeState(result: GlueMsgTreeStateRes): WllamaTreeState {
+    const nodes = new Map<number, WllamaTreeNode>();
+    for (let i = 0; i < result.ids.length; i++) {
+      const childStart = result.child_offsets[i] ?? 0;
+      const childEnd = result.child_offsets[i + 1] ?? childStart;
+      nodes.set(result.ids[i], {
+        id: result.ids[i],
+        parentId: result.parent_ids[i] < 0 ? null : result.parent_ids[i],
+        childIds: result.child_ids.slice(childStart, childEnd),
+        turn: {
+          user: result.user_texts[i] ?? '',
+          assistant: result.assistant_texts[i] ?? '',
+        },
+        status: result.statuses[i] ?? 'pending',
+        prefixTokenCount: result.prefix_token_counts[i] ?? -1,
+        generationTimeMs: result.generation_time_ms[i] ?? -1,
+        cachedTokenCount: result.cached_token_counts[i] ?? 0,
+        snapshotTokenBytes: result.snapshot_token_bytes[i] ?? 0,
+        createdAt: (result.created_at_s[i] ?? 0) * 1000,
+        lastAccessedAt: (result.last_accessed_at_s[i] ?? 0) * 1000,
+      });
+    }
+
+    return {
+      nodes,
+      rootId: result.root_id,
+      activeNodeId: result.active_node_id,
+      nextId: result.next_id,
+      contextMemoryBytes: result.context_memory_bytes,
+      memoryCapBytes: result.memory_cap_bytes,
+      totalSnapshotTokenBytes: result.total_snapshot_token_bytes,
+      lastPrunedNodeIds: result.last_pruned_node_ids,
+      lastPrunedAt: result.last_pruned_at_s * 1000,
+    };
+  }
+
+  private async treeInit(memoryCapBytes: number): Promise<WllamaTreeState> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeInitRes>('chat_init', {
+      _name: 'trin_req',
+      memory_cap_bytes: memoryCapBytes,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeInit failed: ${result.message}`);
+    }
+    this.nCachedTokens = 0;
+    return this.treeGetState();
+  }
+
+  // High-level chat session APIs (SGLang-style) that hide tree internals.
+  async chatEnsureReady(memoryCapBytes: number = 1024 * 1024 * 1024): Promise<WllamaTreeState> {
+    this.checkModelLoaded();
+    try {
+      return await this.treeGetState();
+    } catch (_) {
+      return await this.treeInit(memoryCapBytes);
+    }
+  }
+
+  async chatGetState(): Promise<WllamaTreeState> {
+    await this.chatEnsureReady();
+    return await this.treeGetState();
+  }
+
+  async chatSetActiveNode(nodeId: number): Promise<WllamaTreeState> {
+    await this.chatEnsureReady();
+    return await this.treeSwitch(nodeId);
+  }
+
+  async chatDeleteNode(nodeId: number): Promise<WllamaTreeState> {
+    await this.chatEnsureReady();
+    return await this.treeDelete(nodeId);
+  }
+
+  async chatReset(): Promise<WllamaTreeState> {
+    await this.chatEnsureReady();
+    return await this.treeReset();
+  }
+
+  async chatSessionInit(memoryCapBytes: number = 1024 * 1024 * 1024): Promise<WllamaTreeState> {
+    return this.chatEnsureReady(memoryCapBytes);
+  }
+
+  async chatSessionChat(
+    history: WllamaChatMessage[],
+    userText: string,
+    options: WllamaChatSessionOptions = {}
+  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+    const state = await this.chatEnsureReady();
+    const parentId = this.resolveNodeIdByHistory(state, history);
+    return this.chatFromNode(parentId, userText, options);
+  }
+
+  async chatSessionFinish(): Promise<WllamaTreeState> {
+    return this.chatReset();
+  }
+
+  async chatFromNode(
+    parentId: number,
+    userText: string,
+    options: WllamaChatFromNodeOptions = {}
+  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+    await this.chatEnsureReady();
+
+    const started = await this.treeChatStart(parentId, userText);
+    const t0 = Date.now();
+    let assistantText = '';
+
+    try {
+      const prompt = started.formattedPrompt || (await this.formatChat(started.messages, true));
+      const stream = await this.createCompletion(prompt, {
+        ...options,
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        if (options.abortSignal?.aborted) {
+          break;
+        }
+        const piece = new TextDecoder().decode(chunk.piece, { stream: true });
+        assistantText = chunk.currentText;
+        options.onChunk?.(piece, assistantText);
+      }
+
+      const state = await this.treeChatFinish(
+        started.nodeId,
+        assistantText,
+        Date.now() - t0,
+        false
+      );
+      return { nodeId: started.nodeId, assistantText, state };
+    } catch (err) {
+      try {
+        await this.treeChatFinish(started.nodeId, '', Date.now() - t0, true);
+      } catch {
+        // Ignore rollback failure and rethrow original inference error.
+      }
+      throw err;
+    }
+  }
+
+  private resolveNodeIdByHistory(state: WllamaTreeState, history: WllamaChatMessage[]): number {
+    const turns = this.historyToTurns(history);
+    let currentId = state.rootId;
+
+    for (const turn of turns) {
+      const current = state.nodes.get(currentId);
+      if (!current) {
+        throw new WllamaError(`Node ${currentId} not found while resolving history`);
+      }
+
+      const nextId = current.childIds.find((childId) => {
+        const child = state.nodes.get(childId);
+        return !!child
+          && child.turn.user === turn.user
+          && child.turn.assistant === turn.assistant;
+      });
+
+      if (nextId === undefined) {
+        throw new WllamaError('History does not map to an existing conversation path');
+      }
+      currentId = nextId;
+    }
+
+    return currentId;
+  }
+
+  private historyToTurns(history: WllamaChatMessage[]): Array<{ user: string; assistant: string }> {
+    const turns: Array<{ user: string; assistant: string }> = [];
+    let pendingUser = '';
+
+    for (const msg of history) {
+      if (msg.role === 'system') {
+        continue;
+      }
+      if (msg.role === 'user') {
+        if (pendingUser) {
+          throw new WllamaError('Invalid history: consecutive user messages are not supported');
+        }
+        pendingUser = msg.content;
+        continue;
+      }
+      if (msg.role === 'assistant') {
+        if (!pendingUser) {
+          throw new WllamaError('Invalid history: assistant message without preceding user message');
+        }
+        turns.push({ user: pendingUser, assistant: msg.content });
+        pendingUser = '';
+      }
+    }
+
+    if (pendingUser) {
+      throw new WllamaError('Invalid history: trailing user message is not allowed in base history');
+    }
+
+    return turns;
+  }
+
+  private async treeGetState(): Promise<WllamaTreeState> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeStateRes>('chat_state', {
+      _name: 'trst_req',
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeGetState failed: ${result.message}`);
+    }
+    return this.mapTreeState(result);
+  }
+
+  private async treeSwitch(nodeId: number): Promise<WllamaTreeState> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeSwitchRes>('chat_set_active', {
+      _name: 'trsw_req',
+      node_id: nodeId,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeSwitch(${nodeId}) failed: ${result.message}`);
+    }
+    const state = await this.treeGetState();
+    this.nCachedTokens = state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
+    return state;
+  }
+
+  private async treeChatStart(parentId: number, userText: string): Promise<{ nodeId: number; messages: WllamaChatMessage[]; formattedPrompt: string; state: WllamaTreeState }> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatStartRes>('chat_start', {
+      _name: 'tchs_req',
+      parent_id: parentId,
+      user_text: userText,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeChatStart(${parentId}) failed: ${result.message}`);
+    }
+
+    const messages: WllamaChatMessage[] = [];
+    const len = Math.min(result.roles.length, result.contents.length);
+    for (let i = 0; i < len; i++) {
+      const role = result.roles[i];
+      if (role === 'system' || role === 'user' || role === 'assistant') {
+        messages.push({ role, content: result.contents[i] });
+      }
+    }
+
+    const state = await this.treeGetState();
+    const parentNode = state.nodes.get(parentId);
+    this.nCachedTokens = parentNode?.prefixTokenCount ?? 0;
+    return {
+      nodeId: result.node_id,
+      messages,
+      formattedPrompt: result.formatted_chat ?? '',
+      state,
+    };
+  }
+
+  private async treeChatFinish(
+    nodeId: number,
+    assistantText: string,
+    generationTimeMs: number,
+    abortedOrError: boolean
+  ): Promise<WllamaTreeState> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatFinishRes>('chat_finish', {
+      _name: 'tchf_req',
+      node_id: nodeId,
+      assistant_text: assistantText,
+      generation_time_ms: generationTimeMs,
+      aborted_or_error: abortedOrError,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeChatFinish(${nodeId}) failed: ${result.message}`);
+    }
+
+    const state = await this.treeGetState();
+    this.nCachedTokens = state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
+    return state;
+  }
+
+  private async treeDelete(nodeId: number): Promise<WllamaTreeState> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeDeleteRes>('chat_delete', {
+      _name: 'trde_req',
+      node_id: nodeId,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeDelete(${nodeId}) failed: ${result.message}`);
+    }
+    return this.treeGetState();
+  }
+
+  private async treeReset(): Promise<WllamaTreeState> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeResetRes>('chat_reset', {
+      _name: 'trrs_req',
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeReset failed: ${result.message}`);
+    }
+    this.nCachedTokens = 0;
+    return this.treeGetState();
   }
 
   /**

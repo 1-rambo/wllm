@@ -117,6 +117,44 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
     WLLAMA_ACTION(chat_format)
     WLLAMA_ACTION(kv_remove)
     WLLAMA_ACTION(kv_clear)
+    WLLAMA_ACTION(kv_seq_save)
+    WLLAMA_ACTION(kv_seq_restore)
+    WLLAMA_ACTION(kv_seq_rm)
+    else if (action == "chat_init")
+    {
+      auto res = action_tree_init(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_state")
+    {
+      auto res = action_tree_state(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_set_active")
+    {
+      auto res = action_tree_switch(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_delete")
+    {
+      auto res = action_tree_delete(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_reset")
+    {
+      auto res = action_tree_reset(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_start")
+    {
+      auto res = action_tree_chat_start(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_finish")
+    {
+      auto res = action_tree_chat_finish(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
     WLLAMA_ACTION(current_status)
     WLLAMA_ACTION(perf_context)
     WLLAMA_ACTION(perf_reset)

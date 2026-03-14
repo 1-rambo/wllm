@@ -1068,6 +1068,522 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
         "isNullable": false
       }
     ]
+  },
+  "kvss_req": {
+    "name": "kvss_req",
+    "structName": "glue_msg_kv_seq_save_req",
+    "className": "GlueMsgKvSeqSaveReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvss_res": {
+    "name": "kvss_res",
+    "structName": "glue_msg_kv_seq_save_res",
+    "className": "GlueMsgKvSeqSaveRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_past",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvsr_req": {
+    "name": "kvsr_req",
+    "structName": "glue_msg_kv_seq_restore_req",
+    "className": "GlueMsgKvSeqRestoreReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_past",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvsr_res": {
+    "name": "kvsr_res",
+    "structName": "glue_msg_kv_seq_restore_res",
+    "className": "GlueMsgKvSeqRestoreRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_past",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvsm_req": {
+    "name": "kvsm_req",
+    "structName": "glue_msg_kv_seq_rm_req",
+    "className": "GlueMsgKvSeqRmReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvsm_res": {
+    "name": "kvsm_res",
+    "structName": "glue_msg_kv_seq_rm_res",
+    "className": "GlueMsgKvSeqRmRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "trin_req": {
+    "name": "trin_req",
+    "structName": "glue_msg_tree_init_req",
+    "className": "GlueMsgTreeInitReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "memory_cap_bytes",
+        "isNullable": false
+      }
+    ]
+  },
+  "trin_res": {
+    "name": "trin_res",
+    "structName": "glue_msg_tree_init_res",
+    "className": "GlueMsgTreeInitRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "trst_req": {
+    "name": "trst_req",
+    "structName": "glue_msg_tree_state_req",
+    "className": "GlueMsgTreeStateReq",
+    "fields": []
+  },
+  "trst_res": {
+    "name": "trst_res",
+    "structName": "glue_msg_tree_state_res",
+    "className": "GlueMsgTreeStateRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "ids",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "parent_ids",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "user_texts",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "assistant_texts",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "statuses",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "prefix_token_counts",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "generation_time_ms",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "cached_token_counts",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "snapshot_token_bytes",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "created_at_s",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "last_accessed_at_s",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "child_offsets",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "child_ids",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "root_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "active_node_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "next_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "context_memory_bytes",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "memory_cap_bytes",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "total_snapshot_token_bytes",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "last_pruned_node_ids",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "last_pruned_at_s",
+        "isNullable": false
+      }
+    ]
+  },
+  "trsw_req": {
+    "name": "trsw_req",
+    "structName": "glue_msg_tree_switch_req",
+    "className": "GlueMsgTreeSwitchReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "trsw_res": {
+    "name": "trsw_res",
+    "structName": "glue_msg_tree_switch_res",
+    "className": "GlueMsgTreeSwitchRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "trpr_req": {
+    "name": "trpr_req",
+    "structName": "glue_msg_tree_prepare_turn_req",
+    "className": "GlueMsgTreePrepareTurnReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "parent_id",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "user_text",
+        "isNullable": false
+      }
+    ]
+  },
+  "trpr_res": {
+    "name": "trpr_res",
+    "structName": "glue_msg_tree_prepare_turn_res",
+    "className": "GlueMsgTreePrepareTurnRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "trfn_req": {
+    "name": "trfn_req",
+    "structName": "glue_msg_tree_finish_turn_req",
+    "className": "GlueMsgTreeFinishTurnReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "assistant_text",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "generation_time_ms",
+        "isNullable": false
+      }
+    ]
+  },
+  "trfn_res": {
+    "name": "trfn_res",
+    "structName": "glue_msg_tree_finish_turn_res",
+    "className": "GlueMsgTreeFinishTurnRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "trde_req": {
+    "name": "trde_req",
+    "structName": "glue_msg_tree_delete_req",
+    "className": "GlueMsgTreeDeleteReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "trde_res": {
+    "name": "trde_res",
+    "structName": "glue_msg_tree_delete_res",
+    "className": "GlueMsgTreeDeleteRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "trrs_req": {
+    "name": "trrs_req",
+    "structName": "glue_msg_tree_reset_req",
+    "className": "GlueMsgTreeResetReq",
+    "fields": []
+  },
+  "trrs_res": {
+    "name": "trrs_res",
+    "structName": "glue_msg_tree_reset_res",
+    "className": "GlueMsgTreeResetRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchs_req": {
+    "name": "tchs_req",
+    "structName": "glue_msg_tree_chat_start_req",
+    "className": "GlueMsgTreeChatStartReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "parent_id",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "user_text",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchs_res": {
+    "name": "tchs_res",
+    "structName": "glue_msg_tree_chat_start_res",
+    "className": "GlueMsgTreeChatStartRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "roles",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "contents",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "formatted_chat",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchf_req": {
+    "name": "tchf_req",
+    "structName": "glue_msg_tree_chat_finish_req",
+    "className": "GlueMsgTreeChatFinishReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "assistant_text",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "generation_time_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "aborted_or_error",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchf_res": {
+    "name": "tchf_res",
+    "structName": "glue_msg_tree_chat_finish_res",
+    "className": "GlueMsgTreeChatFinishRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
   }
 };
 
@@ -1454,5 +1970,195 @@ export interface GlueMsgChatFormatRes {
   formatted_chat: string;
 }
 
+// struct glue_msg_kv_seq_save_req
+export interface GlueMsgKvSeqSaveReq {
+  _name: "kvss_req";
+  slot_id: number;
+}
 
-export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes;
+// struct glue_msg_kv_seq_save_res
+export interface GlueMsgKvSeqSaveRes {
+  _name: "kvss_res";
+  success: boolean;
+  message: string;
+  n_past: number;
+}
+
+// struct glue_msg_kv_seq_restore_req
+export interface GlueMsgKvSeqRestoreReq {
+  _name: "kvsr_req";
+  slot_id: number;
+  n_past: number;
+}
+
+// struct glue_msg_kv_seq_restore_res
+export interface GlueMsgKvSeqRestoreRes {
+  _name: "kvsr_res";
+  success: boolean;
+  message: string;
+  n_past: number;
+}
+
+// struct glue_msg_kv_seq_rm_req
+export interface GlueMsgKvSeqRmReq {
+  _name: "kvsm_req";
+  slot_id: number;
+}
+
+// struct glue_msg_kv_seq_rm_res
+export interface GlueMsgKvSeqRmRes {
+  _name: "kvsm_res";
+  success: boolean;
+  message: string;
+}
+
+// struct glue_msg_tree_init_req
+export interface GlueMsgTreeInitReq {
+  _name: "trin_req";
+  memory_cap_bytes: number;
+}
+
+// struct glue_msg_tree_init_res
+export interface GlueMsgTreeInitRes {
+  _name: "trin_res";
+  success: boolean;
+  message: string;
+}
+
+// struct glue_msg_tree_state_req
+export interface GlueMsgTreeStateReq {
+  _name: "trst_req";
+}
+
+// struct glue_msg_tree_state_res
+export interface GlueMsgTreeStateRes {
+  _name: "trst_res";
+  success: boolean;
+  message: string;
+  ids: number[];
+  parent_ids: number[];
+  user_texts: string[];
+  assistant_texts: string[];
+  statuses: string[];
+  prefix_token_counts: number[];
+  generation_time_ms: number[];
+  cached_token_counts: number[];
+  snapshot_token_bytes: number[];
+  created_at_s: number[];
+  last_accessed_at_s: number[];
+  child_offsets: number[];
+  child_ids: number[];
+  root_id: number;
+  active_node_id: number;
+  next_id: number;
+  context_memory_bytes: number;
+  memory_cap_bytes: number;
+  total_snapshot_token_bytes: number;
+  last_pruned_node_ids: number[];
+  last_pruned_at_s: number;
+}
+
+// struct glue_msg_tree_switch_req
+export interface GlueMsgTreeSwitchReq {
+  _name: "trsw_req";
+  node_id: number;
+}
+
+// struct glue_msg_tree_switch_res
+export interface GlueMsgTreeSwitchRes {
+  _name: "trsw_res";
+  success: boolean;
+  message: string;
+}
+
+// struct glue_msg_tree_prepare_turn_req
+export interface GlueMsgTreePrepareTurnReq {
+  _name: "trpr_req";
+  parent_id: number;
+  user_text: string;
+}
+
+// struct glue_msg_tree_prepare_turn_res
+export interface GlueMsgTreePrepareTurnRes {
+  _name: "trpr_res";
+  success: boolean;
+  message: string;
+  node_id: number;
+}
+
+// struct glue_msg_tree_finish_turn_req
+export interface GlueMsgTreeFinishTurnReq {
+  _name: "trfn_req";
+  node_id: number;
+  assistant_text: string;
+  generation_time_ms: number;
+}
+
+// struct glue_msg_tree_finish_turn_res
+export interface GlueMsgTreeFinishTurnRes {
+  _name: "trfn_res";
+  success: boolean;
+  message: string;
+}
+
+// struct glue_msg_tree_delete_req
+export interface GlueMsgTreeDeleteReq {
+  _name: "trde_req";
+  node_id: number;
+}
+
+// struct glue_msg_tree_delete_res
+export interface GlueMsgTreeDeleteRes {
+  _name: "trde_res";
+  success: boolean;
+  message: string;
+}
+
+// struct glue_msg_tree_reset_req
+export interface GlueMsgTreeResetReq {
+  _name: "trrs_req";
+}
+
+// struct glue_msg_tree_reset_res
+export interface GlueMsgTreeResetRes {
+  _name: "trrs_res";
+  success: boolean;
+  message: string;
+}
+
+// struct glue_msg_tree_chat_start_req
+export interface GlueMsgTreeChatStartReq {
+  _name: "tchs_req";
+  parent_id: number;
+  user_text: string;
+}
+
+// struct glue_msg_tree_chat_start_res
+export interface GlueMsgTreeChatStartRes {
+  _name: "tchs_res";
+  success: boolean;
+  message: string;
+  node_id: number;
+  roles: string[];
+  contents: string[];
+  formatted_chat: string;
+}
+
+// struct glue_msg_tree_chat_finish_req
+export interface GlueMsgTreeChatFinishReq {
+  _name: "tchf_req";
+  node_id: number;
+  assistant_text: string;
+  generation_time_ms: number;
+  aborted_or_error: boolean;
+}
+
+// struct glue_msg_tree_chat_finish_res
+export interface GlueMsgTreeChatFinishRes {
+  _name: "tchf_res";
+  success: boolean;
+  message: string;
+}
+
+
+export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes | GlueMsgKvSeqSaveReq | GlueMsgKvSeqSaveRes | GlueMsgKvSeqRestoreReq | GlueMsgKvSeqRestoreRes | GlueMsgKvSeqRmReq | GlueMsgKvSeqRmRes | GlueMsgTreeInitReq | GlueMsgTreeInitRes | GlueMsgTreeStateReq | GlueMsgTreeStateRes | GlueMsgTreeSwitchReq | GlueMsgTreeSwitchRes | GlueMsgTreePrepareTurnReq | GlueMsgTreePrepareTurnRes | GlueMsgTreeFinishTurnReq | GlueMsgTreeFinishTurnRes | GlueMsgTreeDeleteReq | GlueMsgTreeDeleteRes | GlueMsgTreeResetReq | GlueMsgTreeResetRes | GlueMsgTreeChatStartReq | GlueMsgTreeChatStartRes | GlueMsgTreeChatFinishReq | GlueMsgTreeChatFinishRes;
