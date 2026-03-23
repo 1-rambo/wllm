@@ -3,7 +3,12 @@
  * 树维护、KV 快照、LRU 剪枝和内存上限控制全部在引擎层完成。
  */
 
-import type { Wllama, WllamaChatMessage, WllamaTreeState } from '@wllama/wllama';
+import type {
+  Wllama,
+  WllamaChatMessage,
+  WllamaTieredCacheOptions,
+  WllamaTreeState,
+} from '@wllama/wllama';
 import type {
   ConversationNode,
   ConversationPrefixTreeManager,
@@ -15,6 +20,7 @@ import type {
 
 export interface PrefixTreeManagerOptions {
   memoryCapBytes?: number;
+  tieredCache?: WllamaTieredCacheOptions;
 }
 
 export const DEFAULT_MEMORY_CAP_BYTES = 1024 * 1024 * 1024;
@@ -48,9 +54,11 @@ export class PrefixTreeManagerImpl implements ConversationPrefixTreeManager {
   private wllama: Wllama;
   private state: PrefixTreeState;
   private initialized = false;
+  private options: PrefixTreeManagerOptions;
 
   constructor(wllama: Wllama, options: PrefixTreeManagerOptions = {}) {
     this.wllama = wllama;
+    this.options = options;
     const root = makeRootNode();
     this.state = {
       nodes: new Map([[0, root]]),
@@ -62,11 +70,33 @@ export class PrefixTreeManagerImpl implements ConversationPrefixTreeManager {
       totalSnapshotTokenBytes: 0,
       lastPrunedNodeIds: [],
       lastPrunedAt: 0,
+      tieredCacheEnabled: options.tieredCache?.enabled ?? false,
+      tierStats: {
+        l1Tokens: 0,
+        l2Tokens: 0,
+        l3Tokens: 0,
+        l1Slots: 0,
+        l2Slots: 0,
+        l3Slots: 0,
+        promotions: 0,
+        demotions: 0,
+        diskReads: 0,
+        diskWrites: 0,
+        l3OverflowEvents: 0,
+      },
     };
   }
 
-  async init(memoryCapBytes: number = this.state.memoryCapBytes): Promise<void> {
-    const state = await this.wllama.chatSessionInit(memoryCapBytes);
+  async init(
+    memoryCapBytes: number = this.state.memoryCapBytes,
+    tieredCache: WllamaTieredCacheOptions = this.options.tieredCache ?? {}
+  ): Promise<void> {
+    this.options = {
+      ...this.options,
+      memoryCapBytes,
+      tieredCache,
+    };
+    const state = await this.wllama.chatSessionInit(memoryCapBytes, tieredCache);
     this.applyEngineState(state);
     this.initialized = true;
   }
@@ -121,6 +151,26 @@ export class PrefixTreeManagerImpl implements ConversationPrefixTreeManager {
   ): Promise<number> {
     await this.ensureInitialized();
     const result = await this.wllama.chatSessionChat(history, userMessage, {
+      stream: true,
+      useCache: true,
+      nPredict: Number.POSITIVE_INFINITY,
+      sampling: { temp: 0.7, top_p: 0.9 },
+      abortSignal,
+      onChunk: onToken,
+    });
+
+    this.applyEngineState(result.state);
+    return result.nodeId;
+  }
+
+  async chatFromNodeId(
+    parentNodeId: number,
+    userMessage: string,
+    onToken: (piece: string, fullText: string) => void,
+    abortSignal?: AbortSignal
+  ): Promise<number> {
+    await this.ensureInitialized();
+    const result = await this.wllama.chatFromNode(parentNodeId, userMessage, {
       stream: true,
       useCache: true,
       nPredict: Number.POSITIVE_INFINITY,
@@ -253,6 +303,10 @@ export class PrefixTreeManagerImpl implements ConversationPrefixTreeManager {
       totalSnapshotTokenBytes: state.totalSnapshotTokenBytes,
       lastPrunedNodeIds: [...state.lastPrunedNodeIds],
       lastPrunedAt: state.lastPrunedAt,
+      tieredCacheEnabled: state.tieredCacheEnabled,
+      tierStats: {
+        ...state.tierStats,
+      },
     };
   }
 }

@@ -28,6 +28,63 @@ const LOCAL_MODEL_FILE = 'Llama-3.2-1B-Instruct-Q4_0.gguf';
 
 type LoadPhase = 'idle' | 'downloading' | 'loading' | 'ready' | 'error';
 
+type AutoReport = {
+  turns: number;
+  branches: number;
+  durationMs: number;
+  delta: {
+    nodes: number;
+    snapshotBytes: number;
+    promotions: number;
+    demotions: number;
+    diskReads: number;
+    diskWrites: number;
+    l3OverflowEvents: number;
+    prunedCount: number;
+  };
+};
+
+type ThresholdSweepRow = {
+  l1L2Threshold: number;
+  l2L3Threshold: number;
+  durationMs: number;
+  prunedCount: number;
+  demotions: number;
+  promotions: number;
+  diskReads: number;
+  diskWrites: number;
+  l3OverflowEvents: number;
+};
+
+function parseThresholdPairs(spec: string): Array<{ l1L2Threshold: number; l2L3Threshold: number }> {
+  const parts = spec
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out: Array<{ l1L2Threshold: number; l2L3Threshold: number }> = [];
+
+  for (const item of parts) {
+    if (item.includes(':')) {
+      const [a, b] = item.split(':').map((x) => Number(x.trim()));
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        out.push({
+          l1L2Threshold: Math.max(0, Math.floor(a)),
+          l2L3Threshold: Math.max(0, Math.floor(b)),
+        });
+      }
+      continue;
+    }
+
+    const v = Number(item);
+    if (Number.isFinite(v)) {
+      const n = Math.max(0, Math.floor(v));
+      out.push({ l1L2Threshold: n, l2L3Threshold: n });
+    }
+  }
+
+  return out;
+}
+
 // ModelManager 单例（与 examples/main 一致，负责 OPFS 缓存管理）
 const modelManager = new ModelManager();
 
@@ -82,6 +139,28 @@ export default function App() {
   const loadPromiseRef = useRef<Promise<void> | null>(null);
   const autoLoadStartedRef = useRef(false);
 
+  const [tieredCacheEnabled, setTieredCacheEnabled] = useState(true);
+  // const [l1CapTokens, setL1CapTokens] = useState(4096);
+  // const [l2CapTokens, setL2CapTokens] = useState(32768);
+  const [l1CapTokens, setL1CapTokens] = useState(2048);
+  const [l2CapTokens, setL2CapTokens] = useState(8192);
+  const [l3CapTokens, setL3CapTokens] = useState(131072);
+  const [pruneL1L2TokenThreshold, setPruneL1L2TokenThreshold] = useState(4096);
+  const [pruneL2L3TokenThreshold, setPruneL2L3TokenThreshold] = useState(8192);
+  const [l3Path, setL3Path] = useState('/tmp/wllama-tier-cache');
+  const [thresholdSweepSpec, setThresholdSweepSpec] = useState('1024,2048,4096,8192');
+  const [thresholdSweepRows, setThresholdSweepRows] = useState<ThresholdSweepRow[]>([]);
+
+  const buildTieredCacheConfig = useCallback(() => ({
+    enabled: tieredCacheEnabled,
+    l1TokenCap: Math.max(0, Math.floor(l1CapTokens || 0)),
+    l2TokenCap: Math.max(0, Math.floor(l2CapTokens || 0)),
+    l3TokenCap: Math.max(0, Math.floor(l3CapTokens || 0)),
+    pruneL1L2TokenThreshold: Math.max(0, Math.floor(pruneL1L2TokenThreshold || 0)),
+    pruneL2L3TokenThreshold: Math.max(0, Math.floor(pruneL2L3TokenThreshold || 0)),
+    l3Path: l3Path.trim() || '/tmp/wllama-tier-cache',
+  }), [tieredCacheEnabled, l1CapTokens, l2CapTokens, l3CapTokens, pruneL1L2TokenThreshold, pruneL2L3TokenThreshold, l3Path]);
+
   // 固定本地模型加载逻辑
   const handleLoad = useCallback(async () => {
     if (loadPromiseRef.current) {
@@ -100,13 +179,20 @@ export default function App() {
       try {
         // 直接用本地 public/ 目录模型
         const model = await modelManager.downloadModel(modelUrl);
-        const wllama = new Wllama(WLLAMA_CONFIG_PATHS, { preferWebGPU: false });
-        await wllama.loadModel(model, { n_ctx: 4096 });
+        const wllama = new Wllama(WLLAMA_CONFIG_PATHS, { preferWebGPU: true });
+        await wllama.loadModel(model, {
+          n_ctx: 4096,
+          // Prefix-tree chat uses one live sequence; keep full KV capacity for it.
+          n_seq_max: 1,
+          // Unified KV helps seq copy/restore behavior stay consistent.
+          kv_unified: true,
+        });
         wllamaRef.current = wllama;
         const manager = new PrefixTreeManagerImpl(wllama, {
           memoryCapBytes: DEFAULT_MEMORY_CAP_BYTES,
+          tieredCache: buildTieredCacheConfig(),
         });
-        await manager.init(DEFAULT_MEMORY_CAP_BYTES);
+        await manager.init(DEFAULT_MEMORY_CAP_BYTES, buildTieredCacheConfig());
         managerRef.current = manager;
         setHistory([]);
         setLoadPhase('ready');
@@ -123,7 +209,7 @@ export default function App() {
     } finally {
       loadPromiseRef.current = null;
     }
-  }, [loadPhase, modelUrl]);
+  }, [loadPhase, modelUrl, buildTieredCacheConfig]);
 
   useEffect(() => {
     if (loadPhase === 'idle' && !autoLoadStartedRef.current) {
@@ -148,6 +234,10 @@ export default function App() {
   const [treeState, setTreeState] = useState<PrefixTreeState>(mgr.getState());
   const [isGenerating, setIsGenerating] = useState(false);
   const [history, setHistory] = useState<WllamaChatMessage[]>([]);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoLogs, setAutoLogs] = useState<string[]>([]);
+  const [autoReport, setAutoReport] = useState<AutoReport | null>(null);
+  const autoAbortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(() => {
     const currentMgr = managerRef.current ?? dummyMgrRef.current;
@@ -226,6 +316,302 @@ export default function App() {
     setHistory([]);
     setStreamingText('');
   }, [isGenerating]);
+
+  const handleApplyTieredCache = useCallback(async () => {
+    const manager = managerRef.current;
+    if (!manager || isGenerating) {
+      return;
+    }
+    await manager.init(DEFAULT_MEMORY_CAP_BYTES, buildTieredCacheConfig());
+    setHistory([]);
+    setStreamingText('');
+    refresh();
+  }, [buildTieredCacheConfig, isGenerating, refresh]);
+
+  const appendAutoLog = useCallback((line: string) => {
+    const stamped = `${new Date().toLocaleTimeString()} ${line}`;
+    setAutoLogs((prev) => [...prev.slice(-11), stamped]);
+  }, []);
+
+  const buildLongTopic = useCallback((topic: string, branchName: string, idx: number) => {
+    const payload = [
+      `背景:${topic}`,
+      `分支:${branchName}`,
+      `轮次:${idx}`,
+      '请给出结构化总结，包含关键实体、时间线、风险和建议。',
+      '需要保留上下文一致性，并引用前文信息进行对比。',
+      '输出 6 条要点，每条不少于 20 字。',
+    ].join(' ');
+    return `${payload}\n\n${payload}\n${payload}`;
+  }, []);
+
+  // const normalizeHistoryForBase = useCallback((raw: WllamaChatMessage[]): {
+  //   safe: WllamaChatMessage[];
+  //   droppedDanglingUser: boolean;
+  // } => {
+  //   const safe: WllamaChatMessage[] = [];
+  //   let pendingUser: WllamaChatMessage | null = null;
+
+  //   for (const msg of raw) {
+  //     if (msg.role === 'system') {
+  //       continue;
+  //     }
+  //     if (msg.role === 'user') {
+  //       pendingUser = msg;
+  //       continue;
+  //     }
+  //     if (msg.role === 'assistant') {
+  //       if (pendingUser) {
+  //         safe.push(pendingUser, msg);
+  //         pendingUser = null;
+  //       }
+  //     }
+  //   }
+
+  //   return {
+  //     safe,
+  //     droppedDanglingUser: pendingUser !== null,
+  //   };
+  // }, []);
+
+  const runAutoScenario = useCallback(async (
+    manager: PrefixTreeManagerImpl,
+    abortController: AbortController,
+    autoCfg: ReturnType<typeof buildTieredCacheConfig>
+  ): Promise<AutoReport> => {
+    const startedAt = performance.now();
+    const before = manager.getState();
+
+    let turns = 0;
+    let branches = 0;
+
+    await manager.init(DEFAULT_MEMORY_CAP_BYTES, autoCfg);
+    setHistory([]);
+    refresh();
+
+    const runTurn = async (parentNodeId: number, msg: string, tag: string) => {
+      const isRecoverableTierReplayError = (err: unknown): boolean => {
+        const text = err instanceof Error ? err.message : String(err);
+        return /KV slot not found|replaying tiered cache|treeChatStart\(/i.test(text);
+      };
+
+      const stateNow = manager.getState();
+      const nodeMap = stateNow.nodes;
+      const candidateParents: number[] = [];
+      const seen = new Set<number>();
+      let cur: number | null = parentNodeId;
+      while (cur !== null && !seen.has(cur)) {
+        candidateParents.push(cur);
+        seen.add(cur);
+        const node = nodeMap.get(cur);
+        cur = node?.parentId ?? null;
+      }
+      if (!seen.has(stateNow.rootId)) {
+        candidateParents.push(stateNow.rootId);
+      }
+
+      let nodeId = -1;
+      let lastErr: unknown = null;
+      let usedIndex = -1;
+      for (let i = 0; i < candidateParents.length; i += 1) {
+        const candidateParent = candidateParents[i];
+        try {
+          nodeId = await manager.chatFromNodeId(
+            candidateParent,
+            msg,
+            () => {
+              // 自动演示不展示逐 token 文本，避免 UI 抖动。
+            },
+            abortController.signal
+          );
+          usedIndex = i;
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (!isRecoverableTierReplayError(err)) {
+            throw err;
+          }
+          const fallbackNode = candidateParents[Math.min(i + 1, candidateParents.length - 1)];
+          appendAutoLog(`${tag} 恢复失败，回退父节点重试（候选 #${fallbackNode}）`);
+        }
+      }
+
+      if (nodeId < 0) {
+        throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+      }
+
+      if (usedIndex > 0) {
+        appendAutoLog(`${tag} 已使用祖先节点回退继续（回退 ${usedIndex} 级）`);
+      }
+
+      turns += 1;
+      appendAutoLog(`${tag} -> 节点 #${nodeId}`);
+      refresh();
+
+      return {
+        nodeId,
+        nextParentNodeId: nodeId,
+      };
+    };
+
+    appendAutoLog('构建共享前缀（2 轮）');
+    const baseTopic = '智能客服系统日志归档与知识库更新';
+    const rootId = manager.getState().rootId;
+    const r1 = await runTurn(rootId, buildLongTopic(baseTopic, 'shared', 1), 'shared-1');
+    const r2 = await runTurn(r1.nextParentNodeId, buildLongTopic(baseTopic, 'shared', 2), 'shared-2');
+
+    const branchRootNodeId = r2.nextParentNodeId;
+    const branchNames = ['billing', 'security', 'operations', 'support', 'analytics', 'compliance'];
+
+    for (let i = 0; i < branchNames.length; i += 1) {
+      const branch = branchNames[i];
+      branches += 1;
+      appendAutoLog(`创建分支 ${branch}`);
+
+      const b1 = await runTurn(
+        branchRootNodeId,
+        buildLongTopic('跨部门周报合并', branch, 1),
+        `branch-${branch}-1`
+      );
+      await runTurn(
+        b1.nextParentNodeId,
+        buildLongTopic('异常告警与根因定位', branch, 2),
+        `branch-${branch}-2`
+      );
+    }
+
+    const after = manager.getState();
+    const report: AutoReport = {
+      turns,
+      branches,
+      durationMs: performance.now() - startedAt,
+      delta: {
+        nodes: after.nodes.size - before.nodes.size,
+        snapshotBytes: after.totalSnapshotTokenBytes - before.totalSnapshotTokenBytes,
+        promotions: after.tierStats.promotions - before.tierStats.promotions,
+        demotions: after.tierStats.demotions - before.tierStats.demotions,
+        diskReads: after.tierStats.diskReads - before.tierStats.diskReads,
+        diskWrites: after.tierStats.diskWrites - before.tierStats.diskWrites,
+        l3OverflowEvents: after.tierStats.l3OverflowEvents - before.tierStats.l3OverflowEvents,
+        prunedCount: after.lastPrunedNodeIds.length,
+      },
+    };
+
+    setHistory(manager.getHistory(after.activeNodeId));
+    return report;
+  }, [appendAutoLog, buildLongTopic, buildTieredCacheConfig, refresh]);
+
+  const runAutoDemo = useCallback(async () => {
+    if (autoRunning || isGenerating || loadPhase !== 'ready') {
+      return;
+    }
+    const manager = managerRef.current;
+    if (!manager) {
+      return;
+    }
+
+    setAutoRunning(true);
+    setAutoLogs([]);
+    setAutoReport(null);
+
+    const abortController = new AbortController();
+    autoAbortRef.current = abortController;
+
+    try {
+      const currentCfg = buildTieredCacheConfig();
+      const autoCfg = {
+        ...currentCfg,
+        enabled: true,
+      };
+      appendAutoLog('开始自动演示：重置会话树并应用缓存配置（强制 Tiered Cache=ON）');
+      if (!currentCfg.enabled) {
+        setTieredCacheEnabled(true);
+        appendAutoLog('检测到 UI 中 Tiered Cache=OFF，自动演示已强制改为 ON');
+      }
+
+      const report = await runAutoScenario(manager, abortController, autoCfg);
+      setAutoReport(report);
+      appendAutoLog('自动演示完成，可在左侧观察树结构与 KV/tier 指标变化');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (abortController.signal.aborted) {
+        appendAutoLog('自动演示已停止');
+      } else {
+        appendAutoLog(`自动演示失败: ${msg}`);
+      }
+    } finally {
+      autoAbortRef.current = null;
+      setAutoRunning(false);
+      refresh();
+    }
+  }, [autoRunning, isGenerating, loadPhase, buildTieredCacheConfig, appendAutoLog, setTieredCacheEnabled, runAutoScenario, refresh]);
+
+  const runThresholdSweep = useCallback(async () => {
+    if (autoRunning || isGenerating || loadPhase !== 'ready') {
+      return;
+    }
+    const manager = managerRef.current;
+    if (!manager) {
+      return;
+    }
+
+    const pairs = parseThresholdPairs(thresholdSweepSpec);
+    if (pairs.length === 0) {
+      appendAutoLog('阈值扫描配置为空，请使用 "1024,2048" 或 "1024:4096,2048:8192"');
+      return;
+    }
+
+    setAutoRunning(true);
+    setAutoLogs([]);
+    setAutoReport(null);
+    setThresholdSweepRows([]);
+
+    const abortController = new AbortController();
+    autoAbortRef.current = abortController;
+
+    try {
+      appendAutoLog(`开始阈值扫描，共 ${pairs.length} 组`);
+      const rows: ThresholdSweepRow[] = [];
+      for (let i = 0; i < pairs.length; i += 1) {
+        if (abortController.signal.aborted) {
+          break;
+        }
+        const pair = pairs[i];
+        appendAutoLog(`阈值组 ${i + 1}/${pairs.length}: L1/L2=${pair.l1L2Threshold}, L2/L3=${pair.l2L3Threshold}`);
+        const cfg = {
+          ...buildTieredCacheConfig(),
+          enabled: true,
+          pruneL1L2TokenThreshold: pair.l1L2Threshold,
+          pruneL2L3TokenThreshold: pair.l2L3Threshold,
+        };
+        const report = await runAutoScenario(manager, abortController, cfg);
+        rows.push({
+          l1L2Threshold: pair.l1L2Threshold,
+          l2L3Threshold: pair.l2L3Threshold,
+          durationMs: report.durationMs,
+          prunedCount: report.delta.prunedCount,
+          demotions: report.delta.demotions,
+          promotions: report.delta.promotions,
+          diskReads: report.delta.diskReads,
+          diskWrites: report.delta.diskWrites,
+          l3OverflowEvents: report.delta.l3OverflowEvents,
+        });
+        setThresholdSweepRows([...rows]);
+      }
+      appendAutoLog('阈值扫描完成');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendAutoLog(`阈值扫描失败: ${msg}`);
+    } finally {
+      autoAbortRef.current = null;
+      setAutoRunning(false);
+      refresh();
+    }
+  }, [autoRunning, isGenerating, loadPhase, thresholdSweepSpec, buildTieredCacheConfig, appendAutoLog, runAutoScenario, refresh]);
+
+  const stopAutoDemo = useCallback(() => {
+    autoAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -320,7 +706,26 @@ export default function App() {
         </div>
 
         {/* KV Cache 状态面板 */}
-        <KVCachePanel treeState={treeState} activeNodeId={activeNodeId} />
+        <KVCachePanel
+          treeState={treeState}
+          activeNodeId={activeNodeId}
+          tieredCacheEnabled={tieredCacheEnabled}
+          setTieredCacheEnabled={setTieredCacheEnabled}
+          l1CapTokens={l1CapTokens}
+          setL1CapTokens={setL1CapTokens}
+          l2CapTokens={l2CapTokens}
+          setL2CapTokens={setL2CapTokens}
+          l3CapTokens={l3CapTokens}
+          setL3CapTokens={setL3CapTokens}
+          pruneL1L2TokenThreshold={pruneL1L2TokenThreshold}
+          setPruneL1L2TokenThreshold={setPruneL1L2TokenThreshold}
+          pruneL2L3TokenThreshold={pruneL2L3TokenThreshold}
+          setPruneL2L3TokenThreshold={setPruneL2L3TokenThreshold}
+          l3Path={l3Path}
+          setL3Path={setL3Path}
+          onApply={handleApplyTieredCache}
+          disabled={isGenerating || loadPhase !== 'ready'}
+        />
       </aside>
 
       {/* ── 右侧：主聊天区 ── */}
@@ -332,6 +737,94 @@ export default function App() {
             {activeNode && activeNode.prefixTokenCount >= 0 &&
               `  ·  前缀约 ${activeNode.prefixTokenCount} tokens`}
           </span>
+        </div>
+
+        <div style={styles.autoPanel}>
+          <div style={styles.autoPanelTop}>
+            <div style={styles.autoPanelTitle}>⚗ 自动分支对话演示</div>
+            <div style={styles.autoPanelBtns}>
+              <button
+                style={styles.autoRunBtn}
+                onClick={() => void runAutoDemo()}
+                disabled={autoRunning || isGenerating}
+              >
+                {autoRunning ? '运行中...' : '一键跑演示'}
+              </button>
+              <button
+                style={styles.autoStopBtn}
+                onClick={stopAutoDemo}
+                disabled={!autoRunning}
+              >
+                停止
+              </button>
+            </div>
+          </div>
+          <div style={styles.autoSweepRow}>
+            <input
+              style={styles.autoSweepInput}
+              value={thresholdSweepSpec}
+              onChange={(e) => setThresholdSweepSpec(e.target.value)}
+              disabled={autoRunning || isGenerating}
+              placeholder="阈值组: 1024,2048 或 1024:4096,2048:8192"
+            />
+            <button
+              style={styles.autoSweepBtn}
+              onClick={() => void runThresholdSweep()}
+              disabled={autoRunning || isGenerating}
+            >
+              一键阈值扫描
+            </button>
+          </div>
+          {autoReport && (
+            <div style={styles.autoReportGrid}>
+              <span>轮次: {autoReport.turns}</span>
+              <span>分支: {autoReport.branches}</span>
+              <span>耗时: {(autoReport.durationMs / 1000).toFixed(1)}s</span>
+              <span>节点增量: {autoReport.delta.nodes}</span>
+              <span>快照增量: {formatBytes(autoReport.delta.snapshotBytes)}</span>
+              <span>升/降级增量: {autoReport.delta.promotions}/{autoReport.delta.demotions}</span>
+              <span>磁盘读/写增量: {autoReport.delta.diskReads}/{autoReport.delta.diskWrites}</span>
+              <span>L3 overflow 增量: {autoReport.delta.l3OverflowEvents}</span>
+              <span>最近剪枝节点数: {autoReport.delta.prunedCount}</span>
+            </div>
+          )}
+          {thresholdSweepRows.length > 0 && (
+            <div style={styles.autoSweepTableWrap}>
+              <table style={styles.autoSweepTable}>
+                <thead>
+                  <tr>
+                    <th>L1/L2 阈值</th>
+                    <th>L2/L3 阈值</th>
+                    <th>耗时(s)</th>
+                    <th>剪枝数</th>
+                    <th>升/降级</th>
+                    <th>磁盘读/写</th>
+                    <th>L3 overflow</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {thresholdSweepRows.map((row, idx) => (
+                    <tr key={`${idx}-${row.l1L2Threshold}-${row.l2L3Threshold}`}>
+                      <td>{row.l1L2Threshold}</td>
+                      <td>{row.l2L3Threshold}</td>
+                      <td>{(row.durationMs / 1000).toFixed(1)}</td>
+                      <td>{row.prunedCount}</td>
+                      <td>{row.promotions}/{row.demotions}</td>
+                      <td>{row.diskReads}/{row.diskWrites}</td>
+                      <td>{row.l3OverflowEvents}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={styles.autoLogBox}>
+            {autoLogs.length === 0
+              ? <span style={styles.autoHint}>点击“一键跑演示”后，这里会显示自动流程日志。</span>
+              : autoLogs.map((line, idx) => (
+                <div key={`${idx}-${line}`} style={styles.autoLogLine}>{line}</div>
+              ))}
+          </div>
         </div>
 
         <div style={styles.messageList}>
@@ -532,9 +1025,41 @@ function SiblingNav({
 function KVCachePanel({
   treeState,
   activeNodeId,
+  tieredCacheEnabled,
+  setTieredCacheEnabled,
+  l1CapTokens,
+  setL1CapTokens,
+  l2CapTokens,
+  setL2CapTokens,
+  l3CapTokens,
+  setL3CapTokens,
+  pruneL1L2TokenThreshold,
+  setPruneL1L2TokenThreshold,
+  pruneL2L3TokenThreshold,
+  setPruneL2L3TokenThreshold,
+  l3Path,
+  setL3Path,
+  onApply,
+  disabled,
 }: {
   treeState: PrefixTreeState;
   activeNodeId: number;
+  tieredCacheEnabled: boolean;
+  setTieredCacheEnabled: (value: boolean) => void;
+  l1CapTokens: number;
+  setL1CapTokens: (value: number) => void;
+  l2CapTokens: number;
+  setL2CapTokens: (value: number) => void;
+  l3CapTokens: number;
+  setL3CapTokens: (value: number) => void;
+  pruneL1L2TokenThreshold: number;
+  setPruneL1L2TokenThreshold: (value: number) => void;
+  pruneL2L3TokenThreshold: number;
+  setPruneL2L3TokenThreshold: (value: number) => void;
+  l3Path: string;
+  setL3Path: (value: string) => void;
+  onApply: () => Promise<void>;
+  disabled: boolean;
 }) {
   const totalNodes = treeState.nodes.size - 1; // 减去根节点
   const cachedNodes = [...treeState.nodes.values()].filter(
@@ -546,6 +1071,8 @@ function KVCachePanel({
   const usagePercent = treeState.memoryCapBytes > 0
     ? Math.min(100, (treeState.totalSnapshotTokenBytes / treeState.memoryCapBytes) * 100)
     : 0;
+  const l1OverCapWhileDisabled =
+    !treeState.tieredCacheEnabled && l1CapTokens > 0 && treeState.tierStats.l1Tokens > l1CapTokens;
 
   return (
     <div style={styles.kvPanel}>
@@ -578,6 +1105,41 @@ function KVCachePanel({
         <span>Context/KV 实际分配</span>
         <strong>{formatBytes(treeState.contextMemoryBytes)}</strong>
       </div>
+      <div style={styles.kvRow}>
+        <span>Tiered Cache</span>
+        <strong style={{ color: treeState.tieredCacheEnabled ? '#16a34a' : '#94a3b8' }}>
+          {treeState.tieredCacheEnabled ? 'ON' : 'OFF'}
+        </strong>
+      </div>
+      {l1OverCapWhileDisabled && (
+        <div style={styles.kvWarn}>
+          ⚠ Tiered Cache 处于 OFF，当前 L1 已超过 cap，但不会发生替换。
+        </div>
+      )}
+      <div style={styles.kvRow}>
+        <span>L1/L2/L3 tokens</span>
+        <strong>
+          {treeState.tierStats.l1Tokens} / {treeState.tierStats.l2Tokens} / {treeState.tierStats.l3Tokens}
+        </strong>
+      </div>
+      <div style={styles.kvRow}>
+        <span>L1/L2/L3 slots</span>
+        <strong>
+          {treeState.tierStats.l1Slots} / {treeState.tierStats.l2Slots} / {treeState.tierStats.l3Slots}
+        </strong>
+      </div>
+      <div style={styles.kvRow}>
+        <span>升/降级</span>
+        <strong>{treeState.tierStats.promotions} / {treeState.tierStats.demotions}</strong>
+      </div>
+      <div style={styles.kvRow}>
+        <span>磁盘读/写</span>
+        <strong>{treeState.tierStats.diskReads} / {treeState.tierStats.diskWrites}</strong>
+      </div>
+      <div style={styles.kvRow}>
+        <span>L3 Overflow</span>
+        <strong>{treeState.tierStats.l3OverflowEvents}</strong>
+      </div>
       <div style={styles.kvProgressBar}>
         <div style={{ ...styles.kvProgressFill, width: `${usagePercent}%` }} />
       </div>
@@ -590,8 +1152,86 @@ function KVCachePanel({
             : '无'}
         </strong>
       </div>
+      <div style={styles.tierCtrlWrap}>
+        <label style={styles.tierCtrlRow}>
+          <span>启用三级缓存</span>
+          <input
+            type="checkbox"
+            checked={tieredCacheEnabled}
+            onChange={(e) => setTieredCacheEnabled(e.target.checked)}
+            disabled={disabled}
+          />
+        </label>
+        <label style={styles.tierCtrlRow}>
+          <span>L1 token cap</span>
+          <input
+            style={styles.tierInput}
+            type="number"
+            min={0}
+            value={l1CapTokens}
+            onChange={(e) => setL1CapTokens(Number(e.target.value || 0))}
+            disabled={disabled}
+          />
+        </label>
+        <label style={styles.tierCtrlRow}>
+          <span>L2 token cap</span>
+          <input
+            style={styles.tierInput}
+            type="number"
+            min={0}
+            value={l2CapTokens}
+            onChange={(e) => setL2CapTokens(Number(e.target.value || 0))}
+            disabled={disabled}
+          />
+        </label>
+        <label style={styles.tierCtrlRow}>
+          <span>L3 token cap</span>
+          <input
+            style={styles.tierInput}
+            type="number"
+            min={0}
+            value={l3CapTokens}
+            onChange={(e) => setL3CapTokens(Number(e.target.value || 0))}
+            disabled={disabled}
+          />
+        </label>
+        <label style={styles.tierCtrlRow}>
+          <span>L1/L2 剪枝阈值</span>
+          <input
+            style={styles.tierInput}
+            type="number"
+            min={0}
+            value={pruneL1L2TokenThreshold}
+            onChange={(e) => setPruneL1L2TokenThreshold(Number(e.target.value || 0))}
+            disabled={disabled}
+          />
+        </label>
+        <label style={styles.tierCtrlRow}>
+          <span>L2/L3 剪枝阈值</span>
+          <input
+            style={styles.tierInput}
+            type="number"
+            min={0}
+            value={pruneL2L3TokenThreshold}
+            onChange={(e) => setPruneL2L3TokenThreshold(Number(e.target.value || 0))}
+            disabled={disabled}
+          />
+        </label>
+        <label style={styles.tierCtrlRow}>
+          <span>L3 路径</span>
+          <input
+            style={styles.tierInput}
+            value={l3Path}
+            onChange={(e) => setL3Path(e.target.value)}
+            disabled={disabled}
+          />
+        </label>
+        <button style={styles.applyTierBtn} onClick={() => void onApply()} disabled={disabled}>
+          应用并重置会话
+        </button>
+      </div>
       <div style={styles.kvNote}>
-        ✅ 当前显示的是引擎真实字节数。KV/context 缓冲区本身是固定分配；可被 LRU 回收的是节点快照 token 数据，因此剪枝阈值也基于该值而不是前缀估算。
+        ✅ Tiered 模式下按边界阈值决策：L1 到 L2 与 L2 到 L3 各有独立剪枝阈值。设为 0 表示该边界优先降级；L3 超 cap 时会强制剪枝。
       </div>
     </div>
   );
@@ -784,6 +1424,56 @@ const styles = {
     lineHeight: 1.5,
   } as React.CSSProperties,
 
+  kvWarn: {
+    marginBottom: 6,
+    borderRadius: 6,
+    border: '1px solid #fecaca',
+    background: '#fef2f2',
+    color: '#b91c1c',
+    padding: '6px 8px',
+    fontSize: 11,
+    lineHeight: 1.4,
+  } as React.CSSProperties,
+
+  tierCtrlWrap: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTop: '1px dashed #cbd5e1',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  } as React.CSSProperties,
+
+  tierCtrlRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 11,
+    color: '#475569',
+  } as React.CSSProperties,
+
+  tierInput: {
+    width: 130,
+    border: '1px solid #cbd5e1',
+    borderRadius: 6,
+    padding: '4px 6px',
+    fontSize: 11,
+    color: '#1e293b',
+  } as React.CSSProperties,
+
+  applyTierBtn: {
+    marginTop: 4,
+    border: 'none',
+    borderRadius: 6,
+    padding: '6px 8px',
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#fff',
+    background: '#0ea5e9',
+    cursor: 'pointer',
+  } as React.CSSProperties,
+
   kvProgressBar: {
     height: 8,
     borderRadius: 999,
@@ -924,6 +1614,125 @@ const styles = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  } as React.CSSProperties,
+
+  autoPanel: {
+    borderBottom: '1px solid #e2e8f0',
+    background: '#f8fafc',
+    padding: '10px 16px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  } as React.CSSProperties,
+
+  autoPanelTop: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  } as React.CSSProperties,
+
+  autoPanelTitle: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#334155',
+  } as React.CSSProperties,
+
+  autoPanelBtns: {
+    display: 'flex',
+    gap: 6,
+  } as React.CSSProperties,
+
+  autoSweepRow: {
+    display: 'flex',
+    gap: 8,
+    alignItems: 'center',
+  } as React.CSSProperties,
+
+  autoSweepInput: {
+    flex: 1,
+    border: '1px solid #cbd5e1',
+    borderRadius: 8,
+    padding: '6px 8px',
+    fontSize: 11,
+    color: '#1e293b',
+  } as React.CSSProperties,
+
+  autoSweepBtn: {
+    border: 'none',
+    borderRadius: 8,
+    background: '#14b8a6',
+    color: '#fff',
+    padding: '6px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  } as React.CSSProperties,
+
+  autoRunBtn: {
+    border: 'none',
+    borderRadius: 8,
+    background: '#0ea5e9',
+    color: '#fff',
+    padding: '6px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+  } as React.CSSProperties,
+
+  autoStopBtn: {
+    border: 'none',
+    borderRadius: 8,
+    background: '#ef4444',
+    color: '#fff',
+    padding: '6px 10px',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+  } as React.CSSProperties,
+
+  autoReportGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: 4,
+    fontSize: 11,
+    color: '#0f172a',
+  } as React.CSSProperties,
+
+  autoSweepTableWrap: {
+    maxHeight: 140,
+    overflowY: 'auto',
+    border: '1px solid #dbeafe',
+    borderRadius: 8,
+    background: '#fff',
+  } as React.CSSProperties,
+
+  autoSweepTable: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: 11,
+    color: '#0f172a',
+  } as React.CSSProperties,
+
+  autoLogBox: {
+    maxHeight: 100,
+    overflowY: 'auto',
+    border: '1px solid #dbeafe',
+    borderRadius: 8,
+    background: '#fff',
+    padding: '6px 8px',
+  } as React.CSSProperties,
+
+  autoLogLine: {
+    fontSize: 11,
+    color: '#475569',
+    lineHeight: 1.5,
+  } as React.CSSProperties,
+
+  autoHint: {
+    fontSize: 11,
+    color: '#94a3b8',
   } as React.CSSProperties,
 
   // ── 加载界面 ────────────────────────────────────────────────

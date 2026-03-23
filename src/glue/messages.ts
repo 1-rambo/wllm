@@ -3,7 +3,7 @@
 
 import type { GlueMessageProto } from './glue';
 
-export const GLUE_VERSION = 2;
+export const GLUE_VERSION = 3;
 
 export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
   "erro_evt": {
@@ -156,6 +156,11 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "bool",
         "name": "swa_full",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "kv_unified",
         "isNullable": true
       }
     ]
@@ -1180,6 +1185,41 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
         "type": "int",
         "name": "memory_cap_bytes",
         "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "tiered_cache_enabled",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l1_token_cap",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l2_token_cap",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l3_token_cap",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_prune_l1_l2_token_threshold",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_prune_l2_l3_token_threshold",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "tier_l3_path",
+        "isNullable": false
       }
     ]
   },
@@ -1324,6 +1364,66 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "int",
         "name": "last_pruned_at_s",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "tiered_cache_enabled",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l1_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l2_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l3_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l1_slots",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l2_slots",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l3_slots",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_promotions",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_demotions",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_disk_reads",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_disk_writes",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_l3_overflow_events",
         "isNullable": false
       }
     ]
@@ -1623,6 +1723,7 @@ export interface GlueMsgLoadReq {
   cache_type_v?: string | undefined;
   flash_attn?: boolean | undefined;
   swa_full?: boolean | undefined;
+  kv_unified?: boolean | undefined;
 }
 
 // struct glue_msg_load_res
@@ -2016,6 +2117,13 @@ export interface GlueMsgKvSeqRmRes {
 export interface GlueMsgTreeInitReq {
   _name: "trin_req";
   memory_cap_bytes: number;
+  tiered_cache_enabled: boolean;
+  tier_l1_token_cap: number;
+  tier_l2_token_cap: number;
+  tier_l3_token_cap: number;
+  tier_prune_l1_l2_token_threshold: number;
+  tier_prune_l2_l3_token_threshold: number;
+  tier_l3_path: string;
 }
 
 // struct glue_msg_tree_init_res
@@ -2056,6 +2164,18 @@ export interface GlueMsgTreeStateRes {
   total_snapshot_token_bytes: number;
   last_pruned_node_ids: number[];
   last_pruned_at_s: number;
+  tiered_cache_enabled: boolean;
+  tier_l1_tokens: number;
+  tier_l2_tokens: number;
+  tier_l3_tokens: number;
+  tier_l1_slots: number;
+  tier_l2_slots: number;
+  tier_l3_slots: number;
+  tier_promotions: number;
+  tier_demotions: number;
+  tier_disk_reads: number;
+  tier_disk_writes: number;
+  tier_l3_overflow_events: number;
 }
 
 // struct glue_msg_tree_switch_req

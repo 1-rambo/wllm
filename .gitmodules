@@ -1,3 +1,15 @@
 [submodule "llama.cpp"]
 	path = llama.cpp
 	url = https://github.com/1-rambo/llama.cpp
+[submodule "AgenticBrowserBenchmark"]
+	path = AgenticBrowserBenchmark
+	url = git@github.com:rgbacmyk/AgenticBrowserBenchmark.git
+[submodule "test"]
+	path = test
+	url = https://github.com/hendrycks/test
+[submodule "hellaswag"]
+	path = hellaswag
+	url = https://www.modelscope.cn/datasets/modelscope/hellaswag.git
+[submodule "examples/sglang-style-mmlu-hellaswag/hellaswag"]
+	path = examples/sglang-style-mmlu-hellaswag/hellaswag
+	url = https://www.modelscope.cn/datasets/modelscope/hellaswag.git

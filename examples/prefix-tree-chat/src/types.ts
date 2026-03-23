@@ -111,6 +111,24 @@ export interface PrefixTreeState {
 
   /** 最近一次 LRU 剪枝发生时间；0 表示尚未发生 */
   lastPrunedAt: number;
+
+  /** 是否启用三级缓存 */
+  tieredCacheEnabled: boolean;
+
+  /** 分层缓存运行时统计 */
+  tierStats: {
+    l1Tokens: number;
+    l2Tokens: number;
+    l3Tokens: number;
+    l1Slots: number;
+    l2Slots: number;
+    l3Slots: number;
+    promotions: number;
+    demotions: number;
+    diskReads: number;
+    diskWrites: number;
+    l3OverflowEvents: number;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────

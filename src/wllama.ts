@@ -48,6 +48,8 @@ import { LIBLLAMA_VERSION } from './workers-code/generated';
 const HF_MODEL_ID_REGEX = /^([a-zA-Z0-9_\-\.]+)\/([a-zA-Z0-9_\-\.]+)$/;
 const HF_MODEL_ID_REGEX_EXPLAIN =
   "Hugging Face model ID is incorrect. Only regular alphanumeric characters, '-', '.' and '_' supported";
+const MAX_SAFE_N_SEQ_MAX = 256;
+const MIN_CTX_PER_SEQUENCE = 1024;
 
 export interface WllamaLogger {
   debug: typeof console.debug;
@@ -112,6 +114,8 @@ export interface LoadModelConfig {
   seed?: number;
   n_ctx?: number;
   n_batch?: number;
+  n_seq_max?: number;
+  kv_unified?: boolean;
   // by default, on multi-thread build, we take half number of available threads (hardwareConcurrency / 2)
   n_threads?: number;
   embeddings?: boolean;
@@ -297,6 +301,30 @@ export interface WllamaTreeState {
   totalSnapshotTokenBytes: number;
   lastPrunedNodeIds: number[];
   lastPrunedAt: number;
+  tieredCacheEnabled: boolean;
+  tierStats: {
+    l1Tokens: number;
+    l2Tokens: number;
+    l3Tokens: number;
+    l1Slots: number;
+    l2Slots: number;
+    l3Slots: number;
+    promotions: number;
+    demotions: number;
+    diskReads: number;
+    diskWrites: number;
+    l3OverflowEvents: number;
+  };
+}
+
+export interface WllamaTieredCacheOptions {
+  enabled?: boolean;
+  l1TokenCap?: number;
+  l2TokenCap?: number;
+  l3TokenCap?: number;
+  pruneL1L2TokenThreshold?: number;
+  pruneL2L3TokenThreshold?: number;
+  l3Path?: string;
 }
 
 export interface WllamaChatFromNodeOptions extends ChatCompletionOptions {
@@ -304,6 +332,17 @@ export interface WllamaChatFromNodeOptions extends ChatCompletionOptions {
 }
 
 export interface WllamaChatSessionOptions extends WllamaChatFromNodeOptions {}
+
+interface EngineChatRequest {
+  id: number;
+  parentId: number;
+  userText: string;
+  options: WllamaChatFromNodeOptions;
+  enqueuedAt: number;
+  resolve: (value: { nodeId: number; assistantText: string; state: WllamaTreeState }) => void;
+  reject: (reason?: unknown) => void;
+  cleanupAbort?: () => void;
+}
 
 /**
  * Logger preset with debug messages suppressed
@@ -366,6 +405,9 @@ export class Wllama {
   private hasEncoder: boolean = false;
   private decoderStartToken: number = -1;
   private nCachedTokens: number = 0;
+  private nextEngineChatRequestId: number = 1;
+  private engineChatQueue: EngineChatRequest[] = [];
+  private engineChatQueueRunning: boolean = false;
 
   constructor(pathConfig: AssetsPathConfig, wllamaConfig: WllamaConfig = {}) {
     checkEnvironmentCompatible();
@@ -700,6 +742,17 @@ export class Wllama {
       );
     }
     // load the model
+    const resolvedNCtx = config.n_ctx || 1024;
+    const maxNSeqFromCtx = Math.max(1, Math.floor(resolvedNCtx / MIN_CTX_PER_SEQUENCE));
+    const hardNSeqMax = Math.min(MAX_SAFE_N_SEQ_MAX, maxNSeqFromCtx);
+    const requestedNSeqMax = config.n_seq_max ?? hardNSeqMax;
+    const safeNSeqMax = Math.min(Math.max(1, Math.floor(requestedNSeqMax)), hardNSeqMax);
+    if (safeNSeqMax !== requestedNSeqMax) {
+      this.logger().warn(
+        `n_seq_max=${requestedNSeqMax} is not supported by current runtime/context, using ${safeNSeqMax} instead`
+      );
+    }
+
     const loadResult: GlueMsgLoadRes = await this.proxy.wllamaAction('load', {
       _name: 'load_req',
       use_mmap: true,
@@ -726,7 +779,8 @@ export class Wllama {
       yarn_orig_ctx: config.yarn_orig_ctx,
       cache_type_k: config.cache_type_k as string,
       cache_type_v: config.cache_type_v as string,
-      n_seq_max: 1, // only support single sequence for now
+      n_seq_max: safeNSeqMax,
+      kv_unified: config.kv_unified ?? true,
       flash_attn: config.flash_attn,
       swa_full: true, // TODO: properly support SWA
     });
@@ -1436,14 +1490,38 @@ export class Wllama {
       totalSnapshotTokenBytes: result.total_snapshot_token_bytes,
       lastPrunedNodeIds: result.last_pruned_node_ids,
       lastPrunedAt: result.last_pruned_at_s * 1000,
+      tieredCacheEnabled: result.tiered_cache_enabled,
+      tierStats: {
+        l1Tokens: result.tier_l1_tokens,
+        l2Tokens: result.tier_l2_tokens,
+        l3Tokens: result.tier_l3_tokens,
+        l1Slots: result.tier_l1_slots,
+        l2Slots: result.tier_l2_slots,
+        l3Slots: result.tier_l3_slots,
+        promotions: result.tier_promotions,
+        demotions: result.tier_demotions,
+        diskReads: result.tier_disk_reads,
+        diskWrites: result.tier_disk_writes,
+        l3OverflowEvents: result.tier_l3_overflow_events,
+      },
     };
   }
 
-  private async treeInit(memoryCapBytes: number): Promise<WllamaTreeState> {
+  private async treeInit(
+    memoryCapBytes: number,
+    tieredCache: WllamaTieredCacheOptions = {}
+  ): Promise<WllamaTreeState> {
     this.checkModelLoaded();
     const result = await this.proxy.wllamaAction<GlueMsgTreeInitRes>('chat_init', {
       _name: 'trin_req',
       memory_cap_bytes: memoryCapBytes,
+      tiered_cache_enabled: tieredCache.enabled ?? false,
+      tier_l1_token_cap: tieredCache.l1TokenCap ?? 0,
+      tier_l2_token_cap: tieredCache.l2TokenCap ?? 0,
+      tier_l3_token_cap: tieredCache.l3TokenCap ?? 0,
+      tier_prune_l1_l2_token_threshold: tieredCache.pruneL1L2TokenThreshold ?? 0,
+      tier_prune_l2_l3_token_threshold: tieredCache.pruneL2L3TokenThreshold ?? 0,
+      tier_l3_path: tieredCache.l3Path ?? '/tmp/wllama-tier-cache',
     });
     if (!result.success) {
       throw new WllamaError(`treeInit failed: ${result.message}`);
@@ -1453,12 +1531,15 @@ export class Wllama {
   }
 
   // High-level chat session APIs (SGLang-style) that hide tree internals.
-  async chatEnsureReady(memoryCapBytes: number = 1024 * 1024 * 1024): Promise<WllamaTreeState> {
+  async chatEnsureReady(
+    memoryCapBytes: number = 1024 * 1024 * 1024,
+    tieredCache: WllamaTieredCacheOptions = {}
+  ): Promise<WllamaTreeState> {
     this.checkModelLoaded();
     try {
       return await this.treeGetState();
     } catch (_) {
-      return await this.treeInit(memoryCapBytes);
+      return await this.treeInit(memoryCapBytes, tieredCache);
     }
   }
 
@@ -1482,8 +1563,13 @@ export class Wllama {
     return await this.treeReset();
   }
 
-  async chatSessionInit(memoryCapBytes: number = 1024 * 1024 * 1024): Promise<WllamaTreeState> {
-    return this.chatEnsureReady(memoryCapBytes);
+  async chatSessionInit(
+    memoryCapBytes: number = 1024 * 1024 * 1024,
+    tieredCache: WllamaTieredCacheOptions = {}
+  ): Promise<WllamaTreeState> {
+    // Reinitialize tree session so new memory/tier settings always take effect.
+    // This matches UI semantics: "apply and reset session".
+    return this.treeInit(memoryCapBytes, tieredCache);
   }
 
   async chatSessionChat(
@@ -1506,6 +1592,156 @@ export class Wllama {
     options: WllamaChatFromNodeOptions = {}
   ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
     await this.chatEnsureReady();
+
+    return this.enqueueEngineChat(parentId, userText, options);
+  }
+
+  private enqueueEngineChat(
+    parentId: number,
+    userText: string,
+    options: WllamaChatFromNodeOptions
+  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+    if (options.abortSignal?.aborted) {
+      return Promise.reject(new WllamaAbortError());
+    }
+
+    return new Promise((resolve, reject) => {
+      const req: EngineChatRequest = {
+        id: this.nextEngineChatRequestId++,
+        parentId,
+        userText,
+        options,
+        enqueuedAt: Date.now(),
+        resolve,
+        reject,
+      };
+
+      const abortSignal = options.abortSignal;
+      if (abortSignal) {
+        const onAbort = () => {
+          const idx = this.engineChatQueue.findIndex((x) => x.id === req.id);
+          if (idx >= 0) {
+            this.engineChatQueue.splice(idx, 1);
+            req.reject(new WllamaAbortError());
+          }
+        };
+        req.cleanupAbort = () => abortSignal.removeEventListener('abort', onAbort);
+        abortSignal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      this.engineChatQueue.push(req);
+      void this.processEngineChatQueue();
+    });
+  }
+
+  private async processEngineChatQueue(): Promise<void> {
+    if (this.engineChatQueueRunning) {
+      return;
+    }
+
+    this.engineChatQueueRunning = true;
+    try {
+      while (this.engineChatQueue.length > 0) {
+        const req = await this.pickNextEngineChatRequest();
+        if (!req) {
+          break;
+        }
+
+        if (req.options.abortSignal?.aborted) {
+          req.cleanupAbort?.();
+          req.reject(new WllamaAbortError());
+          continue;
+        }
+
+        try {
+          const result = await this.chatFromNodeDirect(req.parentId, req.userText, req.options);
+          req.resolve(result);
+        } catch (err) {
+          req.reject(err);
+        } finally {
+          req.cleanupAbort?.();
+        }
+      }
+    } finally {
+      this.engineChatQueueRunning = false;
+      if (this.engineChatQueue.length > 0) {
+        void this.processEngineChatQueue();
+      }
+    }
+  }
+
+  private async pickNextEngineChatRequest(): Promise<EngineChatRequest | undefined> {
+    if (this.engineChatQueue.length === 0) {
+      return undefined;
+    }
+    if (this.engineChatQueue.length === 1) {
+      return this.engineChatQueue.shift();
+    }
+
+    // FCFS as base (wait time), plus reuse-priority boost from shared prefix depth.
+    let state: WllamaTreeState | null = null;
+    try {
+      state = await this.treeGetState();
+    } catch {
+      state = null;
+    }
+
+    const now = Date.now();
+    let bestIdx = 0;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < this.engineChatQueue.length; i++) {
+      const req = this.engineChatQueue[i];
+      const waitSeconds = Math.max(0, (now - req.enqueuedAt) / 1000);
+      const reuseDepth = state
+        ? this.sharedPrefixDepthInTree(state, state.activeNodeId, req.parentId)
+        : 0;
+      const score = waitSeconds + reuseDepth * 1000;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+
+    const [best] = this.engineChatQueue.splice(bestIdx, 1);
+    return best;
+  }
+
+  private sharedPrefixDepthInTree(state: WllamaTreeState, aNodeId: number, bNodeId: number): number {
+    const aPath = this.pathNodeIdsInTree(state, aNodeId);
+    const bPath = this.pathNodeIdsInTree(state, bNodeId);
+    const n = Math.min(aPath.length, bPath.length);
+    let depth = 0;
+    for (let i = 0; i < n; i++) {
+      if (aPath[i] !== bPath[i]) {
+        break;
+      }
+      depth += 1;
+    }
+    return depth;
+  }
+
+  private pathNodeIdsInTree(state: WllamaTreeState, nodeId: number): number[] {
+    const ids: number[] = [];
+    let cur = state.nodes.get(nodeId);
+    while (cur) {
+      ids.push(cur.id);
+      if (cur.parentId === null) {
+        break;
+      }
+      cur = state.nodes.get(cur.parentId);
+    }
+    ids.reverse();
+    return ids;
+  }
+
+  private async chatFromNodeDirect(
+    parentId: number,
+    userText: string,
+    options: WllamaChatFromNodeOptions = {}
+  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+    if (options.abortSignal?.aborted) {
+      throw new WllamaAbortError();
+    }
 
     const started = await this.treeChatStart(parentId, userText);
     const t0 = Date.now();

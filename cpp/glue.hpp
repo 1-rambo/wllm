@@ -21,7 +21,7 @@
 #include <functional>
 
 // increase when messages change
-#define GLUE_VERSION 2
+#define GLUE_VERSION 3
 
 #define GLUE_MAGIC 0x45554c47 // "GLUE"
 #define GLUE_PROTO_ID_LEN 8
@@ -517,6 +517,7 @@ struct glue_msg_load_req
   GLUE_FIELD_NULLABLE(str, cache_type_v)
   GLUE_FIELD_NULLABLE(bool, flash_attn)
   GLUE_FIELD_NULLABLE(bool, swa_full)
+  GLUE_FIELD_NULLABLE(bool, kv_unified)
 };
 
 struct glue_msg_load_res
@@ -969,6 +970,13 @@ struct glue_msg_tree_init_req
 {
   GLUE_HANDLER("trin_req")
   GLUE_FIELD(int, memory_cap_bytes)
+  GLUE_FIELD(bool, tiered_cache_enabled)
+  GLUE_FIELD(int, tier_l1_token_cap)
+  GLUE_FIELD(int, tier_l2_token_cap)
+  GLUE_FIELD(int, tier_l3_token_cap)
+  GLUE_FIELD(int, tier_prune_l1_l2_token_threshold)
+  GLUE_FIELD(int, tier_prune_l2_l3_token_threshold)
+  GLUE_FIELD(str, tier_l3_path)
 };
 
 struct glue_msg_tree_init_res
@@ -1009,6 +1017,18 @@ struct glue_msg_tree_state_res
   GLUE_FIELD(int, total_snapshot_token_bytes)
   GLUE_FIELD(arr_int, last_pruned_node_ids)
   GLUE_FIELD(int, last_pruned_at_s)
+  GLUE_FIELD(bool, tiered_cache_enabled)
+  GLUE_FIELD(int, tier_l1_tokens)
+  GLUE_FIELD(int, tier_l2_tokens)
+  GLUE_FIELD(int, tier_l3_tokens)
+  GLUE_FIELD(int, tier_l1_slots)
+  GLUE_FIELD(int, tier_l2_slots)
+  GLUE_FIELD(int, tier_l3_slots)
+  GLUE_FIELD(int, tier_promotions)
+  GLUE_FIELD(int, tier_demotions)
+  GLUE_FIELD(int, tier_disk_reads)
+  GLUE_FIELD(int, tier_disk_writes)
+  GLUE_FIELD(int, tier_l3_overflow_events)
 };
 
 struct glue_msg_tree_switch_req
