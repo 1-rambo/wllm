@@ -1074,108 +1074,6 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       }
     ]
   },
-  "kvss_req": {
-    "name": "kvss_req",
-    "structName": "glue_msg_kv_seq_save_req",
-    "className": "GlueMsgKvSeqSaveReq",
-    "fields": [
-      {
-        "type": "int",
-        "name": "slot_id",
-        "isNullable": false
-      }
-    ]
-  },
-  "kvss_res": {
-    "name": "kvss_res",
-    "structName": "glue_msg_kv_seq_save_res",
-    "className": "GlueMsgKvSeqSaveRes",
-    "fields": [
-      {
-        "type": "bool",
-        "name": "success",
-        "isNullable": false
-      },
-      {
-        "type": "str",
-        "name": "message",
-        "isNullable": false
-      },
-      {
-        "type": "int",
-        "name": "n_past",
-        "isNullable": false
-      }
-    ]
-  },
-  "kvsr_req": {
-    "name": "kvsr_req",
-    "structName": "glue_msg_kv_seq_restore_req",
-    "className": "GlueMsgKvSeqRestoreReq",
-    "fields": [
-      {
-        "type": "int",
-        "name": "slot_id",
-        "isNullable": false
-      },
-      {
-        "type": "int",
-        "name": "n_past",
-        "isNullable": false
-      }
-    ]
-  },
-  "kvsr_res": {
-    "name": "kvsr_res",
-    "structName": "glue_msg_kv_seq_restore_res",
-    "className": "GlueMsgKvSeqRestoreRes",
-    "fields": [
-      {
-        "type": "bool",
-        "name": "success",
-        "isNullable": false
-      },
-      {
-        "type": "str",
-        "name": "message",
-        "isNullable": false
-      },
-      {
-        "type": "int",
-        "name": "n_past",
-        "isNullable": false
-      }
-    ]
-  },
-  "kvsm_req": {
-    "name": "kvsm_req",
-    "structName": "glue_msg_kv_seq_rm_req",
-    "className": "GlueMsgKvSeqRmReq",
-    "fields": [
-      {
-        "type": "int",
-        "name": "slot_id",
-        "isNullable": false
-      }
-    ]
-  },
-  "kvsm_res": {
-    "name": "kvsm_res",
-    "structName": "glue_msg_kv_seq_rm_res",
-    "className": "GlueMsgKvSeqRmRes",
-    "fields": [
-      {
-        "type": "bool",
-        "name": "success",
-        "isNullable": false
-      },
-      {
-        "type": "str",
-        "name": "message",
-        "isNullable": false
-      }
-    ]
-  },
   "trin_req": {
     "name": "trin_req",
     "structName": "glue_msg_tree_init_req",
@@ -1214,6 +1112,11 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "int",
         "name": "tier_prune_l2_l3_token_threshold",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "tier_replacement_policy",
         "isNullable": false
       },
       {
@@ -1424,6 +1327,81 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "int",
         "name": "tier_l3_overflow_events",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_restore_attempts",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_restore_hits_l1",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_restore_hits_l2",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_restore_hits_l3",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_restore_misses",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_restore_rebuilds",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_parent_recover_attempts",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_parent_recover_successes",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_parent_recover_failures",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_slot_alloc_hits",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_slot_alloc_misses",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_slot_evict_l1",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_slot_evict_l2",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_slot_evict_l3",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "tier_fallback_replays",
         "isNullable": false
       }
     ]
@@ -2071,48 +2049,6 @@ export interface GlueMsgChatFormatRes {
   formatted_chat: string;
 }
 
-// struct glue_msg_kv_seq_save_req
-export interface GlueMsgKvSeqSaveReq {
-  _name: "kvss_req";
-  slot_id: number;
-}
-
-// struct glue_msg_kv_seq_save_res
-export interface GlueMsgKvSeqSaveRes {
-  _name: "kvss_res";
-  success: boolean;
-  message: string;
-  n_past: number;
-}
-
-// struct glue_msg_kv_seq_restore_req
-export interface GlueMsgKvSeqRestoreReq {
-  _name: "kvsr_req";
-  slot_id: number;
-  n_past: number;
-}
-
-// struct glue_msg_kv_seq_restore_res
-export interface GlueMsgKvSeqRestoreRes {
-  _name: "kvsr_res";
-  success: boolean;
-  message: string;
-  n_past: number;
-}
-
-// struct glue_msg_kv_seq_rm_req
-export interface GlueMsgKvSeqRmReq {
-  _name: "kvsm_req";
-  slot_id: number;
-}
-
-// struct glue_msg_kv_seq_rm_res
-export interface GlueMsgKvSeqRmRes {
-  _name: "kvsm_res";
-  success: boolean;
-  message: string;
-}
-
 // struct glue_msg_tree_init_req
 export interface GlueMsgTreeInitReq {
   _name: "trin_req";
@@ -2123,6 +2059,7 @@ export interface GlueMsgTreeInitReq {
   tier_l3_token_cap: number;
   tier_prune_l1_l2_token_threshold: number;
   tier_prune_l2_l3_token_threshold: number;
+  tier_replacement_policy: string;
   tier_l3_path: string;
 }
 
@@ -2176,6 +2113,21 @@ export interface GlueMsgTreeStateRes {
   tier_disk_reads: number;
   tier_disk_writes: number;
   tier_l3_overflow_events: number;
+  tier_restore_attempts: number;
+  tier_restore_hits_l1: number;
+  tier_restore_hits_l2: number;
+  tier_restore_hits_l3: number;
+  tier_restore_misses: number;
+  tier_restore_rebuilds: number;
+  tier_parent_recover_attempts: number;
+  tier_parent_recover_successes: number;
+  tier_parent_recover_failures: number;
+  tier_slot_alloc_hits: number;
+  tier_slot_alloc_misses: number;
+  tier_slot_evict_l1: number;
+  tier_slot_evict_l2: number;
+  tier_slot_evict_l3: number;
+  tier_fallback_replays: number;
 }
 
 // struct glue_msg_tree_switch_req
@@ -2281,4 +2233,4 @@ export interface GlueMsgTreeChatFinishRes {
 }
 
 
-export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes | GlueMsgKvSeqSaveReq | GlueMsgKvSeqSaveRes | GlueMsgKvSeqRestoreReq | GlueMsgKvSeqRestoreRes | GlueMsgKvSeqRmReq | GlueMsgKvSeqRmRes | GlueMsgTreeInitReq | GlueMsgTreeInitRes | GlueMsgTreeStateReq | GlueMsgTreeStateRes | GlueMsgTreeSwitchReq | GlueMsgTreeSwitchRes | GlueMsgTreePrepareTurnReq | GlueMsgTreePrepareTurnRes | GlueMsgTreeFinishTurnReq | GlueMsgTreeFinishTurnRes | GlueMsgTreeDeleteReq | GlueMsgTreeDeleteRes | GlueMsgTreeResetReq | GlueMsgTreeResetRes | GlueMsgTreeChatStartReq | GlueMsgTreeChatStartRes | GlueMsgTreeChatFinishReq | GlueMsgTreeChatFinishRes;
+export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes | GlueMsgTreeInitReq | GlueMsgTreeInitRes | GlueMsgTreeStateReq | GlueMsgTreeStateRes | GlueMsgTreeSwitchReq | GlueMsgTreeSwitchRes | GlueMsgTreePrepareTurnReq | GlueMsgTreePrepareTurnRes | GlueMsgTreeFinishTurnReq | GlueMsgTreeFinishTurnRes | GlueMsgTreeDeleteReq | GlueMsgTreeDeleteRes | GlueMsgTreeResetReq | GlueMsgTreeResetRes | GlueMsgTreeChatStartReq | GlueMsgTreeChatStartRes | GlueMsgTreeChatFinishReq | GlueMsgTreeChatFinishRes;

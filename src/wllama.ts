@@ -21,9 +21,6 @@ import type {
   GlueMsgGetKvRemoveRes,
   GlueMsgGetLogitsRes,
   GlueMsgGetVocabRes,
-  GlueMsgKvSeqRmRes,
-  GlueMsgKvSeqRestoreRes,
-  GlueMsgKvSeqSaveRes,
   GlueMsgLoadRes,
   GlueMsgLookupTokenRes,
   GlueMsgPerfContextRes,
@@ -50,6 +47,8 @@ const HF_MODEL_ID_REGEX_EXPLAIN =
   "Hugging Face model ID is incorrect. Only regular alphanumeric characters, '-', '.' and '_' supported";
 const MAX_SAFE_N_SEQ_MAX = 256;
 const MIN_CTX_PER_SEQUENCE = 1024;
+const DEFAULT_ENGINE_CHAT_SERVICE_UPPER_BOUND_MS = 30000;
+const DEFAULT_ENGINE_CHAT_QUEUE_MAX_PENDING = 128;
 
 export interface WllamaLogger {
   debug: typeof console.debug;
@@ -98,6 +97,25 @@ export interface WllamaConfig {
    * Default: noPerf = false
    */
   noPerf?: boolean;
+  /**
+   * Unified upper bound of per-request service time used by queue scheduling budget (ms).
+   *
+   * Default: 30000
+   */
+  engineChatServiceUpperBoundMs?: number;
+  /**
+   * Maximum number of pending chat requests allowed in engine queue.
+   * Requests above this bound are rejected immediately for backpressure.
+   *
+   * Default: 128
+   */
+  engineChatQueueMaxPending?: number;
+  /**
+   * Enable detailed engine-chat tracing logs for diagnosing random stalls/timeouts.
+   *
+   * Default: false
+   */
+  engineChatTraceEnabled?: boolean;
 }
 
 export interface WllamaChatMessage {
@@ -314,6 +332,21 @@ export interface WllamaTreeState {
     diskReads: number;
     diskWrites: number;
     l3OverflowEvents: number;
+    restoreAttempts: number;
+    restoreHitsL1: number;
+    restoreHitsL2: number;
+    restoreHitsL3: number;
+    restoreMisses: number;
+    restoreRebuilds: number;
+    parentRecoverAttempts: number;
+    parentRecoverSuccesses: number;
+    parentRecoverFailures: number;
+    slotAllocHits: number;
+    slotAllocMisses: number;
+    slotEvictL1: number;
+    slotEvictL2: number;
+    slotEvictL3: number;
+    fallbackReplays: number;
   };
 }
 
@@ -324,6 +357,7 @@ export interface WllamaTieredCacheOptions {
   l3TokenCap?: number;
   pruneL1L2TokenThreshold?: number;
   pruneL2L3TokenThreshold?: number;
+  replacementPolicy?: 'hybrid' | 'lru' | 'lfu' | 'size-only' | 'random';
   l3Path?: string;
 }
 
@@ -339,6 +373,10 @@ interface EngineChatRequest {
   userText: string;
   options: WllamaChatFromNodeOptions;
   enqueuedAt: number;
+  nAheadAtEnqueue: number;
+  baselineWorkMs: number;
+  waitBudgetMs: number;
+  processingStartedAt?: number;
   resolve: (value: { nodeId: number; assistantText: string; state: WllamaTreeState }) => void;
   reject: (reason?: unknown) => void;
   cleanupAbort?: () => void;
@@ -357,6 +395,7 @@ export type WllamaErrorType =
   | 'download_error'
   | 'load_error'
   | 'kv_cache_full'
+  | 'queue_overloaded'
   | 'unknown_error'
   | 'inference_error';
 
@@ -427,6 +466,21 @@ export class Wllama {
 
   private logger() {
     return this.config.logger ?? console;
+  }
+
+  private isEngineChatTraceEnabled(): boolean {
+    return this.config.engineChatTraceEnabled ?? false;
+  }
+
+  private traceEngineChat(message: string, level: 'debug' | 'warn' = 'debug') {
+    if (!this.isEngineChatTraceEnabled()) {
+      return;
+    }
+    if (level === 'warn') {
+      this.logger().warn(`[EngineChatTrace] ${message}`);
+      return;
+    }
+    this.logger().debug(`[EngineChatTrace] ${message}`);
   }
 
   private checkModelLoaded() {
@@ -1383,80 +1437,6 @@ export class Wllama {
     this.nCachedTokens = 0;
   }
 
-  /**
-   * Save the current live KV cache (seq 0) as a named slot in VRAM.
-   *
-   * Used by the prefix-tree chat feature to snapshot the KV state at each
-   * conversation node so it can be restored cheaply when switching branches.
-   *
-   * @param slotId  Integer >= 1 identifying the slot. The caller is
-   *                responsible for managing slot IDs (e.g. using node IDs).
-   * @returns Number of tokens saved into the slot (= nCachedTokens).
-   */
-  async kvSeqSave(slotId: number): Promise<number> {
-    this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgKvSeqSaveRes>(
-      'kv_seq_save',
-      {
-        _name: 'kvss_req',
-        slot_id: slotId,
-      }
-    );
-    if (!result.success) {
-      throw new WllamaError(`kvSeqSave(${slotId}) failed: ${result.message}`);
-    }
-    return result.n_past;
-  }
-
-  /**
-   * Restore a previously saved KV slot back into the live sequence (seq 0).
-   *
-   * After this call:
-   *   - The KV cache contains exactly `nPast` tokens from the saved slot.
-   *   - `nCachedTokens` is updated accordingly.
-   *   - Any tokens that were in seq 0 before the call are discarded.
-   *
-   * @param slotId  Slot to restore (must have been saved with kvSeqSave).
-   * @param nPast   Number of prefix tokens to restore. Must be <= the number
-   *                of tokens that were in seq 0 when kvSeqSave was called.
-   */
-  async kvSeqRestore(slotId: number, nPast: number): Promise<void> {
-    this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgKvSeqRestoreRes>(
-      'kv_seq_restore',
-      {
-        _name: 'kvsr_req',
-        slot_id: slotId,
-        n_past: nPast,
-      }
-    );
-    if (!result.success) {
-      throw new WllamaError(
-        `kvSeqRestore(${slotId}, ${nPast}) failed: ${result.message}`
-      );
-    }
-    this.nCachedTokens = result.n_past;
-  }
-
-  /**
-   * Release a KV slot, freeing its VRAM.
-   *
-   * @param slotId  Slot to release (>= 1).
-   */
-  async kvSeqRm(slotId: number): Promise<void> {
-    this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgKvSeqRmRes>(
-      'kv_seq_rm',
-      {
-        _name: 'kvsm_req',
-        slot_id: slotId,
-      }
-    );
-    if (!result.success) {
-      throw new WllamaError(`kvSeqRm(${slotId}) failed: ${result.message}`);
-    }
-  }
-
   private mapTreeState(result: GlueMsgTreeStateRes): WllamaTreeState {
     const nodes = new Map<number, WllamaTreeNode>();
     for (let i = 0; i < result.ids.length; i++) {
@@ -1503,6 +1483,21 @@ export class Wllama {
         diskReads: result.tier_disk_reads,
         diskWrites: result.tier_disk_writes,
         l3OverflowEvents: result.tier_l3_overflow_events,
+        restoreAttempts: (result as unknown as Record<string, number>).tier_restore_attempts ?? 0,
+        restoreHitsL1: (result as unknown as Record<string, number>).tier_restore_hits_l1 ?? 0,
+        restoreHitsL2: (result as unknown as Record<string, number>).tier_restore_hits_l2 ?? 0,
+        restoreHitsL3: (result as unknown as Record<string, number>).tier_restore_hits_l3 ?? 0,
+        restoreMisses: (result as unknown as Record<string, number>).tier_restore_misses ?? 0,
+        restoreRebuilds: (result as unknown as Record<string, number>).tier_restore_rebuilds ?? 0,
+        parentRecoverAttempts: (result as unknown as Record<string, number>).tier_parent_recover_attempts ?? 0,
+        parentRecoverSuccesses: (result as unknown as Record<string, number>).tier_parent_recover_successes ?? 0,
+        parentRecoverFailures: (result as unknown as Record<string, number>).tier_parent_recover_failures ?? 0,
+        slotAllocHits: (result as unknown as Record<string, number>).tier_slot_alloc_hits ?? 0,
+        slotAllocMisses: (result as unknown as Record<string, number>).tier_slot_alloc_misses ?? 0,
+        slotEvictL1: (result as unknown as Record<string, number>).tier_slot_evict_l1 ?? 0,
+        slotEvictL2: (result as unknown as Record<string, number>).tier_slot_evict_l2 ?? 0,
+        slotEvictL3: (result as unknown as Record<string, number>).tier_slot_evict_l3 ?? 0,
+        fallbackReplays: (result as unknown as Record<string, number>).tier_fallback_replays ?? 0,
       },
     };
   }
@@ -1521,6 +1516,7 @@ export class Wllama {
       tier_l3_token_cap: tieredCache.l3TokenCap ?? 0,
       tier_prune_l1_l2_token_threshold: tieredCache.pruneL1L2TokenThreshold ?? 0,
       tier_prune_l2_l3_token_threshold: tieredCache.pruneL2L3TokenThreshold ?? 0,
+      tier_replacement_policy: tieredCache.replacementPolicy ?? 'hybrid',
       tier_l3_path: tieredCache.l3Path ?? '/tmp/wllama-tier-cache',
     });
     if (!result.success) {
@@ -1605,13 +1601,34 @@ export class Wllama {
       return Promise.reject(new WllamaAbortError());
     }
 
+    const maxPending = this.getEngineChatQueueMaxPending();
+    if (this.engineChatQueue.length >= maxPending) {
+      this.traceEngineChat(
+        `reject queue_overloaded pending=${this.engineChatQueue.length} max=${maxPending} parent=${parentId}`,
+        'warn'
+      );
+      return Promise.reject(
+        new WllamaError(
+          `engine chat queue is full (pending=${this.engineChatQueue.length}, max=${maxPending})`,
+          'queue_overloaded'
+        )
+      );
+    }
+
     return new Promise((resolve, reject) => {
+      const nAheadAtEnqueue = this.engineChatQueue.length;
+      const pMaxMs = this.getEngineChatServiceUpperBoundMs();
+      const baselineWorkMs = nAheadAtEnqueue * pMaxMs;
+      const waitBudgetMs = baselineWorkMs + pMaxMs;
       const req: EngineChatRequest = {
         id: this.nextEngineChatRequestId++,
         parentId,
         userText,
         options,
         enqueuedAt: Date.now(),
+        nAheadAtEnqueue,
+        baselineWorkMs,
+        waitBudgetMs,
         resolve,
         reject,
       };
@@ -1630,6 +1647,9 @@ export class Wllama {
       }
 
       this.engineChatQueue.push(req);
+      this.traceEngineChat(
+        `enqueue req=${req.id} parent=${parentId} pending=${this.engineChatQueue.length} nAhead=${req.nAheadAtEnqueue} budgetMs=${req.waitBudgetMs}`
+      );
       void this.processEngineChatQueue();
     });
   }
@@ -1640,6 +1660,7 @@ export class Wllama {
     }
 
     this.engineChatQueueRunning = true;
+    this.traceEngineChat(`queue loop start pending=${this.engineChatQueue.length}`);
     try {
       while (this.engineChatQueue.length > 0) {
         const req = await this.pickNextEngineChatRequest();
@@ -1649,14 +1670,33 @@ export class Wllama {
 
         if (req.options.abortSignal?.aborted) {
           req.cleanupAbort?.();
+          this.traceEngineChat(`drop aborted req=${req.id} before execute`);
           req.reject(new WllamaAbortError());
           continue;
         }
 
         try {
-          const result = await this.chatFromNodeDirect(req.parentId, req.userText, req.options);
+          req.processingStartedAt = Date.now();
+          this.traceEngineChat(
+            `start req=${req.id} waitMs=${req.processingStartedAt - req.enqueuedAt} pendingAfterPick=${this.engineChatQueue.length}`
+          );
+          const result = await this.chatFromNodeDirect(
+            req.parentId,
+            req.userText,
+            ({ ...req.options, __engineReqId: req.id } as unknown as WllamaChatFromNodeOptions)
+          );
+          const doneAt = Date.now();
+          this.traceEngineChat(
+            `finish req=${req.id} serviceMs=${doneAt - (req.processingStartedAt ?? doneAt)} totalMs=${doneAt - req.enqueuedAt}`
+          );
           req.resolve(result);
         } catch (err) {
+          const failAt = Date.now();
+          const msg = err instanceof Error ? err.message : String(err);
+          this.traceEngineChat(
+            `fail req=${req.id} serviceMs=${req.processingStartedAt ? failAt - req.processingStartedAt : -1} totalMs=${failAt - req.enqueuedAt} err=${msg}`,
+            'warn'
+          );
           req.reject(err);
         } finally {
           req.cleanupAbort?.();
@@ -1664,6 +1704,7 @@ export class Wllama {
       }
     } finally {
       this.engineChatQueueRunning = false;
+      this.traceEngineChat(`queue loop end pending=${this.engineChatQueue.length}`);
       if (this.engineChatQueue.length > 0) {
         void this.processEngineChatQueue();
       }
@@ -1678,7 +1719,9 @@ export class Wllama {
       return this.engineChatQueue.shift();
     }
 
-    // FCFS as base (wait time), plus reuse-priority boost from shared prefix depth.
+    // RFG scheduling:
+    // 1) If overdue set is non-empty, pick from overdue set.
+    // 2) Otherwise pick by reuse-first lexicographic order.
     let state: WllamaTreeState | null = null;
     try {
       state = await this.treeGetState();
@@ -1686,24 +1729,102 @@ export class Wllama {
       state = null;
     }
 
+    interface CandidateMetrics {
+      req: EngineChatRequest;
+      idx: number;
+      waitMs: number;
+      overdue: boolean;
+      reuseDepth: number;
+      newPrefillWork: number;
+    }
+
     const now = Date.now();
-    let bestIdx = 0;
-    let bestScore = Number.NEGATIVE_INFINITY;
+    const candidates: CandidateMetrics[] = [];
+
     for (let i = 0; i < this.engineChatQueue.length; i++) {
       const req = this.engineChatQueue[i];
-      const waitSeconds = Math.max(0, (now - req.enqueuedAt) / 1000);
-      const reuseDepth = state
-        ? this.sharedPrefixDepthInTree(state, state.activeNodeId, req.parentId)
-        : 0;
-      const score = waitSeconds + reuseDepth * 1000;
-      if (score > bestScore) {
-        bestScore = score;
-        bestIdx = i;
+      const waitMs = Math.max(0, now - req.enqueuedAt);
+
+      let reuseDepth = 0;
+      let newPrefillWork = 0;
+      if (state) {
+        reuseDepth = this.sharedPrefixDepthInTree(state, state.activeNodeId, req.parentId);
+        const promptDepth = this.pathNodeIdsInTree(state, req.parentId).length;
+        newPrefillWork = Math.max(0, promptDepth - reuseDepth);
+      }
+
+      candidates.push({
+        req,
+        idx: i,
+        waitMs,
+        overdue: waitMs >= req.waitBudgetMs,
+        reuseDepth,
+        newPrefillWork,
+      });
+    }
+
+    const overdueCandidates = candidates.filter((x) => x.overdue);
+    const activeSet = overdueCandidates.length > 0 ? overdueCandidates : candidates;
+    const useOverdueOrder = overdueCandidates.length > 0;
+
+    let best = activeSet[0];
+    for (let i = 1; i < activeSet.length; i++) {
+      const cur = activeSet[i];
+      if (this.isBetterEngineChatCandidate(cur, best, useOverdueOrder)) {
+        best = cur;
       }
     }
 
-    const [best] = this.engineChatQueue.splice(bestIdx, 1);
-    return best;
+    const [picked] = this.engineChatQueue.splice(best.idx, 1);
+    return picked;
+  }
+
+  private getEngineChatServiceUpperBoundMs(): number {
+    const configured = this.config.engineChatServiceUpperBoundMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_SERVICE_UPPER_BOUND_MS;
+    }
+    return Math.floor(configured);
+  }
+
+  private getEngineChatQueueMaxPending(): number {
+    const configured = this.config.engineChatQueueMaxPending;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_QUEUE_MAX_PENDING;
+    }
+    return Math.floor(configured);
+  }
+
+  private isBetterEngineChatCandidate(
+    a: {
+      req: EngineChatRequest;
+      waitMs: number;
+      reuseDepth: number;
+      newPrefillWork: number;
+    },
+    b: {
+      req: EngineChatRequest;
+      waitMs: number;
+      reuseDepth: number;
+      newPrefillWork: number;
+    },
+    useOverdueOrder: boolean
+  ): boolean {
+    if (useOverdueOrder) {
+      // overdue order: (wait, reuse, -newPrefillWork, enqueuedAt, id)
+      if (a.waitMs !== b.waitMs) return a.waitMs > b.waitMs;
+      if (a.reuseDepth !== b.reuseDepth) return a.reuseDepth > b.reuseDepth;
+      if (a.newPrefillWork !== b.newPrefillWork) return a.newPrefillWork < b.newPrefillWork;
+      if (a.req.enqueuedAt !== b.req.enqueuedAt) return a.req.enqueuedAt < b.req.enqueuedAt;
+      return a.req.id < b.req.id;
+    }
+
+    // non-overdue order: (reuse, -newPrefillWork, wait, enqueuedAt, id)
+    if (a.reuseDepth !== b.reuseDepth) return a.reuseDepth > b.reuseDepth;
+    if (a.newPrefillWork !== b.newPrefillWork) return a.newPrefillWork < b.newPrefillWork;
+    if (a.waitMs !== b.waitMs) return a.waitMs > b.waitMs;
+    if (a.req.enqueuedAt !== b.req.enqueuedAt) return a.req.enqueuedAt < b.req.enqueuedAt;
+    return a.req.id < b.req.id;
   }
 
   private sharedPrefixDepthInTree(state: WllamaTreeState, aNodeId: number, bNodeId: number): number {
@@ -1743,40 +1864,80 @@ export class Wllama {
       throw new WllamaAbortError();
     }
 
+    const reqId = (options as unknown as { __engineReqId?: number }).__engineReqId;
+    const traceKey = `req=${reqId ?? 'na'} parent=${parentId}`;
+    const opStartedAt = Date.now();
+    let stage: 'chat_start' | 'create_completion' | 'streaming' | 'chat_finish' | 'rollback' = 'chat_start';
+    let chunkCount = 0;
+    let lastProgressAt = opStartedAt;
+    let firstTokenAt = 0;
+    const heartbeatId = this.isEngineChatTraceEnabled()
+      ? setInterval(() => {
+        const now = Date.now();
+        this.traceEngineChat(
+          `${traceKey} heartbeat stage=${stage} elapsedMs=${now - opStartedAt} chunks=${chunkCount} sinceProgressMs=${now - lastProgressAt}`,
+          now - lastProgressAt > 10000 ? 'warn' : 'debug'
+        );
+      }, 5000)
+      : null;
+
     const started = await this.treeChatStart(parentId, userText);
     const t0 = Date.now();
     let assistantText = '';
 
     try {
+      stage = 'create_completion';
       const prompt = started.formattedPrompt || (await this.formatChat(started.messages, true));
       const stream = await this.createCompletion(prompt, {
         ...options,
         stream: true,
       });
 
+      stage = 'streaming';
       for await (const chunk of stream) {
         if (options.abortSignal?.aborted) {
+          this.traceEngineChat(`${traceKey} abort observed in streaming loop`);
           break;
+        }
+        chunkCount += 1;
+        lastProgressAt = Date.now();
+        if (firstTokenAt === 0) {
+          firstTokenAt = lastProgressAt;
+          this.traceEngineChat(`${traceKey} first-token ttftMs=${firstTokenAt - t0}`);
         }
         const piece = new TextDecoder().decode(chunk.piece, { stream: true });
         assistantText = chunk.currentText;
         options.onChunk?.(piece, assistantText);
       }
 
+      stage = 'chat_finish';
       const state = await this.treeChatFinish(
         started.nodeId,
         assistantText,
         Date.now() - t0,
         false
       );
+      this.traceEngineChat(
+        `${traceKey} done node=${started.nodeId} totalMs=${Date.now() - opStartedAt} chunks=${chunkCount}`
+      );
       return { nodeId: started.nodeId, assistantText, state };
     } catch (err) {
       try {
+        stage = 'rollback';
         await this.treeChatFinish(started.nodeId, '', Date.now() - t0, true);
       } catch {
         // Ignore rollback failure and rethrow original inference error.
       }
+      const msg = err instanceof Error ? err.message : String(err);
+      this.traceEngineChat(
+        `${traceKey} error stage=${stage} totalMs=${Date.now() - opStartedAt} chunks=${chunkCount} err=${msg}`,
+        'warn'
+      );
       throw err;
+    } finally {
+      if (heartbeatId) {
+        clearInterval(heartbeatId);
+      }
     }
   }
 
@@ -2032,7 +2193,36 @@ export class Wllama {
    */
   async _getDebugInfo(): Promise<any> {
     this.checkModelLoaded();
-    return await this.proxy.wllamaDebug();
+    const nativeDebug = await this.proxy.wllamaDebug();
+    const now = Date.now();
+    const pending = this.engineChatQueue.map((req) => ({
+      id: req.id,
+      parentId: req.parentId,
+      enqueuedForMs: now - req.enqueuedAt,
+      processingForMs: req.processingStartedAt ? now - req.processingStartedAt : 0,
+      nAheadAtEnqueue: req.nAheadAtEnqueue,
+      waitBudgetMs: req.waitBudgetMs,
+    }));
+
+    if (nativeDebug && typeof nativeDebug === 'object') {
+      return {
+        ...(nativeDebug as Record<string, unknown>),
+        engineChat: {
+          running: this.engineChatQueueRunning,
+          pendingCount: this.engineChatQueue.length,
+          pending,
+        },
+      };
+    }
+
+    return {
+      nativeDebug,
+      engineChat: {
+        running: this.engineChatQueueRunning,
+        pendingCount: this.engineChatQueue.length,
+        pending,
+      },
+    };
   }
 
   /**

@@ -1,9 +1,6 @@
 [submodule "llama.cpp"]
 	path = llama.cpp
 	url = https://github.com/1-rambo/llama.cpp
-[submodule "AgenticBrowserBenchmark"]
-	path = AgenticBrowserBenchmark
-	url = git@github.com:rgbacmyk/AgenticBrowserBenchmark.git
 [submodule "test"]
 	path = test
 	url = https://github.com/hendrycks/test

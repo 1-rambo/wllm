@@ -19,33 +19,34 @@ services:
         set -e
         cd /source
 
-        export SHARED_EMCC_FLAGS="--no-entry -O3 -msimd128 -DNDEBUG -flto=full -frtti -fwasm-exceptions -sEXPORT_ALL=1 -sEXPORT_ES6=0 -sMODULARIZE=0 -sINITIAL_MEMORY=128MB -sMAXIMUM_MEMORY=4096MB -sALLOW_MEMORY_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_FUNCTIONS=_main,_wllama_malloc,_wllama_start,_wllama_action,_wllama_exit,_wllama_debug -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8 -sNO_EXIT_RUNTIME=1 -Wno-unused-command-line-argument -sJSPI -sJSPI_EXPORTS=['wllama_start','wllama_action']"
+        export SHARED_EMCC_FLAGS="--no-entry -O3 -msimd128 -DNDEBUG -flto=full -frtti -fwasm-exceptions -sEXPORT_ALL=1 -sEXPORT_ES6=0 -sMODULARIZE=0 -sINITIAL_MEMORY=128MB -sMAXIMUM_MEMORY=4096MB -sALLOW_MEMORY_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_FUNCTIONS=_main,_wllama_malloc,_wllama_start,_wllama_action,_wllama_exit,_wllama_debug,_wllama_get_last_error -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8 -sNO_EXIT_RUNTIME=1 -Wno-unused-command-line-argument -sJSPI -sJSPI_EXPORTS=['wllama_start','wllama_action']"
 
-        mkdir -p wasm/single-thread
-        cd wasm/single-thread
-        emcmake cmake ../..
+        BUILD_ROOT=/tmp/wllama-wasm-build
+        rm -rf "$$BUILD_ROOT"
+
+        mkdir -p "$$BUILD_ROOT/single-thread"
+        cd "$$BUILD_ROOT/single-thread"
+        emcmake cmake /source
         export EMCC_CFLAGS="$$SHARED_EMCC_FLAGS"
         emmake make wllama -j
 
-        cd ../..
+        cd /source
 
-        mkdir -p wasm/multi-thread
-        cd wasm/multi-thread
+        mkdir -p "$$BUILD_ROOT/multi-thread"
+        cd "$$BUILD_ROOT/multi-thread"
         export EMCC_CFLAGS="" # temporary clear it
-        emcmake cmake ../..
+        emcmake cmake /source
         export EMCC_CFLAGS="$$SHARED_EMCC_FLAGS -pthread -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=Module[\\\"pthreadPoolSize\\\"]"
         emmake make wllama -j
 
-        # go back to root
-        cd ../..
-
         # list files
-        echo "wasm/single-thread"; ls -lh wasm/single-thread
-        echo "wasm/multi-thread";  ls -lh wasm/multi-thread
+        echo "$$BUILD_ROOT/single-thread"; ls -lh "$$BUILD_ROOT/single-thread"
+        echo "$$BUILD_ROOT/multi-thread";  ls -lh "$$BUILD_ROOT/multi-thread"
 
         # copy output files
-        mkdir -p src/multi-thread
-        cp wasm/multi-thread/wllama.js         src/multi-thread
-        cp wasm/multi-thread/wllama.wasm       src/multi-thread
-        cp wasm/single-thread/wllama.js        src/single-thread
-        cp wasm/single-thread/wllama.wasm      src/single-thread
+        mkdir -p /source/src/multi-thread
+        mkdir -p /source/src/single-thread
+        cp "$$BUILD_ROOT/multi-thread/wllama.js"   /source/src/multi-thread
+        cp "$$BUILD_ROOT/multi-thread/wllama.wasm" /source/src/multi-thread
+        cp "$$BUILD_ROOT/single-thread/wllama.js"  /source/src/single-thread
+        cp "$$BUILD_ROOT/single-thread/wllama.wasm" /source/src/single-thread

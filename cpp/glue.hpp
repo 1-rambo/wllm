@@ -908,62 +908,6 @@ struct glue_msg_chat_format_res
 };
 
 /////////
-// KV Cache sequence slot operations
-// Used by the prefix-tree chat feature to snapshot/restore KV state per node.
-// slot_id must be >= 1 (0 is reserved for the active sequence).
-
-// Save current seq-0 KV state into an in-memory slot.
-// After this call, the slot holds an exact copy of seq-0 up to n_past tokens.
-struct glue_msg_kv_seq_save_req
-{
-  GLUE_HANDLER("kvss_req")
-  GLUE_FIELD(int, slot_id)   // destination slot (>= 1)
-};
-
-struct glue_msg_kv_seq_save_res
-{
-  GLUE_HANDLER("kvss_res")
-  GLUE_FIELD(bool, success)
-  GLUE_FIELD(str, message)
-  GLUE_FIELD(int, n_past)    // number of tokens saved
-};
-
-/////////
-
-// Restore a previously saved slot back into seq-0.
-// The caller provides n_past so we can verify / trim after restore.
-struct glue_msg_kv_seq_restore_req
-{
-  GLUE_HANDLER("kvsr_req")
-  GLUE_FIELD(int, slot_id)   // source slot (>= 1)
-  GLUE_FIELD(int, n_past)    // expected number of tokens after restore
-};
-
-struct glue_msg_kv_seq_restore_res
-{
-  GLUE_HANDLER("kvsr_res")
-  GLUE_FIELD(bool, success)
-  GLUE_FIELD(str, message)
-  GLUE_FIELD(int, n_past)    // actual n_past after restore
-};
-
-/////////
-
-// Release (free) a slot so its KV memory can be reused.
-struct glue_msg_kv_seq_rm_req
-{
-  GLUE_HANDLER("kvsm_req")
-  GLUE_FIELD(int, slot_id)   // slot to release (>= 1)
-};
-
-struct glue_msg_kv_seq_rm_res
-{
-  GLUE_HANDLER("kvsm_res")
-  GLUE_FIELD(bool, success)
-  GLUE_FIELD(str, message)
-};
-
-/////////
 // Prefix tree engine operations
 
 struct glue_msg_tree_init_req
@@ -976,6 +920,7 @@ struct glue_msg_tree_init_req
   GLUE_FIELD(int, tier_l3_token_cap)
   GLUE_FIELD(int, tier_prune_l1_l2_token_threshold)
   GLUE_FIELD(int, tier_prune_l2_l3_token_threshold)
+  GLUE_FIELD(str, tier_replacement_policy)
   GLUE_FIELD(str, tier_l3_path)
 };
 
@@ -1029,6 +974,21 @@ struct glue_msg_tree_state_res
   GLUE_FIELD(int, tier_disk_reads)
   GLUE_FIELD(int, tier_disk_writes)
   GLUE_FIELD(int, tier_l3_overflow_events)
+  GLUE_FIELD(int, tier_restore_attempts)
+  GLUE_FIELD(int, tier_restore_hits_l1)
+  GLUE_FIELD(int, tier_restore_hits_l2)
+  GLUE_FIELD(int, tier_restore_hits_l3)
+  GLUE_FIELD(int, tier_restore_misses)
+  GLUE_FIELD(int, tier_restore_rebuilds)
+  GLUE_FIELD(int, tier_parent_recover_attempts)
+  GLUE_FIELD(int, tier_parent_recover_successes)
+  GLUE_FIELD(int, tier_parent_recover_failures)
+  GLUE_FIELD(int, tier_slot_alloc_hits)
+  GLUE_FIELD(int, tier_slot_alloc_misses)
+  GLUE_FIELD(int, tier_slot_evict_l1)
+  GLUE_FIELD(int, tier_slot_evict_l2)
+  GLUE_FIELD(int, tier_slot_evict_l3)
+  GLUE_FIELD(int, tier_fallback_replays)
 };
 
 struct glue_msg_tree_switch_req

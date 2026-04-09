@@ -115,6 +115,37 @@ td {
   padding: 8px;
 }
 
+.progress-wrap {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #c8d9ea;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #19344f;
+}
+
+.progress-track {
+  margin-top: 6px;
+  height: 10px;
+  border-radius: 999px;
+  background: #dbe8f5;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0f6b43 0%, #2b8a3e 100%);
+  transition: width 180ms ease;
+}
+
 .log-line {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;

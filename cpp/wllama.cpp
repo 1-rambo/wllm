@@ -3,6 +3,8 @@
 #include <string>
 #include <sstream>
 #include <stdio.h>
+#include <atomic>
+#include <chrono>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -60,6 +62,23 @@ static void printStr(ggml_log_level level, const char *text)
 
 static glue_outbuf output_buffer;
 static app_t app;
+static std::atomic<uint64_t> g_action_trace_seq{1};
+static std::string g_last_action_error;
+
+static int64_t action_trace_now_ms()
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+static bool action_trace_is_key_action(const std::string &action)
+{
+  return action == "chat_start" ||
+         action == "chat_finish" ||
+         action == "decode" ||
+         action == "sampling_sample";
+}
 
 static std::vector<char> input_buffer;
 // second argument is dummy
@@ -76,9 +95,11 @@ extern "C" const char *wllama_start()
 {
   try
   {
+    g_last_action_error.clear();
     llama_backend_init();
     // std::cerr << llama_print_system_info() << "\n";
     llama_log_set(llama_log_callback_logTee, nullptr);
+    std::cerr << "[WLLAMA_TRACE_SCHEMA] version=2026-04-03-decode-enter-return-v2" << std::endl;
     wllama_malloc(1024, 0);
     return "{\"success\":true}";
   }
@@ -89,12 +110,29 @@ extern "C" const char *wllama_start()
   }
 }
 
+extern "C" const char *wllama_get_last_error()
+{
+  return g_last_action_error.c_str();
+}
+
 extern "C" const char *wllama_action(const char *name, const char *req_raw)
 {
+  const uint64_t trace_id = g_action_trace_seq.fetch_add(1);
+  const int64_t started_at_ms = action_trace_now_ms();
+  std::string action = name ? std::string(name) : std::string();
+  uint32_t *output_len = reinterpret_cast<uint32_t *>(const_cast<char *>(req_raw));
+  const bool trace_key_action = action_trace_is_key_action(action);
+  const int64_t slow_action_threshold_ms = 100;
+
+  if (trace_key_action)
+  {
+    std::cerr << "[WLLAMA_ACTION_TRACE] id=" << trace_id
+              << " phase=entry action=" << action << std::endl;
+  }
+
   try
   {
-    std::string action(name);
-
+    g_last_action_error.clear();
     if (action.empty())
     {
       printStr(GGML_LOG_LEVEL_ERROR, "Empty action");
@@ -117,9 +155,6 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
     WLLAMA_ACTION(chat_format)
     WLLAMA_ACTION(kv_remove)
     WLLAMA_ACTION(kv_clear)
-    WLLAMA_ACTION(kv_seq_save)
-    WLLAMA_ACTION(kv_seq_restore)
-    WLLAMA_ACTION(kv_seq_rm)
     else if (action == "chat_init")
     {
       auto res = action_tree_init(app, req_raw);
@@ -170,13 +205,63 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
     }
 
     // length of response is written inside input_buffer
-    uint32_t *output_len = (uint32_t *)req_raw;
-    output_len[0] = output_buffer.data.size();
-    return output_buffer.data.data();
+    if (output_len != nullptr)
+    {
+      output_len[0] = static_cast<uint32_t>(output_buffer.data.size());
+    }
+
+    const char *output_ptr = output_buffer.data.data();
+    if (output_ptr == nullptr || output_buffer.data.empty())
+    {
+      g_last_action_error = std::string("action=") + action + " err=empty_output_buffer";
+      if (output_len != nullptr)
+      {
+        output_len[0] = 0;
+      }
+      std::cerr << "[WLLAMA_ACTION_TRACE] id=" << trace_id
+                << " phase=error action=" << action
+                << " elapsedMs=" << (action_trace_now_ms() - started_at_ms)
+                << " err=empty_output_buffer" << std::endl;
+      return nullptr;
+    }
+
+    const int64_t elapsed_ms = action_trace_now_ms() - started_at_ms;
+
+    if (trace_key_action || elapsed_ms >= slow_action_threshold_ms)
+    {
+      std::cerr << "[WLLAMA_ACTION_TRACE] id=" << trace_id
+                << " phase=exit action=" << action
+                << " elapsedMs=" << elapsed_ms
+                << " outBytes=" << output_buffer.data.size() << std::endl;
+    }
+    return output_ptr;
   }
   catch (std::exception &e)
   {
+    g_last_action_error = std::string("action=") + action + " err=" + e.what();
+    if (output_len != nullptr)
+    {
+      output_len[0] = 0;
+    }
+    std::cerr << "[WLLAMA_ACTION_TRACE] id=" << trace_id
+              << " phase=error action=" << action
+              << " elapsedMs=" << (action_trace_now_ms() - started_at_ms)
+              << " err=" << e.what() << std::endl;
     printStr(GGML_LOG_LEVEL_ERROR, e.what());
+    return nullptr;
+  }
+  catch (...)
+  {
+    g_last_action_error = std::string("action=") + action + " err=unknown";
+    if (output_len != nullptr)
+    {
+      output_len[0] = 0;
+    }
+    std::cerr << "[WLLAMA_ACTION_TRACE] id=" << trace_id
+              << " phase=error action=" << action
+              << " elapsedMs=" << (action_trace_now_ms() - started_at_ms)
+              << " err=unknown" << std::endl;
+    printStr(GGML_LOG_LEVEL_ERROR, "Unknown error in wllama_action");
     return nullptr;
   }
 }

@@ -4,6 +4,10 @@ let wllamaStart;
 let wllamaAction;
 let wllamaExit;
 let wllamaDebug;
+let wllamaGetLastError;
+
+// Native bridge uses shared request/response buffers; serialize actions to avoid races.
+let actionMutex = Promise.resolve();
 
 let Module = null;
 
@@ -246,6 +250,21 @@ const callWrapper = (name, ret, args, isAsync) => {
   };
 };
 
+const runActionExclusive = async (fn) => {
+  const waitTurn = actionMutex;
+  let releaseTurn;
+  actionMutex = new Promise((resolve) => {
+    releaseTurn = resolve;
+  });
+
+  await waitTurn;
+  try {
+    return await fn();
+  } finally {
+    releaseTurn();
+  }
+};
+
 onmessage = async (e) => {
   if (!e.data) return;
   const { verb, args, callbackId } = e.data;
@@ -281,6 +300,7 @@ onmessage = async (e) => {
         );
         wllamaExit = callWrapper('wllama_exit', 'string', [], false);
         wllamaDebug = callWrapper('wllama_debug', 'string', [], false);
+        wllamaGetLastError = callWrapper('wllama_get_last_error', 'string', [], false);
         msg({ callbackId, result: null });
       };
       wModuleInit();
@@ -340,25 +360,55 @@ onmessage = async (e) => {
     const argAction = args[0];
     const argEncodedMsg = args[1];
     try {
-      const inputPtr = await wllamaMalloc(argEncodedMsg.byteLength, 0);
-      // copy data to wasm heap
-      const inputBuffer = new Uint8Array(
-        Module.HEAPU8.buffer,
-        inputPtr,
-        argEncodedMsg.byteLength
-      );
-      inputBuffer.set(argEncodedMsg, 0);
-      const outputPtr = await wllamaAction(argAction, inputPtr);
-      // length of output buffer is written at the first 4 bytes of input buffer
-      const outputLen = new Uint32Array(Module.HEAPU8.buffer, inputPtr, 1)[0];
-      // copy the output buffer to JS heap
-      const outputBuffer = new Uint8Array(outputLen);
-      const outputSrcView = new Uint8Array(
-        Module.HEAPU8.buffer,
-        outputPtr,
-        outputLen
-      );
-      outputBuffer.set(outputSrcView, 0); // copy it
+      const outputBuffer = await runActionExclusive(async () => {
+        const readNativeLastError = async () => {
+          try {
+            const nativeErr = await wllamaGetLastError();
+            return nativeErr ? String(nativeErr) : '';
+          } catch (err) {
+            const readErr = err instanceof Error ? err.message : String(err);
+            return `native_last_error_read_failed:${readErr}`;
+          }
+        };
+        const inputPtr = await wllamaMalloc(argEncodedMsg.byteLength, 0);
+        // copy data to wasm heap
+        const inputBuffer = new Uint8Array(
+          Module.HEAPU8.buffer,
+          inputPtr,
+          argEncodedMsg.byteLength
+        );
+        inputBuffer.set(argEncodedMsg, 0);
+        const outputPtr = await wllamaAction(argAction, inputPtr);
+        if (!outputPtr) {
+          const nativeErr = await readNativeLastError();
+          throw new Error(
+            `wllamaAction failed for action=${argAction}: outputPtr=${outputPtr}${nativeErr ? ` nativeErr=${nativeErr}` : ''}`
+          );
+        }
+        // length of output buffer is written at the first 4 bytes of input buffer
+        const outputLen = new Uint32Array(Module.HEAPU8.buffer, inputPtr, 1)[0];
+        if (outputLen <= 0) {
+          const nativeErr = await readNativeLastError();
+          throw new Error(
+            `wllamaAction failed for action=${argAction}: outputPtr=${outputPtr} outputLen=${outputLen}${nativeErr ? ` nativeErr=${nativeErr}` : ''}`
+          );
+        }
+        const heapBytes = Module.HEAPU8.byteLength;
+        if (outputPtr + outputLen > heapBytes) {
+          throw new Error(
+            `wllamaAction returned invalid range for action=${argAction}: outputPtr=${outputPtr} outputLen=${outputLen} heapBytes=${heapBytes}`
+          );
+        }
+        // copy the output buffer to JS heap
+        const out = new Uint8Array(outputLen);
+        const outputSrcView = new Uint8Array(
+          Module.HEAPU8.buffer,
+          outputPtr,
+          outputLen
+        );
+        out.set(outputSrcView, 0); // copy it
+        return out;
+      });
       msg({ callbackId, result: outputBuffer }, [outputBuffer.buffer]);
     } catch (err) {
       msg({ callbackId, err });

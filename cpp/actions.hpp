@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <system_error>
+#include <cassert>
 
 #include "llama.h"
 #include "llama-chat-tree.h"
@@ -44,6 +45,10 @@ struct app_t
   // associated token list.  slot_id == 0 is always the live sequence.
   std::unordered_map<int32_t, llama_tokens> slot_tokens;
   std::unordered_map<int32_t, std::string> slot_disk_paths;
+  // Decouple logical tree node ids from finite KV seq slots.
+  std::unordered_map<int32_t, int32_t> node_to_seq_slot;
+  std::unordered_map<int32_t, int32_t> seq_slot_to_node;
+  std::vector<int32_t> free_seq_slots;
   std::unique_ptr<llama_chat_tree> tree;
 };
 
@@ -87,11 +92,21 @@ inline static std::string debug_runtime_snapshot(
     if (app.tree->initialized())
     {
       const auto & cfg = app.tree->tier_config();
+        const char * policy_name = "hybrid";
+        switch (cfg.replacement_policy)
+        {
+        case LLAMA_CHAT_TREE_REPLACEMENT_LRU: policy_name = "lru"; break;
+        case LLAMA_CHAT_TREE_REPLACEMENT_LFU: policy_name = "lfu"; break;
+        case LLAMA_CHAT_TREE_REPLACEMENT_SIZE_ONLY: policy_name = "size-only"; break;
+        case LLAMA_CHAT_TREE_REPLACEMENT_RANDOM: policy_name = "random"; break;
+        default: policy_name = "hybrid"; break;
+        }
       oss << ", tree_nodes=" << app.tree->nodes().size()
           << ", tree_active=" << app.tree->active_node_id()
           << ", tree_next_id=" << app.tree->next_id()
           << ", tree_last_pruned_count=" << app.tree->last_pruned_node_ids().size()
           << ", tier_enabled=" << (app.tree->tier_config().enabled ? 1 : 0)
+          << ", tier_policy=" << policy_name
           << ", tier_l1_cap=" << cfg.l1_token_cap
           << ", tier_l2_cap=" << cfg.l2_token_cap
           << ", tier_l3_cap=" << cfg.l3_token_cap
@@ -109,6 +124,12 @@ inline static std::string debug_runtime_snapshot(
 
 // Forward declarations for tiered-cache helpers used before their definitions.
 inline static void tier_reset_all(app_t &app);
+inline static int32_t tier_seq_limit(const app_t &app);
+inline static bool tier_is_valid_slot_id_for_seq(const app_t &app, int32_t slot_id);
+inline static void seq_allocator_reset(app_t &app);
+inline static int32_t seq_allocator_get_slot(const app_t &app, int32_t node_id);
+inline static void seq_allocator_release_slot_for_node(app_t &app, int32_t node_id);
+inline static int32_t seq_allocator_ensure_slot_for_node(app_t &app, int32_t node_id, int32_t protected_node, std::string &err);
 
 inline std::vector<char> convert_string_to_buf(std::string &input)
 {
@@ -567,6 +588,22 @@ glue_msg_decode_res action_decode(app_t &app, const char *req_raw)
   llama_tokens tokens_list = std::move(req.tokens.arr);
   bool skip_logits = req.skip_logits.value;
   const int32_t n_past_base = (int32_t)app.tokens.size();
+  const int64_t t_decode_begin = ggml_time_ms();
+  const bool trace_decode = (!skip_logits) || tokens_list.size() >= 128 || n_past_base == 0;
+  if (trace_decode)
+  {
+    const int32_t n_ctx = app.ctx ? llama_n_ctx(app.ctx) : -1;
+    const int32_t n_batch = app.ctx ? llama_n_batch(app.ctx) : -1;
+    const int32_t n_ubatch = app.ctx ? llama_n_ubatch(app.ctx) : -1;
+    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=begin"
+              << " tokens=" << tokens_list.size()
+              << " skip_logits=" << (skip_logits ? 1 : 0)
+              << " n_past_base=" << n_past_base
+              << " n_ctx=" << n_ctx
+              << " n_batch=" << n_batch
+              << " n_ubatch=" << n_ubatch
+              << std::endl;
+  }
   wcommon_batch_clear(app.batch);
   for (size_t i = 0; i < tokens_list.size(); ++i)
   {
@@ -580,7 +617,21 @@ glue_msg_decode_res action_decode(app_t &app, const char *req_raw)
     app.batch.logits[app.batch.n_tokens - 1] = true;
   }
   glue_msg_decode_res res;
-  if (llama_decode(app.ctx, app.batch) != 0)
+  if (trace_decode)
+  {
+    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=llama_decode_call_enter"
+              << " batch_tokens=" << app.batch.n_tokens
+              << std::endl;
+  }
+  const int decode_ret = llama_decode(app.ctx, app.batch);
+  if (trace_decode)
+  {
+    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=llama_decode_call_return"
+              << " ret=" << decode_ret
+              << " elapsedMs=" << (ggml_time_ms() - t_decode_begin)
+              << std::endl;
+  }
+  if (decode_ret != 0)
   {
     const std::string diag = debug_runtime_snapshot(
         app,
@@ -592,12 +643,24 @@ glue_msg_decode_res action_decode(app_t &app, const char *req_raw)
     res.success.value = false;
     res.message.value = "llama_decode failed, maybe n_batch is too small? [" + diag + "]";
     res.n_past.value = n_past_base;
+    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=fail"
+              << " elapsedMs=" << (ggml_time_ms() - t_decode_begin)
+              << " n_past=" << n_past_base
+              << std::endl;
   }
   else
   {
     app.tokens.insert(app.tokens.end(), tokens_list.begin(), tokens_list.end());
     res.success.value = true;
     res.n_past.value = app.tokens.size();
+    const int64_t elapsed = ggml_time_ms() - t_decode_begin;
+    if (trace_decode || elapsed >= 1000)
+    {
+      std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=done"
+                << " elapsedMs=" << elapsed
+                << " n_past=" << res.n_past.value
+                << std::endl;
+    }
   }
   return res;
 }
@@ -641,6 +704,7 @@ glue_msg_sampling_sample_res action_sampling_sample(app_t &app, const char *req_
 {
   PARSE_REQ(glue_msg_sampling_sample_req);
   int32_t idx = app.batch.n_tokens - 1;
+  const int64_t t_sample_begin = ggml_time_ms();
   const llama_token new_token_id = wcommon_sampler_sample(app.ctx_sampling, app.ctx, idx, false);
   std::string piece = wcommon_token_to_piece(app.ctx, new_token_id);
 
@@ -648,6 +712,17 @@ glue_msg_sampling_sample_res action_sampling_sample(app_t &app, const char *req_
   res.success.value = true;
   res.piece.buf = convert_string_to_buf(piece);
   res.token.value = new_token_id;
+  const int64_t sample_elapsed = ggml_time_ms() - t_sample_begin;
+  if (sample_elapsed >= 20)
+  {
+    std::cerr << "[WLLAMA_CPP_TRACE] action=sampling_sample phase=slow"
+              << " elapsedMs=" << sample_elapsed
+              << " idx=" << idx
+              << " batch_tokens=" << app.batch.n_tokens
+              << " n_past=" << app.tokens.size()
+              << " token=" << new_token_id
+              << std::endl;
+  }
   return res;
 }
 
@@ -1105,20 +1180,47 @@ glue_msg_chat_format_res action_chat_format(app_t &app, const char *req_raw)
 
 inline static void tier_drop_slot_metadata(app_t &app, int32_t slot_id);
 
-inline static void tree_remove_slot(app_t &app, int32_t slot_id)
+inline static void tree_remove_slot(app_t &app, int32_t node_id)
 {
-  if (slot_id < 1 || app.ctx == nullptr)
+  if (node_id < 1)
   {
     return;
   }
-  std::cerr << "tree_remove_slot: removing slot=" << slot_id
+  const int32_t seq_slot = seq_allocator_get_slot(app, node_id);
+  std::cerr << "tree_remove_slot: removing node=" << node_id
+            << ", seq_slot=" << seq_slot
             << ", live_tokens=" << app.tokens.size()
             << ", slot_tokens_in_mem=" << app.slot_tokens.size()
             << ", slot_tokens_on_disk=" << app.slot_disk_paths.size()
             << std::endl;
-  auto *mem = llama_get_memory(app.ctx);
-  llama_memory_seq_rm(mem, slot_id, -1, -1);
-  tier_drop_slot_metadata(app, slot_id);
+  if (seq_slot >= 1)
+  {
+    seq_allocator_release_slot_for_node(app, node_id);
+  }
+  tier_drop_slot_metadata(app, node_id);
+}
+
+inline static bool tree_is_ancestor_or_self(const app_t &app, int32_t ancestor_id, int32_t node_id)
+{
+  if (!app.tree || ancestor_id < 1 || node_id < 1)
+  {
+    return false;
+  }
+
+  const auto *cur = app.tree->find_node(node_id);
+  while (cur != nullptr)
+  {
+    if (cur->id == ancestor_id)
+    {
+      return true;
+    }
+    if (cur->parent_id < 0)
+    {
+      break;
+    }
+    cur = app.tree->find_node(cur->parent_id);
+  }
+  return false;
 }
 
 inline static int32_t tree_estimate_snapshot_token_bytes(app_t &app, int32_t n_past)
@@ -1338,6 +1440,7 @@ inline static void tier_reset_all(app_t &app)
   {
     app.tree->tier_reset();
   }
+  seq_allocator_reset(app);
 }
 
 inline static bool tier_replay_tokens_to_live_seq(app_t &app, const llama_tokens &tokens, int32_t n_past, std::string &err)
@@ -1381,7 +1484,658 @@ inline static bool tier_replay_tokens_to_live_seq(app_t &app, const llama_tokens
   return true;
 }
 
-inline static int32_t tier_pick_lru_slot(const app_t &app, int32_t tier, int32_t excluded_slot);
+inline static int32_t tier_pick_victim_slot(const app_t &app, int32_t tier, int32_t excluded_slot);
+inline static bool tier_ensure_space_for_level(
+    app_t &app,
+    int32_t level,
+    int32_t incoming_tokens,
+    int32_t protected_slot,
+    std::string &err);
+
+inline static int32_t tier_cap_for_level(const app_t &app, int32_t level)
+{
+  if (!app.tree)
+  {
+    return 0;
+  }
+  const auto &cfg = app.tree->tier_config();
+  if (level == LLAMA_CHAT_TREE_CACHE_TIER_L1)
+  {
+    return std::max(0, cfg.l1_token_cap);
+  }
+  if (level == LLAMA_CHAT_TREE_CACHE_TIER_L2)
+  {
+    return std::max(0, cfg.l2_token_cap);
+  }
+  if (level == LLAMA_CHAT_TREE_CACHE_TIER_L3)
+  {
+    return std::max(0, cfg.l3_token_cap);
+  }
+  return 0;
+}
+
+inline static int32_t tier_seq_limit(const app_t &app)
+{
+  if (app.ctx == nullptr)
+  {
+    return 1;
+  }
+
+  const int32_t reported = std::max<int32_t>(1, (int32_t) llama_n_seq_max(app.ctx));
+
+  // In kv_unified mode, runtime reports n_seq_max=1 even though tree ops can
+  // still address multiple seq IDs (bounded by compile-time LLAMA_MAX_SEQ).
+  // Keep the tree slot budget compatible with the unified runtime behavior.
+  if (reported == 1)
+  {
+    return 256;
+  }
+
+  return reported;
+}
+
+inline static bool tier_is_valid_slot_id_for_seq(const app_t &app, int32_t slot_id)
+{
+  return slot_id >= 1 && slot_id < tier_seq_limit(app);
+}
+
+inline static void seq_allocator_refill_free_slots(app_t &app)
+{
+  app.free_seq_slots.clear();
+  const int32_t limit = tier_seq_limit(app);
+  for (int32_t slot = 1; slot < limit; ++slot)
+  {
+    if (app.seq_slot_to_node.find(slot) == app.seq_slot_to_node.end())
+    {
+      app.free_seq_slots.push_back(slot);
+    }
+  }
+}
+
+inline static void seq_allocator_reset(app_t &app)
+{
+  app.node_to_seq_slot.clear();
+  app.seq_slot_to_node.clear();
+  seq_allocator_refill_free_slots(app);
+}
+
+inline static int32_t seq_allocator_get_slot(const app_t &app, int32_t node_id)
+{
+  auto it = app.node_to_seq_slot.find(node_id);
+  if (it == app.node_to_seq_slot.end())
+  {
+    return -1;
+  }
+  return it->second;
+}
+
+inline static void seq_allocator_release_slot_for_node(app_t &app, int32_t node_id)
+{
+  auto it = app.node_to_seq_slot.find(node_id);
+  if (it == app.node_to_seq_slot.end())
+  {
+    return;
+  }
+
+  const int32_t slot = it->second;
+  app.node_to_seq_slot.erase(it);
+  auto rev = app.seq_slot_to_node.find(slot);
+  if (rev != app.seq_slot_to_node.end() && rev->second == node_id)
+  {
+    app.seq_slot_to_node.erase(rev);
+  }
+
+  if (app.ctx != nullptr && tier_is_valid_slot_id_for_seq(app, slot))
+  {
+    llama_memory_seq_rm(llama_get_memory(app.ctx), slot, -1, -1);
+  }
+
+  if (tier_is_valid_slot_id_for_seq(app, slot))
+  {
+    if (std::find(app.free_seq_slots.begin(), app.free_seq_slots.end(), slot) == app.free_seq_slots.end())
+    {
+      app.free_seq_slots.push_back(slot);
+    }
+  }
+}
+
+inline static void seq_allocator_bind_slot(app_t &app, int32_t node_id, int32_t slot)
+{
+  auto old = app.node_to_seq_slot.find(node_id);
+  if (old != app.node_to_seq_slot.end() && old->second == slot)
+  {
+    return;
+  }
+  if (old != app.node_to_seq_slot.end())
+  {
+    seq_allocator_release_slot_for_node(app, node_id);
+  }
+
+  auto prev_node = app.seq_slot_to_node.find(slot);
+  if (prev_node != app.seq_slot_to_node.end() && prev_node->second != node_id)
+  {
+    seq_allocator_release_slot_for_node(app, prev_node->second);
+  }
+
+  app.node_to_seq_slot[node_id] = slot;
+  app.seq_slot_to_node[slot] = node_id;
+}
+
+inline static bool seq_allocator_evict_one(app_t &app, int32_t protected_node, std::string &err)
+{
+  if (!app.tree)
+  {
+    err = "tree is not initialized";
+    return false;
+  }
+
+  auto prune_node = [&](int32_t node_id) -> bool {
+    if (protected_node >= 1 && tree_is_ancestor_or_self(app, node_id, protected_node))
+    {
+      std::cerr << "seq_allocator_evict_one: skip subtree prune for protected ancestry, victim="
+                << node_id << ", protected=" << protected_node << std::endl;
+      tree_remove_slot(app, node_id);
+      return true;
+    }
+
+    std::vector<int32_t> deleted_ids;
+    std::string prune_err;
+    if (!app.tree->chat_delete(node_id, deleted_ids, prune_err))
+    {
+      tree_remove_slot(app, node_id);
+      return true;
+    }
+    for (int32_t id : deleted_ids)
+    {
+      tree_remove_slot(app, id);
+    }
+    return true;
+  };
+
+  const int32_t levels[] = {
+      LLAMA_CHAT_TREE_CACHE_TIER_L3,
+      LLAMA_CHAT_TREE_CACHE_TIER_L2,
+      LLAMA_CHAT_TREE_CACHE_TIER_L1,
+  };
+
+  for (int32_t level : levels)
+  {
+    const int32_t victim_node = tier_pick_victim_slot(app, level, protected_node);
+    if (victim_node < 1)
+    {
+      continue;
+    }
+
+    if (level == LLAMA_CHAT_TREE_CACHE_TIER_L3)
+    {
+      const int32_t slot = seq_allocator_get_slot(app, victim_node);
+      if (slot >= 1)
+      {
+        app.tree->tier_on_slot_evict(LLAMA_CHAT_TREE_CACHE_TIER_L3);
+        seq_allocator_release_slot_for_node(app, victim_node);
+        return true;
+      }
+      app.tree->tier_on_slot_evict(LLAMA_CHAT_TREE_CACHE_TIER_L3);
+      return prune_node(victim_node);
+    }
+
+    if (level == LLAMA_CHAT_TREE_CACHE_TIER_L2)
+    {
+      const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node));
+      const int32_t l3_cap = tier_cap_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
+      if (l3_cap > 0 && victim_tokens > l3_cap)
+      {
+        return prune_node(victim_node);
+      }
+
+      std::string ensure_err;
+      if (!tier_ensure_space_for_level(
+              app,
+              LLAMA_CHAT_TREE_CACHE_TIER_L3,
+              victim_tokens,
+              protected_node,
+              ensure_err))
+      {
+        return prune_node(victim_node);
+      }
+
+      if (!tier_write_tokens_to_disk(app, victim_node))
+      {
+        return prune_node(victim_node);
+      }
+
+      app.slot_tokens.erase(victim_node);
+      app.tree->tier_set_slot_level(victim_node, LLAMA_CHAT_TREE_CACHE_TIER_L3);
+      app.tree->tier_on_slot_evict(LLAMA_CHAT_TREE_CACHE_TIER_L2);
+      seq_allocator_release_slot_for_node(app, victim_node);
+      return true;
+    }
+
+    if (level == LLAMA_CHAT_TREE_CACHE_TIER_L1)
+    {
+      const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node));
+      const int32_t l2_cap = tier_cap_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+      if (l2_cap > 0 && victim_tokens > l2_cap)
+      {
+        return prune_node(victim_node);
+      }
+
+      std::string ensure_err;
+      if (!tier_ensure_space_for_level(
+              app,
+              LLAMA_CHAT_TREE_CACHE_TIER_L2,
+              victim_tokens,
+              protected_node,
+              ensure_err))
+      {
+        return prune_node(victim_node);
+      }
+
+      app.tree->tier_set_slot_level(victim_node, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+      app.tree->tier_on_slot_evict(LLAMA_CHAT_TREE_CACHE_TIER_L1);
+      seq_allocator_release_slot_for_node(app, victim_node);
+      return true;
+    }
+  }
+
+  err = "no evictable slot victim";
+  return false;
+}
+
+inline static int32_t seq_allocator_ensure_slot_for_node(app_t &app, int32_t node_id, int32_t protected_node, std::string &err)
+{
+  if (node_id < 1)
+  {
+    err = "invalid node id for slot allocation: " + std::to_string(node_id);
+    if (app.tree)
+    {
+      app.tree->tier_on_slot_alloc_miss();
+    }
+    return -1;
+  }
+
+  const int32_t existing = seq_allocator_get_slot(app, node_id);
+  if (existing >= 1 && tier_is_valid_slot_id_for_seq(app, existing))
+  {
+    if (app.tree)
+    {
+      app.tree->tier_on_slot_alloc_hit();
+    }
+    return existing;
+  }
+
+  bool needed_evict = false;
+
+  if (existing >= 1)
+  {
+    seq_allocator_release_slot_for_node(app, node_id);
+  }
+
+  if (app.free_seq_slots.empty())
+  {
+    seq_allocator_refill_free_slots(app);
+  }
+
+  while (app.free_seq_slots.empty())
+  {
+    needed_evict = true;
+    if (!seq_allocator_evict_one(app, protected_node, err))
+    {
+      if (app.tree)
+      {
+        app.tree->tier_on_slot_alloc_miss();
+      }
+      return -1;
+    }
+    if (app.free_seq_slots.empty())
+    {
+      seq_allocator_refill_free_slots(app);
+    }
+  }
+
+  int32_t slot = -1;
+  while (!app.free_seq_slots.empty())
+  {
+    slot = app.free_seq_slots.back();
+    app.free_seq_slots.pop_back();
+    if (tier_is_valid_slot_id_for_seq(app, slot) && app.seq_slot_to_node.find(slot) == app.seq_slot_to_node.end())
+    {
+      break;
+    }
+    slot = -1;
+  }
+  if (slot < 1)
+  {
+    err = "allocator failed to obtain free seq slot";
+    if (app.tree)
+    {
+      app.tree->tier_on_slot_alloc_miss();
+    }
+    return -1;
+  }
+  if (!tier_is_valid_slot_id_for_seq(app, slot))
+  {
+    err = "allocator selected invalid seq slot=" + std::to_string(slot) +
+          ", n_seq_max=" + std::to_string(tier_seq_limit(app));
+    if (app.tree)
+    {
+      app.tree->tier_on_slot_alloc_miss();
+    }
+    return -1;
+  }
+
+  seq_allocator_bind_slot(app, node_id, slot);
+  if (app.tree)
+  {
+    if (needed_evict)
+    {
+      app.tree->tier_on_slot_alloc_miss();
+    }
+    else
+    {
+      app.tree->tier_on_slot_alloc_hit();
+    }
+  }
+  return slot;
+}
+
+inline static int32_t tier_total_hot_slots(const app_t &app)
+{
+  if (!app.tree)
+  {
+    return 0;
+  }
+  return app.tree->tier_total_slots(LLAMA_CHAT_TREE_CACHE_TIER_L1) +
+         app.tree->tier_total_slots(LLAMA_CHAT_TREE_CACHE_TIER_L2);
+}
+
+inline static int32_t tier_slot_soft_cap(const app_t &app)
+{
+  const int32_t n_seq = tier_seq_limit(app);
+  const int32_t hard_slot_cap = std::max(1, n_seq - 1); // seq_id 0 is live sequence
+  if (hard_slot_cap <= 2)
+  {
+    return 1;
+  }
+  const int32_t ratio_cap = std::max(1, (int32_t) std::floor((double) hard_slot_cap * 0.90));
+  return std::max(1, std::min(hard_slot_cap - 1, ratio_cap));
+}
+
+inline static bool tier_collect_invariant_violation(const app_t &app, std::string &detail)
+{
+  if (!app.tree || !app.tree->tier_config().enabled)
+  {
+    return false;
+  }
+
+  const int32_t levels[3] = {
+    LLAMA_CHAT_TREE_CACHE_TIER_L1,
+    LLAMA_CHAT_TREE_CACHE_TIER_L2,
+    LLAMA_CHAT_TREE_CACHE_TIER_L3,
+  };
+  const char *names[3] = {"L1", "L2", "L3"};
+
+  for (int32_t i = 0; i < 3; ++i)
+  {
+    const int32_t lvl = levels[i];
+    const int32_t cap = tier_cap_for_level(app, lvl);
+    if (cap <= 0)
+    {
+      continue;
+    }
+    const int32_t used = tier_total_tokens(app, lvl);
+    if (used > cap)
+    {
+      detail = std::string("tier invariant violated: ") + names[i] +
+               " used=" + std::to_string(used) +
+               " > cap=" + std::to_string(cap);
+      return true;
+    }
+  }
+  return false;
+}
+
+inline static void tier_assert_capacity_invariants(const app_t &app, const char *stage)
+{
+#ifndef NDEBUG
+  std::string detail;
+  if (tier_collect_invariant_violation(app, detail))
+  {
+    std::cerr << "tier_assert_capacity_invariants: stage=" << (stage ? stage : "unknown")
+              << ", " << detail << std::endl;
+    assert(false && "tier capacity invariant violated");
+  }
+#else
+  (void)app;
+  (void)stage;
+#endif
+}
+
+inline static bool tier_prune_tree_node(app_t &app, int32_t node_id, int32_t protected_slot, std::string &err)
+{
+  if (protected_slot >= 1 && tree_is_ancestor_or_self(app, node_id, protected_slot))
+  {
+    // Never prune an ancestor of the protected in-flight node. Drop only cache metadata.
+    std::cerr << "tier_prune_tree_node: skip subtree prune for protected ancestry, victim=" << node_id
+              << ", protected=" << protected_slot << std::endl;
+    tree_remove_slot(app, node_id);
+    err.clear();
+    return true;
+  }
+
+  std::vector<int32_t> deleted_ids;
+  std::string prune_err;
+  if (!app.tree->chat_delete(node_id, deleted_ids, prune_err))
+  {
+    // Fallback: ensure-space must keep making progress for hard cap guarantee.
+    // If tree-level prune fails, drop slot metadata directly.
+    tree_remove_slot(app, node_id);
+    err.clear();
+    return true;
+  }
+  for (int32_t id : deleted_ids)
+  {
+    tree_remove_slot(app, id);
+  }
+  return true;
+}
+
+inline static bool tier_release_one_from_level(
+    app_t &app,
+    int32_t level,
+    int32_t protected_slot,
+    std::string &err)
+{
+  if (!app.tree)
+  {
+    return true;
+  }
+
+  const int32_t victim = tier_pick_victim_slot(app, level, protected_slot);
+  const int32_t candidate = victim >= 1
+      ? victim
+      : tier_pick_victim_slot(app, level, -1);
+  if (candidate < 1)
+  {
+    err = "no evictable victim in tier=" + std::to_string(level);
+    return false;
+  }
+
+  const int32_t victim_node_id = candidate;
+  const auto *victim_node = app.tree->find_node(victim_node_id);
+
+  if (level == LLAMA_CHAT_TREE_CACHE_TIER_L1)
+  {
+    const bool prefer_prune = victim_node != nullptr &&
+      app.tree->should_prune_on_l1_l2_boundary(*victim_node);
+    if (prefer_prune)
+    {
+      return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+    }
+
+    const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node_id));
+    const int32_t l2_cap = tier_cap_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    if (l2_cap > 0 && victim_tokens > l2_cap)
+    {
+      // Not admissible to next tier by definition; drop instead of failing.
+      return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+    }
+    if (!tier_ensure_space_for_level(
+            app,
+            LLAMA_CHAT_TREE_CACHE_TIER_L2,
+            victim_tokens,
+            protected_slot,
+            err))
+    {
+      // Keep EnsureSpace monotonic: if lower-tier admission cannot be
+      // guaranteed, prune current victim instead of bubbling up failure
+      // after partial progress in recursive paths.
+      return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+    }
+
+    app.tree->tier_set_slot_level(victim_node_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    seq_allocator_release_slot_for_node(app, victim_node_id);
+    return true;
+  }
+
+  if (level == LLAMA_CHAT_TREE_CACHE_TIER_L2)
+  {
+    const bool prefer_prune = victim_node != nullptr &&
+      app.tree->should_prune_on_l2_l3_boundary(*victim_node);
+    if (prefer_prune)
+    {
+      return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+    }
+
+    const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node_id));
+    const int32_t l3_cap = tier_cap_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
+    if (l3_cap > 0 && victim_tokens > l3_cap)
+    {
+      // Not admissible to L3, prune directly.
+      return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+    }
+    if (!tier_ensure_space_for_level(
+            app,
+            LLAMA_CHAT_TREE_CACHE_TIER_L3,
+            victim_tokens,
+            protected_slot,
+            err))
+    {
+      // Keep EnsureSpace monotonic: if lower-tier admission cannot be
+      // guaranteed, prune current victim instead of bubbling up failure
+      // after partial progress in recursive paths.
+      return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+    }
+
+    if (!tier_write_tokens_to_disk(app, victim_node_id))
+    {
+      // Degrade gracefully to prune to keep hard-cap guarantee.
+      return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+    }
+    app.slot_tokens.erase(victim_node_id);
+    app.tree->tier_set_slot_level(victim_node_id, LLAMA_CHAT_TREE_CACHE_TIER_L3);
+    seq_allocator_release_slot_for_node(app, victim_node_id);
+    return true;
+  }
+
+  if (level == LLAMA_CHAT_TREE_CACHE_TIER_L3)
+  {
+    app.tree->tier_on_l3_overflow();
+    if (!victim_node || !app.tree->should_force_prune_l3_over_cap(*victim_node))
+    {
+      // Last-resort direct slot removal to guarantee progress.
+      tree_remove_slot(app, victim_node_id);
+      err.clear();
+      return true;
+    }
+    return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
+  }
+
+  err = "invalid tier level=" + std::to_string(level);
+  return false;
+}
+
+inline static bool tier_ensure_space_for_level(
+    app_t &app,
+    int32_t level,
+    int32_t incoming_tokens,
+    int32_t protected_slot,
+    std::string &err)
+{
+  if (!app.tree || !app.tree->tier_config().enabled)
+  {
+    return true;
+  }
+
+  const int32_t cap = tier_cap_for_level(app, level);
+  const int32_t incoming = std::max(0, incoming_tokens);
+  if (cap <= 0)
+  {
+    return true;
+  }
+  if (incoming > cap)
+  {
+    err = "incoming tokens exceed tier cap (tier=" + std::to_string(level) +
+          ", incoming=" + std::to_string(incoming) +
+          ", cap=" + std::to_string(cap) + ")";
+    return false;
+  }
+
+  const int32_t slot_soft_cap = tier_slot_soft_cap(app);
+  const bool enforce_slot_watermark =
+      slot_soft_cap > 0 &&
+      (level == LLAMA_CHAT_TREE_CACHE_TIER_L1 || level == LLAMA_CHAT_TREE_CACHE_TIER_L2);
+
+  while (true)
+  {
+    const int32_t before_tokens = tier_total_tokens(app, level);
+    const int32_t before_slots = tier_total_hot_slots(app);
+    const bool over_token_cap = before_tokens + incoming > cap;
+    const bool over_slot_cap = enforce_slot_watermark && before_slots >= slot_soft_cap;
+    if (!over_token_cap && !over_slot_cap)
+    {
+      break;
+    }
+
+    if (!tier_release_one_from_level(app, level, protected_slot, err))
+    {
+      return false;
+    }
+
+    const int32_t after_tokens = tier_total_tokens(app, level);
+    const int32_t after_slots = tier_total_hot_slots(app);
+    if (after_tokens >= before_tokens && after_slots >= before_slots)
+    {
+      // Emergency fallback: hard-remove one slot to enforce progress.
+      const int32_t forced = tier_pick_victim_slot(app, level, -1);
+      if (forced >= 1)
+      {
+        tree_remove_slot(app, forced);
+      }
+      else
+      {
+        // If no victim exists, overflow can only persist when incoming itself
+        // is not admissible, which was already checked above.
+        break;
+      }
+    }
+  }
+
+  if (tier_total_tokens(app, level) + incoming > cap)
+  {
+    err = "ensure-space unresolved overflow in tier=" + std::to_string(level);
+    return false;
+  }
+  if (enforce_slot_watermark && tier_total_hot_slots(app) >= slot_soft_cap)
+  {
+    err = "ensure-space unresolved slot pressure: used=" + std::to_string(tier_total_hot_slots(app)) +
+          ", soft_cap=" + std::to_string(slot_soft_cap);
+    return false;
+  }
+
+  tier_assert_capacity_invariants(app, "tier_ensure_space_for_level");
+  return true;
+}
 
 inline static void tier_prepare_kv_space_for_restore(app_t &app, int32_t protected_slot, int32_t target_n_past)
 {
@@ -1401,18 +2155,9 @@ inline static void tier_prepare_kv_space_for_restore(app_t &app, int32_t protect
     return;
   }
 
-  auto *mem = llama_get_memory(app.ctx);
-
   // Keep enough KV room for replay, but avoid draining L1 completely.
   // Approximation: bound total live L1 tokens by (n_ctx - target_n_past).
   const int32_t l1_budget = std::max(0, n_ctx - target_n_past);
-  std::cerr << "tier_prepare_kv_space_for_restore: begin"
-            << ", protected_slot=" << protected_slot
-            << ", target_n_past=" << target_n_past
-            << ", n_ctx=" << n_ctx
-            << ", l1_budget=" << l1_budget
-            << ", l1_tokens_before=" << tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L1)
-            << std::endl;
 
   while (true)
   {
@@ -1422,29 +2167,32 @@ inline static void tier_prepare_kv_space_for_restore(app_t &app, int32_t protect
       break;
     }
 
-    const int32_t victim = tier_pick_lru_slot(app, LLAMA_CHAT_TREE_CACHE_TIER_L1, protected_slot);
+    const int32_t victim = tier_pick_victim_slot(app, LLAMA_CHAT_TREE_CACHE_TIER_L1, protected_slot);
     if (victim < 1)
     {
-      std::cerr << "tier_prepare_kv_space_for_restore: no L1 victim available"
-                << ", l1_now=" << l1_now
-                << ", l1_budget=" << l1_budget << std::endl;
       break;
     }
 
-    std::cerr << "tier_prepare_kv_space_for_restore: demote L1 slot=" << victim
-              << " to L2 before replay, protected_slot=" << protected_slot
-              << ", l1_now=" << l1_now
-              << ", l1_budget=" << l1_budget << std::endl;
-    llama_memory_seq_rm(mem, victim, -1, -1);
+    std::string ensure_err;
+    const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim));
+    if (!tier_ensure_space_for_level(
+            app,
+            LLAMA_CHAT_TREE_CACHE_TIER_L2,
+            victim_tokens,
+            protected_slot,
+            ensure_err))
+    {
+      std::cerr << "tier_prepare_kv_space_for_restore: ensure L2 failed before demotion, err="
+                << ensure_err << std::endl;
+      break;
+    }
+
+    seq_allocator_release_slot_for_node(app, victim);
     app.tree->tier_set_slot_level(victim, LLAMA_CHAT_TREE_CACHE_TIER_L2);
   }
-
-  std::cerr << "tier_prepare_kv_space_for_restore: end"
-            << ", l1_tokens_after=" << tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L1)
-            << std::endl;
 }
 
-inline static bool tier_ensure_tokens_in_memory(app_t &app, int32_t slot_id, std::string &err)
+inline static bool tier_ensure_tokens_in_memory(app_t &app, int32_t slot_id, int32_t protected_slot, std::string &err)
 {
   if (app.slot_tokens.find(slot_id) != app.slot_tokens.end())
   {
@@ -1464,194 +2212,61 @@ inline static bool tier_ensure_tokens_in_memory(app_t &app, int32_t slot_id, std
     return false;
   }
 
+  if (!tier_ensure_space_for_level(
+          app,
+          LLAMA_CHAT_TREE_CACHE_TIER_L2,
+          (int32_t)tokens.size(),
+          protected_slot,
+          err))
+  {
+    return false;
+  }
+
   app.slot_tokens[slot_id] = std::move(tokens);
   app.tree->tier_set_slot_level(slot_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
   return true;
 }
 
-inline static int32_t tier_pick_lru_slot(const app_t &app, int32_t tier, int32_t excluded_slot)
+inline static int32_t tier_pick_victim_slot(const app_t &app, int32_t tier, int32_t excluded_slot)
 {
   if (!app.tree)
   {
     return -1;
   }
-  return app.tree->tier_pick_lru_slot(tier, excluded_slot);
+  return app.tree->tier_pick_victim_slot(tier, excluded_slot);
 }
 
 inline static void tier_apply_capacity_limits(app_t &app, int32_t protected_slot)
 {
-  if (!app.tree || !app.tree->tier_config().enabled)
+  // Slot-level restore paths may run without initialized chat tree.
+  // In that mode, tier capacity management is intentionally a no-op.
+  if (!app.tree)
   {
-    if (!app.tree)
-    {
-      std::cerr << "tier_apply_capacity_limits: skip (tree not initialized)" << std::endl;
-    }
-    else
-    {
-      std::cerr << "tier_apply_capacity_limits: skip (tiered cache disabled)" << std::endl;
-    }
     return;
   }
 
-  const auto &cfg = app.tree->tier_config();
-
-  const int32_t l1_before = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L1);
-  const int32_t l2_before = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
-  const int32_t l3_before = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
-  const int32_t l1_slots_before = tier_total_slots(app, LLAMA_CHAT_TREE_CACHE_TIER_L1);
-  const int32_t l2_slots_before = tier_total_slots(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
-  const int32_t l3_slots_before = tier_total_slots(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
-
-  std::cerr << "tier_apply_capacity_limits: begin"
-            << ", protected_slot=" << protected_slot
-            << ", caps(l1/l2/l3)=" << cfg.l1_token_cap << "/" << cfg.l2_token_cap << "/" << cfg.l3_token_cap
-            << ", tokens(l1/l2/l3)=" << l1_before << "/" << l2_before << "/" << l3_before
-            << ", slots(l1/l2/l3)=" << l1_slots_before << "/" << l2_slots_before << "/" << l3_slots_before
-            << std::endl;
-
-  auto *mem = llama_get_memory(app.ctx);
-
-  auto prune_tree_node = [&](int32_t node_id) -> bool
+  if (!app.tree->tier_config().enabled)
   {
-    std::vector<int32_t> deleted_ids;
-    std::string prune_err;
-    std::cerr << "tier_apply_capacity_limits: prune request node=" << node_id
-              << ", protected_slot=" << protected_slot << std::endl;
-    if (!app.tree->chat_delete(node_id, deleted_ids, prune_err))
-    {
-      std::cerr << "tier_apply_capacity_limits: prune failed node=" << node_id
-                << ", err=" << prune_err << std::endl;
-      return false;
-    }
-    std::cerr << "tier_apply_capacity_limits: prune success node=" << node_id
-              << ", deleted_nodes=" << deleted_ids.size() << std::endl;
-    for (int32_t id : deleted_ids)
-    {
-      tree_remove_slot(app, id);
-    }
-    return true;
-  };
-
-  while (cfg.l1_token_cap > 0 &&
-         tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L1) > cfg.l1_token_cap)
-  {
-    const int32_t l1_tokens_now = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L1);
-    const int32_t victim = tier_pick_lru_slot(app, LLAMA_CHAT_TREE_CACHE_TIER_L1, protected_slot);
-    if (victim < 1)
-    {
-      std::cerr << "tier_apply_capacity_limits: L1 over cap but no victim found"
-                << ", l1_tokens=" << l1_tokens_now
-                << ", l1_cap=" << cfg.l1_token_cap << std::endl;
-      break;
-    }
-
-    const auto *victim_node = app.tree->find_node(victim);
-    const bool prefer_prune = victim_node != nullptr &&
-      app.tree->should_prune_on_l1_l2_boundary(*victim_node);
-    if (prefer_prune)
-    {
-      std::cerr << "tier_apply_capacity_limits: L1 prune victim=" << victim
-                << ", l1_tokens=" << l1_tokens_now
-                << ", l1_cap=" << cfg.l1_token_cap << std::endl;
-      if (!prune_tree_node(victim))
-      {
-        break;
-      }
-      continue;
-    }
-
-    std::cerr << "tier_apply_capacity_limits: L1 demote victim=" << victim
-              << " L1->L2"
-              << ", l1_tokens=" << l1_tokens_now
-              << ", l1_cap=" << cfg.l1_token_cap << std::endl;
-    llama_memory_seq_rm(mem, victim, -1, -1);
-    app.tree->tier_set_slot_level(victim, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    return;
   }
 
-  while (cfg.l2_token_cap > 0 &&
-         tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L2) > cfg.l2_token_cap)
+  std::string err;
+  if (!tier_ensure_space_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L3, 0, protected_slot, err))
   {
-    const int32_t l2_tokens_now = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
-    const int32_t victim = tier_pick_lru_slot(app, LLAMA_CHAT_TREE_CACHE_TIER_L2, protected_slot);
-    if (victim < 1)
-    {
-      std::cerr << "tier_apply_capacity_limits: L2 over cap but no victim found"
-                << ", l2_tokens=" << l2_tokens_now
-                << ", l2_cap=" << cfg.l2_token_cap << std::endl;
-      break;
-    }
-
-    const auto *victim_node = app.tree->find_node(victim);
-    const bool prefer_prune = victim_node != nullptr &&
-      app.tree->should_prune_on_l2_l3_boundary(*victim_node);
-    if (prefer_prune)
-    {
-      std::cerr << "tier_apply_capacity_limits: L2 prune victim=" << victim
-                << ", l2_tokens=" << l2_tokens_now
-                << ", l2_cap=" << cfg.l2_token_cap << std::endl;
-      if (!prune_tree_node(victim))
-      {
-        break;
-      }
-      continue;
-    }
-
-    if (!tier_write_tokens_to_disk(app, victim))
-    {
-      std::cerr << "tier_apply_capacity_limits: L2->L3 write failed victim=" << victim << std::endl;
-      break;
-    }
-    std::cerr << "tier_apply_capacity_limits: L2 demote victim=" << victim
-              << " L2->L3"
-              << ", l2_tokens=" << l2_tokens_now
-              << ", l2_cap=" << cfg.l2_token_cap << std::endl;
-    app.slot_tokens.erase(victim);
-    app.tree->tier_set_slot_level(victim, LLAMA_CHAT_TREE_CACHE_TIER_L3);
+    std::cerr << "tier_apply_capacity_limits: L3 ensure failed: " << err << std::endl;
+  }
+  err.clear();
+  if (!tier_ensure_space_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L2, 0, protected_slot, err))
+  {
+    std::cerr << "tier_apply_capacity_limits: L2 ensure failed: " << err << std::endl;
+  }
+  err.clear();
+  if (!tier_ensure_space_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L1, 0, protected_slot, err))
+  {
+    std::cerr << "tier_apply_capacity_limits: L1 ensure failed: " << err << std::endl;
   }
 
-  while (cfg.l3_token_cap > 0 &&
-         tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L3) > cfg.l3_token_cap)
-  {
-    app.tree->tier_on_l3_overflow();
-    const int32_t l3_tokens_now = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
-
-    const int32_t victim = tier_pick_lru_slot(app, LLAMA_CHAT_TREE_CACHE_TIER_L3, protected_slot);
-    if (victim < 1)
-    {
-      std::cerr << "tier_apply_capacity_limits: L3 over cap but no victim found"
-                << ", l3_tokens=" << l3_tokens_now
-                << ", l3_cap=" << cfg.l3_token_cap << std::endl;
-      break;
-    }
-
-    const auto *victim_node = app.tree->find_node(victim);
-    if (!victim_node || !app.tree->should_force_prune_l3_over_cap(*victim_node))
-    {
-      std::cerr << "tier_apply_capacity_limits: L3 victim not force-prunable victim=" << victim << std::endl;
-      break;
-    }
-
-    std::cerr << "tier_apply_capacity_limits: L3 prune victim=" << victim
-              << ", l3_tokens=" << l3_tokens_now
-              << ", l3_cap=" << cfg.l3_token_cap << std::endl;
-    if (!prune_tree_node(victim))
-    {
-      break;
-    }
-  }
-
-  const int32_t l1_after = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L1);
-  const int32_t l2_after = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
-  const int32_t l3_after = tier_total_tokens(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
-  const int32_t l1_slots_after = tier_total_slots(app, LLAMA_CHAT_TREE_CACHE_TIER_L1);
-  const int32_t l2_slots_after = tier_total_slots(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
-  const int32_t l3_slots_after = tier_total_slots(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
-
-  std::cerr << "tier_apply_capacity_limits: end"
-            << ", protected_slot=" << protected_slot
-            << ", tokens(l1/l2/l3)=" << l1_after << "/" << l2_after << "/" << l3_after
-            << ", slots(l1/l2/l3)=" << l1_slots_after << "/" << l2_slots_after << "/" << l3_slots_after
-            << std::endl;
+  tier_assert_capacity_invariants(app, "tier_apply_capacity_limits");
 }
 
 inline static bool tier_restore_slot_to_live_seq(
@@ -1661,17 +2276,33 @@ inline static bool tier_restore_slot_to_live_seq(
   int32_t &actual_n_past,
   std::string &err)
 {
+  if (app.tree)
+  {
+    app.tree->tier_on_restore_attempt();
+  }
+
+  auto mark_miss = [&]() {
+    if (app.tree)
+    {
+      app.tree->tier_on_restore_miss();
+    }
+  };
+
   if (slot_id < 1)
   {
+    mark_miss();
     err = "slot_id must be >= 1";
     return false;
   }
+  const int32_t bound_seq_slot = seq_allocator_get_slot(app, slot_id);
+  const bool has_seq_slot = bound_seq_slot >= 1 && tier_is_valid_slot_id_for_seq(app, bound_seq_slot);
 
   if (!app.tree)
   {
     auto tok_it = app.slot_tokens.find(slot_id);
     if (tok_it == app.slot_tokens.end())
     {
+      mark_miss();
       err = "slot_id not found: " + std::to_string(slot_id);
       return false;
     }
@@ -1679,13 +2310,34 @@ inline static bool tier_restore_slot_to_live_seq(
     actual_n_past = std::min(std::max(0, requested_n_past), slot_n_past);
     auto *mem = llama_get_memory(app.ctx);
     llama_memory_seq_rm(mem, 0, -1, -1);
-    llama_memory_seq_cp(mem, slot_id, 0, 0, actual_n_past);
+    if (has_seq_slot)
+    {
+      llama_memory_seq_cp(mem, bound_seq_slot, 0, 0, actual_n_past);
+    }
+    else
+    {
+      if (app.tree)
+      {
+        app.tree->tier_on_fallback_replay();
+      }
+      if (!tier_replay_tokens_to_live_seq(app, tok_it->second, actual_n_past, err))
+      {
+        mark_miss();
+        return false;
+      }
+    }
     app.tokens.assign(tok_it->second.begin(), tok_it->second.begin() + actual_n_past);
+    if (app.tree)
+    {
+      app.tree->tier_on_restore_hit(LLAMA_CHAT_TREE_CACHE_TIER_L1);
+    }
     return true;
   }
 
-  if (app.tree->tier_slot_level(slot_id) < 0)
+  const int32_t original_level = app.tree->tier_slot_level(slot_id);
+  if (original_level < 0)
   {
+    mark_miss();
     err = "slot_id not found: " + std::to_string(slot_id);
     return false;
   }
@@ -1696,21 +2348,43 @@ inline static bool tier_restore_slot_to_live_seq(
   auto *mem = llama_get_memory(app.ctx);
   llama_memory_seq_rm(mem, 0, -1, -1);
 
-  if (app.tree->tier_slot_level(slot_id) == LLAMA_CHAT_TREE_CACHE_TIER_L1)
+  if (original_level == LLAMA_CHAT_TREE_CACHE_TIER_L1)
   {
-    llama_memory_seq_cp(mem, slot_id, 0, 0, actual_n_past);
-    if (!tier_ensure_tokens_in_memory(app, slot_id, err))
+    if (!tier_ensure_tokens_in_memory(app, slot_id, slot_id, err))
     {
+      mark_miss();
       return false;
     }
     const llama_tokens &slot_toks = app.slot_tokens[slot_id];
+    if (has_seq_slot)
+    {
+      llama_memory_seq_cp(mem, bound_seq_slot, 0, 0, actual_n_past);
+    }
+    else
+    {
+      if (app.tree)
+      {
+        app.tree->tier_on_fallback_replay();
+      }
+      if (!tier_replay_tokens_to_live_seq(app, slot_toks, actual_n_past, err))
+      {
+        mark_miss();
+        return false;
+      }
+    }
     app.tokens.assign(slot_toks.begin(), slot_toks.begin() + actual_n_past);
     tier_touch_slot(app, slot_id);
+    if (!has_seq_slot)
+    {
+      app.tree->tier_set_slot_level(slot_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    }
+    app.tree->tier_on_restore_hit(LLAMA_CHAT_TREE_CACHE_TIER_L1);
     return true;
   }
 
-  if (!tier_ensure_tokens_in_memory(app, slot_id, err))
+  if (!tier_ensure_tokens_in_memory(app, slot_id, slot_id, err))
   {
+    mark_miss();
     return false;
   }
 
@@ -1720,19 +2394,166 @@ inline static bool tier_restore_slot_to_live_seq(
   // leave the system in a state where L2 already exceeds its cap while L3
   // remains empty because post-restore capacity handling is never reached.
   tier_apply_capacity_limits(app, slot_id);
+  tier_assert_capacity_invariants(app, "tier_restore_before_replay");
 
   const llama_tokens &slot_toks = app.slot_tokens[slot_id];
   if (!tier_replay_tokens_to_live_seq(app, slot_toks, actual_n_past, err))
   {
+    mark_miss();
     return false;
   }
 
-  llama_memory_seq_rm(mem, slot_id, -1, -1);
-  llama_memory_seq_cp(mem, 0, slot_id, 0, actual_n_past);
-  app.tree->tier_on_slot_restored(slot_id, actual_n_past);
+  if (!tier_ensure_space_for_level(
+          app,
+          LLAMA_CHAT_TREE_CACHE_TIER_L1,
+          actual_n_past,
+          slot_id,
+          err))
+  {
+    mark_miss();
+    return false;
+  }
+
+  int32_t seq_slot = bound_seq_slot;
+  if (!tier_is_valid_slot_id_for_seq(app, seq_slot))
+  {
+    std::string alloc_err;
+    seq_slot = seq_allocator_ensure_slot_for_node(app, slot_id, slot_id, alloc_err);
+    if (seq_slot < 1)
+    {
+      std::cerr << "tier_restore_slot_to_live_seq: no seq slot for node=" << slot_id
+                << ", fallback to token-only cache, err=" << alloc_err << std::endl;
+    }
+  }
+
+  if (tier_is_valid_slot_id_for_seq(app, seq_slot))
+  {
+    llama_memory_seq_rm(mem, seq_slot, -1, -1);
+    llama_memory_seq_cp(mem, 0, seq_slot, 0, actual_n_past);
+    app.tree->tier_on_slot_restored(slot_id, actual_n_past);
+  }
+  else
+  {
+    app.tree->tier_on_slot_saved(slot_id, actual_n_past);
+    app.tree->tier_set_slot_level(slot_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+  }
+  app.tree->tier_on_restore_hit(original_level);
   tier_touch_slot(app, slot_id);
   tier_apply_capacity_limits(app, slot_id);
+  tier_assert_capacity_invariants(app, "tier_restore_after_commit");
   return true;
+}
+
+inline static bool tier_rebuild_slot_from_tree_prompt(
+  app_t &app,
+  int32_t slot_id,
+  int32_t &actual_n_past,
+  std::string &err)
+{
+  if (!app.tree)
+  {
+    err = "tree is not initialized";
+    return false;
+  }
+
+  std::string formatted_prompt;
+  if (!app.tree->chat_format_prompt(slot_id, "", false, formatted_prompt, err))
+  {
+    return false;
+  }
+
+  llama_tokens prompt_tokens = wcommon_tokenize(app.vocab, formatted_prompt, false, true);
+  auto *mem = llama_get_memory(app.ctx);
+  llama_memory_seq_rm(mem, 0, -1, -1);
+  app.tokens.clear();
+
+  const int32_t chunk_size = std::max<int32_t>(1, std::min<int32_t>(128, (int32_t) llama_n_ubatch(app.ctx)));
+  for (int32_t i = 0; i < (int32_t)prompt_tokens.size(); i += chunk_size)
+  {
+    const int32_t end = std::min((int32_t)prompt_tokens.size(), i + chunk_size);
+    wcommon_batch_clear(app.batch);
+    for (int32_t j = i; j < end; ++j)
+    {
+      wcommon_batch_add(app.batch, prompt_tokens[j], j, {0}, false);
+    }
+    if (llama_decode(app.ctx, app.batch) != 0)
+    {
+      const std::string diag = debug_runtime_snapshot(
+          app,
+          "tier_rebuild_slot_from_tree_prompt",
+          end - i,
+          i,
+          slot_id);
+      std::cerr << __func__ << ": replay failed at chunk [" << i << ", " << end << "), " << diag << std::endl;
+      err = "llama_decode failed while rebuilding from tree prompt [chunk=" + std::to_string(i) + "-" + std::to_string(end) + ", " + diag + "]";
+      return false;
+    }
+    app.tokens.insert(app.tokens.end(), prompt_tokens.begin() + i, prompt_tokens.begin() + end);
+  }
+
+  actual_n_past = (int32_t) app.tokens.size();
+
+  if (slot_id >= 1)
+  {
+    std::string ensure_err;
+    if (!tier_ensure_space_for_level(
+            app,
+            LLAMA_CHAT_TREE_CACHE_TIER_L1,
+            actual_n_past,
+            slot_id,
+            ensure_err))
+    {
+      err = "tier ensure-space failed while rebuilding slot: " + ensure_err;
+      return false;
+    }
+
+    app.slot_tokens[slot_id] = app.tokens;
+    std::string alloc_err;
+    const int32_t seq_slot = seq_allocator_ensure_slot_for_node(app, slot_id, slot_id, alloc_err);
+    if (tier_is_valid_slot_id_for_seq(app, seq_slot))
+    {
+      llama_memory_seq_rm(mem, seq_slot, -1, -1);
+      llama_memory_seq_cp(mem, 0, seq_slot, 0, actual_n_past);
+      app.tree->tier_on_slot_restored(slot_id, actual_n_past);
+    }
+    else
+    {
+      std::cerr << "tier_rebuild_slot_from_tree_prompt: no seq slot for node=" << slot_id
+                << ", fallback to token-only cache, err=" << alloc_err << std::endl;
+      app.tree->tier_on_slot_saved(slot_id, actual_n_past);
+      app.tree->tier_set_slot_level(slot_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    }
+    tier_touch_slot(app, slot_id);
+    tier_apply_capacity_limits(app, slot_id);
+    tier_assert_capacity_invariants(app, "tier_rebuild_slot_from_tree_prompt_after_commit");
+  }
+
+  return true;
+}
+
+inline static const char * tier_policy_to_str(llama_chat_tree_replacement_policy p)
+{
+  switch (p)
+  {
+  case LLAMA_CHAT_TREE_REPLACEMENT_LRU: return "lru";
+  case LLAMA_CHAT_TREE_REPLACEMENT_LFU: return "lfu";
+  case LLAMA_CHAT_TREE_REPLACEMENT_SIZE_ONLY: return "size-only";
+  case LLAMA_CHAT_TREE_REPLACEMENT_RANDOM: return "random";
+  default: return "hybrid";
+  }
+}
+
+inline static llama_chat_tree_replacement_policy tier_policy_parse_raw(const std::string &s)
+{
+  if (s == "lru")
+    return LLAMA_CHAT_TREE_REPLACEMENT_LRU;
+  if (s == "lfu")
+    return LLAMA_CHAT_TREE_REPLACEMENT_LFU;
+  if (s == "size-only")
+    return LLAMA_CHAT_TREE_REPLACEMENT_SIZE_ONLY;
+  if (s == "random")
+    return LLAMA_CHAT_TREE_REPLACEMENT_RANDOM;
+  return LLAMA_CHAT_TREE_REPLACEMENT_HYBRID;
 }
 
 glue_msg_tree_init_res action_tree_init(app_t &app, const char *req_raw)
@@ -1764,6 +2585,8 @@ glue_msg_tree_init_res action_tree_init(app_t &app, const char *req_raw)
   tier_cfg.l3_token_cap = std::max(0, req.tier_l3_token_cap.value);
   tier_cfg.prune_l1_l2_token_threshold = std::max(0, req.tier_prune_l1_l2_token_threshold.value);
   tier_cfg.prune_l2_l3_token_threshold = std::max(0, req.tier_prune_l2_l3_token_threshold.value);
+  const llama_chat_tree_replacement_policy requested_policy = tier_policy_parse_raw(req.tier_replacement_policy.value);
+  tier_cfg.replacement_policy = requested_policy;
   tier_cfg.l3_path = req.tier_l3_path.value.empty()
                    ? std::string("/tmp/wllama-tier-cache")
                    : req.tier_l3_path.value;
@@ -1842,6 +2665,21 @@ glue_msg_tree_state_res action_tree_state(app_t &app, const char *req_raw)
   res.tier_disk_reads.value = tier_stats.disk_reads;
   res.tier_disk_writes.value = tier_stats.disk_writes;
   res.tier_l3_overflow_events.value = tier_stats.l3_overflow_events;
+  res.tier_restore_attempts.value = tier_stats.restore_attempts;
+  res.tier_restore_hits_l1.value = tier_stats.restore_hits_l1;
+  res.tier_restore_hits_l2.value = tier_stats.restore_hits_l2;
+  res.tier_restore_hits_l3.value = tier_stats.restore_hits_l3;
+  res.tier_restore_misses.value = tier_stats.restore_misses;
+  res.tier_restore_rebuilds.value = tier_stats.restore_rebuilds;
+  res.tier_parent_recover_attempts.value = tier_stats.parent_recover_attempts;
+  res.tier_parent_recover_successes.value = tier_stats.parent_recover_successes;
+  res.tier_parent_recover_failures.value = tier_stats.parent_recover_failures;
+  res.tier_slot_alloc_hits.value = tier_stats.slot_alloc_hits;
+  res.tier_slot_alloc_misses.value = tier_stats.slot_alloc_misses;
+  res.tier_slot_evict_l1.value = tier_stats.slot_evict_l1;
+  res.tier_slot_evict_l2.value = tier_stats.slot_evict_l2;
+  res.tier_slot_evict_l3.value = tier_stats.slot_evict_l3;
+  res.tier_fallback_replays.value = tier_stats.fallback_replays;
   return res;
 }
 
@@ -1884,9 +2722,18 @@ glue_msg_tree_switch_res action_tree_switch(app_t &app, const char *req_raw)
   std::string restore_err;
   if (!tier_restore_slot_to_live_seq(app, node_id, node->prefix_token_count, actual_n_past, restore_err))
   {
-    res.success.value = false;
-    res.message.value = restore_err;
-    return res;
+    std::cerr << "action_tree_switch: tier restore miss for node=" << node_id
+              << ", fallback to prompt rebuild, err=" << restore_err << std::endl;
+    if (!tier_rebuild_slot_from_tree_prompt(app, node_id, actual_n_past, restore_err))
+    {
+      res.success.value = false;
+      res.message.value = restore_err;
+      return res;
+    }
+    if (app.tree)
+    {
+      app.tree->tier_on_restore_rebuild();
+    }
   }
 
   res.success.value = true;
@@ -1935,7 +2782,23 @@ glue_msg_tree_finish_turn_res action_tree_finish_turn(app_t &app, const char *re
   std::vector<int32_t> deleted_ids;
   std::string err;
   const int32_t n_past = (int32_t)app.tokens.size();
-    const int32_t snapshot_token_bytes = tree_estimate_snapshot_token_bytes(app, n_past);
+  const int32_t snapshot_token_bytes = tree_estimate_snapshot_token_bytes(app, n_past);
+
+  if (app.tree && app.tree->tier_config().enabled)
+  {
+    std::string ensure_err;
+    if (!tier_ensure_space_for_level(
+            app,
+            LLAMA_CHAT_TREE_CACHE_TIER_L1,
+            n_past,
+            req.node_id.value,
+            ensure_err))
+    {
+      res.success.value = false;
+      res.message.value = "tier ensure-space failed before commit: " + ensure_err;
+      return res;
+    }
+  }
   if (!app.tree->chat_finish(
         req.node_id.value,
         req.assistant_text.value,
@@ -1953,15 +2816,34 @@ glue_msg_tree_finish_turn_res action_tree_finish_turn(app_t &app, const char *re
   }
 
   auto *mem = llama_get_memory(app.ctx);
-  llama_memory_seq_rm(mem, req.node_id.value, -1, -1);
-  llama_memory_seq_cp(mem, 0, req.node_id.value, 0, n_past);
   app.slot_tokens[req.node_id.value] = app.tokens;
+  std::string alloc_err;
+  const int32_t seq_slot = seq_allocator_ensure_slot_for_node(app, req.node_id.value, req.node_id.value, alloc_err);
+  if (tier_is_valid_slot_id_for_seq(app, seq_slot))
+  {
+    llama_memory_seq_rm(mem, seq_slot, -1, -1);
+    llama_memory_seq_cp(mem, 0, seq_slot, 0, n_past);
+  }
+  else
+  {
+    std::cerr << "[WLLAMA_CPP_TRACE] action=finish_turn phase=degrade"
+              << " reason=seq_slot_unavailable"
+              << " node_id=" << req.node_id.value
+              << " n_seq_max=" << tier_seq_limit(app)
+              << " err=" << alloc_err
+              << std::endl;
+  }
   if (app.tree)
   {
     app.tree->tier_on_slot_saved(req.node_id.value, n_past);
+    if (!tier_is_valid_slot_id_for_seq(app, seq_slot))
+    {
+      app.tree->tier_set_slot_level(req.node_id.value, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    }
   }
   tier_touch_slot(app, req.node_id.value);
   tier_apply_capacity_limits(app, req.node_id.value);
+  tier_assert_capacity_invariants(app, "action_tree_finish_turn_post_commit");
 
   for (int32_t pruned_id : pruned_ids)
   {
@@ -2028,6 +2910,12 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
 {
   PARSE_REQ(glue_msg_tree_chat_start_req);
   glue_msg_tree_chat_start_res res;
+  const int64_t t_chat_start_begin = ggml_time_ms();
+  std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=begin"
+            << " parent_id=" << req.parent_id.value
+            << " user_chars=" << req.user_text.value.size()
+            << " live_tokens=" << app.tokens.size()
+            << std::endl;
 
   // High-level transaction entrypoint.
   if (!app.tree)
@@ -2047,13 +2935,32 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
   const auto *parent = app.tree->find_node(parent_id);
   if (!parent)
   {
-    res.success.value = false;
-    res.message.value = "Tree node not found: " + std::to_string(parent_id);
-    return res;
+    std::string recover_err;
+    if (!app.tree->chat_recover_parent(parent_id, recover_err))
+    {
+      res.success.value = false;
+      res.message.value = "Tree node not found: " + std::to_string(parent_id);
+      if (!recover_err.empty())
+      {
+        res.message.value += " (recover failed: " + recover_err + ")";
+      }
+      return res;
+    }
+    parent = app.tree->find_node(parent_id);
+    if (!parent)
+    {
+      res.success.value = false;
+      res.message.value = "Tree node not found after recover: " + std::to_string(parent_id);
+      return res;
+    }
+    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=parent_recovered"
+              << " parent_id=" << parent_id
+              << std::endl;
   }
 
   if (parent_id == app.tree->root_id())
   {
+    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore root_reset" << std::endl;
     llama_memory_clear(llama_get_memory(app.ctx), true);
     app.tokens.clear();
   }
@@ -2062,11 +2969,45 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
     int32_t actual_n_past = 0;
     std::string restore_err;
     const int32_t n_past = std::max(0, parent->prefix_token_count);
+    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore begin"
+              << " parent_id=" << parent_id
+              << " requested_n_past=" << n_past
+              << std::endl;
     if (!tier_restore_slot_to_live_seq(app, parent_id, n_past, actual_n_past, restore_err))
     {
-      res.success.value = false;
-      res.message.value = "KV slot not found for parent node: " + std::to_string(parent_id) + " (" + restore_err + ")";
-      return res;
+      std::cerr << "action_tree_chat_start: parent restore miss for node=" << parent_id
+                << ", fallback to prompt rebuild, err=" << restore_err << std::endl;
+      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore miss"
+                << " parent_id=" << parent_id
+                << " err=" << restore_err
+                << std::endl;
+      if (!tier_rebuild_slot_from_tree_prompt(app, parent_id, actual_n_past, restore_err))
+      {
+        res.success.value = false;
+        res.message.value = "KV slot restore and rebuild failed for parent node: " + std::to_string(parent_id) + " (" + restore_err + ")";
+        std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=fail"
+                  << " reason=restore_and_rebuild_failed"
+                  << " parent_id=" << parent_id
+                  << " err=" << restore_err
+                  << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
+                  << std::endl;
+        return res;
+      }
+      if (app.tree)
+      {
+        app.tree->tier_on_restore_rebuild();
+      }
+      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore rebuild_done"
+                << " parent_id=" << parent_id
+                << " actual_n_past=" << actual_n_past
+                << std::endl;
+    }
+    else
+    {
+      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore hit"
+                << " parent_id=" << parent_id
+                << " actual_n_past=" << actual_n_past
+                << std::endl;
     }
   }
 
@@ -2075,7 +3016,24 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
   {
     res.success.value = false;
     res.message.value = err;
+    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=fail"
+              << " reason=tree_chat_start_failed"
+              << " parent_id=" << parent_id
+              << " err=" << err
+              << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
+              << std::endl;
     return res;
+  }
+
+  if (!tier_is_valid_slot_id_for_seq(app, node_id))
+  {
+    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=degrade"
+              << " reason=seq_slot_unavailable"
+              << " node_id=" << node_id
+              << " n_seq_max=" << tier_seq_limit(app)
+              << " slot_soft_cap=" << tier_slot_soft_cap(app)
+              << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
+              << std::endl;
   }
 
   if (!app.tree->collect_chat_messages(node_id, res.roles.arr, res.contents.arr, err))
@@ -2096,6 +3054,12 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
 
   res.success.value = true;
   res.node_id.value = node_id;
+  std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=done"
+            << " parent_id=" << parent_id
+            << " node_id=" << node_id
+            << " formatted_chars=" << formatted_chat.size()
+            << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
+            << std::endl;
   return res;
 }
 
@@ -2103,20 +3067,63 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
 {
   PARSE_REQ(glue_msg_tree_chat_finish_req);
   glue_msg_tree_chat_finish_res res;
+  const int32_t node_id = req.node_id.value;
 
   if (!app.tree)
   {
     app.tree = std::make_unique<llama_chat_tree>(app.ctx);
   }
 
+  const auto *target_node = app.tree->find_node(node_id);
+  if (!target_node)
+  {
+    std::string recover_err;
+    if (!app.tree->chat_recover_parent(node_id, recover_err))
+    {
+      res.success.value = false;
+      res.message.value = "Tree node not found: " + std::to_string(node_id);
+      if (!recover_err.empty())
+      {
+        res.message.value += " (recover failed: " + recover_err + ")";
+      }
+      return res;
+    }
+    target_node = app.tree->find_node(node_id);
+    if (!target_node)
+    {
+      res.success.value = false;
+      res.message.value = "Tree node not found after recover: " + std::to_string(node_id);
+      return res;
+    }
+    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_finish phase=node_recovered"
+              << " node_id=" << node_id
+              << std::endl;
+  }
+
   std::vector<int32_t> pruned_ids;
   std::vector<int32_t> deleted_ids;
   std::string err;
   const int32_t n_past = (int32_t)app.tokens.size();
-    const int32_t snapshot_token_bytes = tree_estimate_snapshot_token_bytes(app, n_past);
+  const int32_t snapshot_token_bytes = tree_estimate_snapshot_token_bytes(app, n_past);
+
+  if (!req.aborted_or_error.value && app.tree && app.tree->tier_config().enabled)
+  {
+    std::string ensure_err;
+    if (!tier_ensure_space_for_level(
+            app,
+            LLAMA_CHAT_TREE_CACHE_TIER_L1,
+            n_past,
+            req.node_id.value,
+            ensure_err))
+    {
+      res.success.value = false;
+      res.message.value = "tier ensure-space failed before commit: " + ensure_err;
+      return res;
+    }
+  }
 
   if (!app.tree->chat_finish(
-        req.node_id.value,
+        node_id,
         req.assistant_text.value,
         req.generation_time_ms.value,
         n_past,
@@ -2126,23 +3133,71 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
         deleted_ids,
         err))
   {
-    res.success.value = false;
-    res.message.value = err;
-    return res;
+    if (err.rfind("Tree node not found", 0) == 0)
+    {
+      std::string recover_err;
+      if (app.tree->chat_recover_parent(node_id, recover_err))
+      {
+        pruned_ids.clear();
+        deleted_ids.clear();
+        err.clear();
+        if (app.tree->chat_finish(
+              node_id,
+              req.assistant_text.value,
+              req.generation_time_ms.value,
+              n_past,
+              snapshot_token_bytes,
+              req.aborted_or_error.value,
+              pruned_ids,
+              deleted_ids,
+              err))
+        {
+          std::cerr << "[WLLAMA_CPP_TRACE] action=chat_finish phase=retry_after_recover"
+                    << " node_id=" << node_id
+                    << std::endl;
+        }
+      }
+    }
+
+    if (!err.empty())
+    {
+      res.success.value = false;
+      res.message.value = err;
+      return res;
+    }
   }
 
   auto *mem = llama_get_memory(app.ctx);
   if (!req.aborted_or_error.value)
   {
-    llama_memory_seq_rm(mem, req.node_id.value, -1, -1);
-    llama_memory_seq_cp(mem, 0, req.node_id.value, 0, n_past);
-    app.slot_tokens[req.node_id.value] = app.tokens;
+    std::string alloc_err;
+    const int32_t seq_slot = seq_allocator_ensure_slot_for_node(app, node_id, node_id, alloc_err);
+    if (tier_is_valid_slot_id_for_seq(app, seq_slot))
+    {
+      llama_memory_seq_rm(mem, seq_slot, -1, -1);
+      llama_memory_seq_cp(mem, 0, seq_slot, 0, n_past);
+    }
+    else
+    {
+      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_finish phase=degrade"
+                << " reason=seq_slot_unavailable"
+                << " node_id=" << node_id
+                << " n_seq_max=" << tier_seq_limit(app)
+                << " err=" << alloc_err
+                << std::endl;
+    }
+    app.slot_tokens[node_id] = app.tokens;
     if (app.tree)
     {
-      app.tree->tier_on_slot_saved(req.node_id.value, n_past);
+      app.tree->tier_on_slot_saved(node_id, n_past);
+      if (!tier_is_valid_slot_id_for_seq(app, seq_slot))
+      {
+        app.tree->tier_set_slot_level(node_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+      }
     }
-    tier_touch_slot(app, req.node_id.value);
-    tier_apply_capacity_limits(app, req.node_id.value);
+    tier_touch_slot(app, node_id);
+    tier_apply_capacity_limits(app, node_id);
+    tier_assert_capacity_invariants(app, "action_tree_chat_finish_post_commit");
   }
 
   for (int32_t id : deleted_ids)
@@ -2158,123 +3213,3 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
   return res;
 }
 
-
-// ─────────────────────────────────────────────────────────────
-// KV Cache Slot Operations  (for prefix-tree chat)
-// ─────────────────────────────────────────────────────────────
-
-/**
- * action_kv_seq_save
- *
- * Snapshot the current live sequence (seq_id=0) into slot <slot_id>.
- * Internally we copy seq 0 → slot_id using llama_memory_seq_cp.
- * Any previous snapshot in that slot is freed first.
- *
- * After this call:
- *   - slot_id's KV cells hold a copy of seq 0 (positions 0..n_past-1)
- *   - slot_tokens[slot_id] records the token list for that snapshot
- *   - seq 0 is untouched
- */
-glue_msg_kv_seq_save_res action_kv_seq_save(app_t &app, const char *req_raw)
-{
-  PARSE_REQ(glue_msg_kv_seq_save_req);
-  const int32_t slot_id = req.slot_id.value;
-
-  glue_msg_kv_seq_save_res res;
-
-  if (slot_id < 1)
-  {
-    res.success.value = false;
-    res.message.value = "slot_id must be >= 1";
-    return res;
-  }
-
-  auto *mem = llama_get_memory(app.ctx);
-  const int32_t n_past = (int32_t)app.tokens.size();
-
-  // Free existing snapshot in this slot (if any)
-  llama_memory_seq_rm(mem, slot_id, -1, -1);
-
-  // Copy seq 0 → slot_id for positions [0, n_past)
-  // llama_memory_seq_cp(mem, src_seq, dst_seq, p0, p1)
-  //   copies cells where position is in [p0, p1)
-  llama_memory_seq_cp(mem, 0, slot_id, 0, n_past);
-
-  // Record token list
-  app.slot_tokens[slot_id] = app.tokens;
-  if (app.tree)
-  {
-    app.tree->tier_on_slot_saved(slot_id, n_past);
-  }
-  tier_touch_slot(app, slot_id);
-  tier_apply_capacity_limits(app, slot_id);
-
-  res.success.value = true;
-  res.n_past.value  = n_past;
-  return res;
-}
-
-/**
- * action_kv_seq_restore
- *
- * Restore a previously saved slot back into the live sequence (seq_id=0).
- *
- * Steps:
- *   1. Clear seq 0 from KV cache
- *   2. Copy slot_id → seq 0
- *   3. Trim seq 0 to [0, n_past) in case the slot was longer
- *   4. Restore app.tokens from slot_tokens[slot_id], trimmed to n_past
- */
-glue_msg_kv_seq_restore_res action_kv_seq_restore(app_t &app, const char *req_raw)
-{
-  PARSE_REQ(glue_msg_kv_seq_restore_req);
-  const int32_t slot_id = req.slot_id.value;
-  const int32_t n_past  = req.n_past.value;
-
-  glue_msg_kv_seq_restore_res res;
-
-  if (slot_id < 1)
-  {
-    res.success.value = false;
-    res.message.value = "slot_id must be >= 1";
-    return res;
-  }
-
-  int32_t actual_n_past = 0;
-  std::string restore_err;
-  if (!tier_restore_slot_to_live_seq(app, slot_id, n_past, actual_n_past, restore_err))
-  {
-    res.success.value = false;
-    res.message.value = restore_err;
-    return res;
-  }
-
-  res.success.value = true;
-  res.n_past.value  = actual_n_past;
-  return res;
-}
-
-/**
- * action_kv_seq_rm
- *
- * Release a slot: remove its KV cells and drop its token record.
- */
-glue_msg_kv_seq_rm_res action_kv_seq_rm(app_t &app, const char *req_raw)
-{
-  PARSE_REQ(glue_msg_kv_seq_rm_req);
-  const int32_t slot_id = req.slot_id.value;
-
-  glue_msg_kv_seq_rm_res res;
-
-  if (slot_id < 1)
-  {
-    res.success.value = false;
-    res.message.value = "slot_id must be >= 1";
-    return res;
-  }
-
-  tree_remove_slot(app, slot_id);
-
-  res.success.value = true;
-  return res;
-}

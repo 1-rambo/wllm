@@ -10,6 +10,18 @@ The page runs two modes for comparison:
 - Flat: no tree/slot restore (recompute prefix).
 - Tree: KV slot save/restore to reuse shared prefix.
 
+The benchmark target can now be split and run independently:
+
+- `MMLU` only
+- `HellaSwag` only
+- `MMLU + HellaSwag`
+
+Experiment controls:
+
+- Exp2 (MMLU ablation): `full`, `FCFS`, `Random`, `no-tree`
+- Exp3: cache maintenance profile (time overhead ratio + snapshot/tier token usage)
+- Exp4: concurrent request injection (queue-managed vs direct path, TTFT/tokens-per-second/latency)
+
 ## Run
 
 ```bash
