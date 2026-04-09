@@ -1,6 +1,7 @@
 [submodule "llama.cpp"]
 	path = llama.cpp
 	url = https://github.com/1-rambo/llama.cpp
+	branch = my
 [submodule "test"]
 	path = test
 	url = https://github.com/hendrycks/test
