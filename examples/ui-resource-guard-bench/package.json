@@ -1,5 +1,5 @@
 {
-  "name": "sglang-style-mmlu-hellaswag",
+  "name": "ui-resource-guard-bench",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,16 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@mlc-ai/web-llm": "^0.2.82",
+    "@wllama/wllama": "file:../../",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@webgpu/types": "^0.1.68",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "@webgpu/types": "^0.1.68",
-    "@wllama/wllama": "file:../../",
     "typescript": "^5.5.3",
     "vite": "^5.4.0"
   }

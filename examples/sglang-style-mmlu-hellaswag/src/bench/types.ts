@@ -14,17 +14,22 @@ export interface HellaSwagItem {
 }
 
 export type TreeBackend = 'true-tree';
+export type BenchBackend = 'wllama' | 'web-llm';
 
 export type BenchTarget = 'mmlu' | 'hella' | 'both';
 export type MmluExperimentMode = 'exp1-sequential-once' | 'exp2-random-twice';
+export type ExperimentRunMode = 'exp1' | 'exp2' | 'exp4';
 export type TrueTreeReplacementPolicy = 'hybrid' | 'lru' | 'lfu' | 'size-only' | 'random';
 
 export interface BenchConfig {
+  backend: BenchBackend;
+  webllmModelId: string;
   modelUrl: string;
   nCtx: number;
   nBatch: number;
   treeBackend: TreeBackend;
   target: BenchTarget;
+  experimentRunMode: ExperimentRunMode;
   mmluExperimentMode: MmluExperimentMode;
   randomSeed: number;
   trueTreeMemoryCapMB: number;
@@ -39,8 +44,8 @@ export interface BenchConfig {
   hellaShots: number;
   mmluEvalCount: number;
   hellaEvalCount: number;
-  runExp4: boolean;
   exp4Concurrency: number;
+  exp4SampleCount: number;
   exp4OutputTokens: number;
 }
 
@@ -103,6 +108,10 @@ export interface QueueVsDirectSummary {
   avgLatencyMsDirect: number;
   avgTokensPerSecondQueue: number;
   avgTokensPerSecondDirect: number;
+  batchWallClockMsQueue: number;
+  batchWallClockMsDirect: number;
+  batchTokensPerSecondQueue: number;
+  batchTokensPerSecondDirect: number;
 }
 
 export interface BenchDiagnostics {

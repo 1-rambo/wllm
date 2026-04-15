@@ -588,22 +588,6 @@ glue_msg_decode_res action_decode(app_t &app, const char *req_raw)
   llama_tokens tokens_list = std::move(req.tokens.arr);
   bool skip_logits = req.skip_logits.value;
   const int32_t n_past_base = (int32_t)app.tokens.size();
-  const int64_t t_decode_begin = ggml_time_ms();
-  const bool trace_decode = (!skip_logits) || tokens_list.size() >= 128 || n_past_base == 0;
-  if (trace_decode)
-  {
-    const int32_t n_ctx = app.ctx ? llama_n_ctx(app.ctx) : -1;
-    const int32_t n_batch = app.ctx ? llama_n_batch(app.ctx) : -1;
-    const int32_t n_ubatch = app.ctx ? llama_n_ubatch(app.ctx) : -1;
-    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=begin"
-              << " tokens=" << tokens_list.size()
-              << " skip_logits=" << (skip_logits ? 1 : 0)
-              << " n_past_base=" << n_past_base
-              << " n_ctx=" << n_ctx
-              << " n_batch=" << n_batch
-              << " n_ubatch=" << n_ubatch
-              << std::endl;
-  }
   wcommon_batch_clear(app.batch);
   for (size_t i = 0; i < tokens_list.size(); ++i)
   {
@@ -617,20 +601,7 @@ glue_msg_decode_res action_decode(app_t &app, const char *req_raw)
     app.batch.logits[app.batch.n_tokens - 1] = true;
   }
   glue_msg_decode_res res;
-  if (trace_decode)
-  {
-    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=llama_decode_call_enter"
-              << " batch_tokens=" << app.batch.n_tokens
-              << std::endl;
-  }
   const int decode_ret = llama_decode(app.ctx, app.batch);
-  if (trace_decode)
-  {
-    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=llama_decode_call_return"
-              << " ret=" << decode_ret
-              << " elapsedMs=" << (ggml_time_ms() - t_decode_begin)
-              << std::endl;
-  }
   if (decode_ret != 0)
   {
     const std::string diag = debug_runtime_snapshot(
@@ -643,24 +614,12 @@ glue_msg_decode_res action_decode(app_t &app, const char *req_raw)
     res.success.value = false;
     res.message.value = "llama_decode failed, maybe n_batch is too small? [" + diag + "]";
     res.n_past.value = n_past_base;
-    std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=fail"
-              << " elapsedMs=" << (ggml_time_ms() - t_decode_begin)
-              << " n_past=" << n_past_base
-              << std::endl;
   }
   else
   {
     app.tokens.insert(app.tokens.end(), tokens_list.begin(), tokens_list.end());
     res.success.value = true;
     res.n_past.value = app.tokens.size();
-    const int64_t elapsed = ggml_time_ms() - t_decode_begin;
-    if (trace_decode || elapsed >= 1000)
-    {
-      std::cerr << "[WLLAMA_CPP_TRACE] action=decode phase=done"
-                << " elapsedMs=" << elapsed
-                << " n_past=" << res.n_past.value
-                << std::endl;
-    }
   }
   return res;
 }
@@ -704,7 +663,6 @@ glue_msg_sampling_sample_res action_sampling_sample(app_t &app, const char *req_
 {
   PARSE_REQ(glue_msg_sampling_sample_req);
   int32_t idx = app.batch.n_tokens - 1;
-  const int64_t t_sample_begin = ggml_time_ms();
   const llama_token new_token_id = wcommon_sampler_sample(app.ctx_sampling, app.ctx, idx, false);
   std::string piece = wcommon_token_to_piece(app.ctx, new_token_id);
 
@@ -712,17 +670,6 @@ glue_msg_sampling_sample_res action_sampling_sample(app_t &app, const char *req_
   res.success.value = true;
   res.piece.buf = convert_string_to_buf(piece);
   res.token.value = new_token_id;
-  const int64_t sample_elapsed = ggml_time_ms() - t_sample_begin;
-  if (sample_elapsed >= 20)
-  {
-    std::cerr << "[WLLAMA_CPP_TRACE] action=sampling_sample phase=slow"
-              << " elapsedMs=" << sample_elapsed
-              << " idx=" << idx
-              << " batch_tokens=" << app.batch.n_tokens
-              << " n_past=" << app.tokens.size()
-              << " token=" << new_token_id
-              << std::endl;
-  }
   return res;
 }
 
@@ -2824,15 +2771,6 @@ glue_msg_tree_finish_turn_res action_tree_finish_turn(app_t &app, const char *re
     llama_memory_seq_rm(mem, seq_slot, -1, -1);
     llama_memory_seq_cp(mem, 0, seq_slot, 0, n_past);
   }
-  else
-  {
-    std::cerr << "[WLLAMA_CPP_TRACE] action=finish_turn phase=degrade"
-              << " reason=seq_slot_unavailable"
-              << " node_id=" << req.node_id.value
-              << " n_seq_max=" << tier_seq_limit(app)
-              << " err=" << alloc_err
-              << std::endl;
-  }
   if (app.tree)
   {
     app.tree->tier_on_slot_saved(req.node_id.value, n_past);
@@ -2910,12 +2848,6 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
 {
   PARSE_REQ(glue_msg_tree_chat_start_req);
   glue_msg_tree_chat_start_res res;
-  const int64_t t_chat_start_begin = ggml_time_ms();
-  std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=begin"
-            << " parent_id=" << req.parent_id.value
-            << " user_chars=" << req.user_text.value.size()
-            << " live_tokens=" << app.tokens.size()
-            << std::endl;
 
   // High-level transaction entrypoint.
   if (!app.tree)
@@ -2953,14 +2885,10 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
       res.message.value = "Tree node not found after recover: " + std::to_string(parent_id);
       return res;
     }
-    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=parent_recovered"
-              << " parent_id=" << parent_id
-              << std::endl;
   }
 
   if (parent_id == app.tree->root_id())
   {
-    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore root_reset" << std::endl;
     llama_memory_clear(llama_get_memory(app.ctx), true);
     app.tokens.clear();
   }
@@ -2969,45 +2897,20 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
     int32_t actual_n_past = 0;
     std::string restore_err;
     const int32_t n_past = std::max(0, parent->prefix_token_count);
-    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore begin"
-              << " parent_id=" << parent_id
-              << " requested_n_past=" << n_past
-              << std::endl;
     if (!tier_restore_slot_to_live_seq(app, parent_id, n_past, actual_n_past, restore_err))
     {
       std::cerr << "action_tree_chat_start: parent restore miss for node=" << parent_id
                 << ", fallback to prompt rebuild, err=" << restore_err << std::endl;
-      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore miss"
-                << " parent_id=" << parent_id
-                << " err=" << restore_err
-                << std::endl;
       if (!tier_rebuild_slot_from_tree_prompt(app, parent_id, actual_n_past, restore_err))
       {
         res.success.value = false;
         res.message.value = "KV slot restore and rebuild failed for parent node: " + std::to_string(parent_id) + " (" + restore_err + ")";
-        std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=fail"
-                  << " reason=restore_and_rebuild_failed"
-                  << " parent_id=" << parent_id
-                  << " err=" << restore_err
-                  << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
-                  << std::endl;
         return res;
       }
       if (app.tree)
       {
         app.tree->tier_on_restore_rebuild();
       }
-      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore rebuild_done"
-                << " parent_id=" << parent_id
-                << " actual_n_past=" << actual_n_past
-                << std::endl;
-    }
-    else
-    {
-      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=restore hit"
-                << " parent_id=" << parent_id
-                << " actual_n_past=" << actual_n_past
-                << std::endl;
     }
   }
 
@@ -3016,25 +2919,9 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
   {
     res.success.value = false;
     res.message.value = err;
-    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=fail"
-              << " reason=tree_chat_start_failed"
-              << " parent_id=" << parent_id
-              << " err=" << err
-              << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
-              << std::endl;
     return res;
   }
 
-  if (!tier_is_valid_slot_id_for_seq(app, node_id))
-  {
-    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=degrade"
-              << " reason=seq_slot_unavailable"
-              << " node_id=" << node_id
-              << " n_seq_max=" << tier_seq_limit(app)
-              << " slot_soft_cap=" << tier_slot_soft_cap(app)
-              << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
-              << std::endl;
-  }
 
   if (!app.tree->collect_chat_messages(node_id, res.roles.arr, res.contents.arr, err))
   {
@@ -3054,12 +2941,6 @@ glue_msg_tree_chat_start_res action_tree_chat_start(app_t &app, const char *req_
 
   res.success.value = true;
   res.node_id.value = node_id;
-  std::cerr << "[WLLAMA_CPP_TRACE] action=chat_start phase=done"
-            << " parent_id=" << parent_id
-            << " node_id=" << node_id
-            << " formatted_chars=" << formatted_chat.size()
-            << " elapsedMs=" << (ggml_time_ms() - t_chat_start_begin)
-            << std::endl;
   return res;
 }
 
@@ -3095,9 +2976,6 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
       res.message.value = "Tree node not found after recover: " + std::to_string(node_id);
       return res;
     }
-    std::cerr << "[WLLAMA_CPP_TRACE] action=chat_finish phase=node_recovered"
-              << " node_id=" << node_id
-              << std::endl;
   }
 
   std::vector<int32_t> pruned_ids;
@@ -3141,21 +3019,16 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
         pruned_ids.clear();
         deleted_ids.clear();
         err.clear();
-        if (app.tree->chat_finish(
-              node_id,
-              req.assistant_text.value,
-              req.generation_time_ms.value,
-              n_past,
-              snapshot_token_bytes,
-              req.aborted_or_error.value,
-              pruned_ids,
-              deleted_ids,
-              err))
-        {
-          std::cerr << "[WLLAMA_CPP_TRACE] action=chat_finish phase=retry_after_recover"
-                    << " node_id=" << node_id
-                    << std::endl;
-        }
+        (void)app.tree->chat_finish(
+            node_id,
+            req.assistant_text.value,
+            req.generation_time_ms.value,
+            n_past,
+            snapshot_token_bytes,
+            req.aborted_or_error.value,
+            pruned_ids,
+            deleted_ids,
+            err);
       }
     }
 
@@ -3176,15 +3049,6 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
     {
       llama_memory_seq_rm(mem, seq_slot, -1, -1);
       llama_memory_seq_cp(mem, 0, seq_slot, 0, n_past);
-    }
-    else
-    {
-      std::cerr << "[WLLAMA_CPP_TRACE] action=chat_finish phase=degrade"
-                << " reason=seq_slot_unavailable"
-                << " node_id=" << node_id
-                << " n_seq_max=" << tier_seq_limit(app)
-                << " err=" << alloc_err
-                << std::endl;
     }
     app.slot_tokens[node_id] = app.tokens;
     if (app.tree)

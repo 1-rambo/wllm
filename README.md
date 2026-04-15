@@ -51,6 +51,7 @@ This keeps integration semantics stable for serving workloads and avoids bypassi
 - Prefix-tree chat demo: [examples/prefix-tree-chat](./examples/prefix-tree-chat)
 - Agentic benchmark (A/B serving comparison): [examples/agentic-benchmark-ab](./examples/agentic-benchmark-ab)
 - SGLang-style benchmark (MMLU + HellaSwag): [examples/sglang-style-mmlu-hellaswag](./examples/sglang-style-mmlu-hellaswag)
+- UI isolation benchmark (No-Tech vs Full-Tech): [examples/UI-bench](./examples/UI-bench)
 
 ## Install
 

@@ -717,9 +717,9 @@ function buildMmluQuestionOnlyPrompt(item: MMLUItem): string {
   ].join('\n\n');
 }
 
-function buildHellaChoicePrompt(sharedPrefix: string, item: HellaSwagItem): string {
+function buildHellaQuestionOnlyPrompt(item: HellaSwagItem): string {
   return [
-    sharedPrefix,
+    '### New Question (NOT an example)',
     `Context: ${safeText(item.ctx)}`,
     `A. ${safeText(item.endings[0])}`,
     `B. ${safeText(item.endings[1])}`,
@@ -759,9 +759,10 @@ async function runChoicePrompt(
   mode: 'flat' | 'tree',
   prompt: string,
   signal?: AbortSignal,
-  rootNodeId?: number
+  parentNodeId: number = 0,
+  startedAtMs?: number
 ): Promise<{ predIndex: number; answerText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number }> {
-  const t0 = performance.now();
+  const t0 = startedAtMs ?? performance.now();
   let firstTokenAt = 0;
   const options = {
     nPredict: 1,
@@ -771,25 +772,20 @@ async function runChoicePrompt(
       top_k: 1,
       grammar: 'root ::= "A" | "B" | "C" | "D"',
     },
-    onNewToken: () => {
+    onChunk: () => {
       if (!firstTokenAt) {
         firstTokenAt = performance.now();
       }
     },
   };
 
-  const answerText = mode === 'tree'
-    ? (await chatFromNodeWithBenchTimeout(
-      runtime,
-      rootNodeId ?? 0,
-      prompt,
-      options,
-      `runChoicePrompt/${mode}/chatFromNode`
-    )).assistantText
-    : await withBenchTimeout(
-      runtime.createChatCompletion([{ role: 'user', content: prompt }], options),
-      `runChoicePrompt/${mode}/createChatCompletion`
-    );
+  const answerText = (await chatFromNodeWithBenchTimeout(
+    runtime,
+    parentNodeId,
+    prompt,
+    options,
+    `runChoicePrompt/${mode}/chatFromNode`
+  )).assistantText;
 
   const latencyMs = Math.max(0, performance.now() - t0);
   const ttftMs = Math.max(0, (firstTokenAt || performance.now()) - t0);
@@ -968,26 +964,6 @@ async function runMmlu(
       onLog?.({ text: `[MMLU/${mode}] Exp2 random-twice currently has ${plans.length} subject; randomization is mostly intra-subject.` });
     }
 
-    const optionTokenCandidates = await Promise.all(
-      CHOICE_LABELS.map(async (label) => {
-        const forms = [label, ` ${label}`, `\n${label}`, `(${label})`];
-        const ids = new Set<number>();
-        for (const form of forms) {
-          const toks = await runtime.tokenize(form, true);
-          if (toks.length === 1) {
-            ids.add(toks[0]);
-          }
-        }
-        if (ids.size === 0) {
-          const toks = await runtime.tokenize(label, true);
-          if (toks.length > 0) {
-            ids.add(toks[0]);
-          }
-        }
-        return [...ids];
-      })
-    );
-
     const runQuestionFromNode = async (
       parentNodeId: number,
       questionPrompt: string,
@@ -998,7 +974,7 @@ async function runMmlu(
       answerText: string;
       nativeOutput: string;
       nativeFinalOutput: string;
-      parseSource: 'prompt_final_answer' | 'repair_final_answer' | 'logits_fallback';
+      parseSource: 'prompt_final_answer';
       latencyMs: number;
       ttftMs: number;
       tokensPerSecond: number;
@@ -1019,71 +995,10 @@ async function runMmlu(
         },
       }, `MMLU/${mode}/question/chatFromNode`);
       const nativeOutput = judged.assistantText || '';
-      let nativeFinalOutput = nativeOutput;
-      let bestIdx = parseChoiceIndex(nativeOutput);
-      let parseSource: 'prompt_final_answer' | 'repair_final_answer' | 'logits_fallback' = 'prompt_final_answer';
-
-      if (bestIdx < 0) {
-        const repairPrompt = [
-          'Your previous response is invalid.',
-          'Respond with only one letter (A, B, C, or D) and no explanation.',
-        ].join('\n');
-        const repair = await chatFromNodeWithBenchTimeout(runtime, judged.nodeId, repairPrompt, {
-          nPredict: 16,
-          abortSignal: signal,
-          sampling: {
-            temp: 0,
-            top_k: 10,
-          },
-          onChunk: () => {
-            if (!firstTokenAt) {
-              firstTokenAt = performance.now();
-            }
-          },
-        }, `MMLU/${mode}/question/repairChatFromNode`);
-        nativeFinalOutput = repair.assistantText || '';
-        bestIdx = parseChoiceIndex(nativeFinalOutput);
-        if (bestIdx >= 0) {
-          parseSource = 'repair_final_answer';
-        }
-      }
-
-      if (bestIdx < 0) {
-        const finalStepPrompt = 'Final answer (A/B/C/D):';
-        await chatFromNodeWithBenchTimeout(runtime, judged.nodeId, finalStepPrompt, {
-          nPredict: 0,
-          abortSignal: signal,
-        }, `MMLU/${mode}/question/finalCueChatFromNode`);
-
-        const dist = await getNextTokenDistribution(runtime);
-        firstTokenAt = firstTokenAt || performance.now();
-
-        bestIdx = 0;
-        let bestP = -1;
-        const probs: number[] = [];
-        for (let j = 0; j < optionTokenCandidates.length; j += 1) {
-          let p = 0;
-          for (const tok of optionTokenCandidates[j]) {
-            p = Math.max(p, dist.get(tok) ?? 0);
-          }
-          probs.push(p);
-          if (p > bestP) {
-            bestP = p;
-            bestIdx = j;
-          }
-        }
-
-        nativeFinalOutput = `pA=${probs[0]?.toFixed(6) ?? '0'} pB=${probs[1]?.toFixed(6) ?? '0'} pC=${probs[2]?.toFixed(6) ?? '0'} pD=${probs[3]?.toFixed(6) ?? '0'}`;
-        parseSource = 'logits_fallback';
-      }
-
-      let answerText: string = CHOICE_LABELS[bestIdx];
-      if (parseSource !== 'logits_fallback') {
-        answerText = nativeFinalOutput;
-      }
-      if (parseSource === 'logits_fallback') {
-        answerText = `${answerText}\n[FALLBACK] ${CHOICE_LABELS[bestIdx]}`;
-      }
+      const nativeFinalOutput = nativeOutput;
+      const bestIdx = parseChoiceIndex(nativeOutput);
+      const parseSource: 'prompt_final_answer' = 'prompt_final_answer';
+      const answerText = nativeFinalOutput;
 
       const latency = Math.max(0, performance.now() - startedAt);
       const ttft = Math.max(0, (firstTokenAt || performance.now()) - startedAt);
@@ -1327,30 +1242,6 @@ async function runMmlu(
     onLog?.({ text: `[MMLU/${mode}] subject=${subject} shared prefix chars=${sharedPrefix.length}` });
     let sharedNodeId = 0;
 
-    const optionTokenCandidates = await Promise.all(
-      CHOICE_LABELS.map(async (label) => {
-        // Try multiple textual forms and keep only true single-token candidates.
-        const forms = [label, ` ${label}`, `\n${label}`, `(${label})`];
-        const ids = new Set<number>();
-        for (const form of forms) {
-          const toks = await runtime.tokenize(form, true);
-          if (toks.length === 1) {
-            ids.add(toks[0]);
-          }
-        }
-
-        if (ids.size === 0) {
-          // Fallback: at least keep first token from plain label to avoid empty candidate sets.
-          const toks = await runtime.tokenize(label, true);
-          if (toks.length > 0) {
-            ids.add(toks[0]);
-          }
-        }
-
-        return [...ids];
-      })
-    );
-
     const runQuestionFromNode = async (
       parentNodeId: number,
       questionPrompt: string,
@@ -1360,7 +1251,7 @@ async function runMmlu(
       answerText: string;
       nativeOutput: string;
       nativeFinalOutput: string;
-      parseSource: 'prompt_final_answer' | 'repair_final_answer' | 'logits_fallback';
+      parseSource: 'prompt_final_answer';
       latencyMs: number;
       ttftMs: number;
       tokensPerSecond: number;
@@ -1381,74 +1272,10 @@ async function runMmlu(
         },
       }), `MMLU/${mode}/question/chatFromNode`);
       const nativeOutput = judged.assistantText || '';
-      let nativeFinalOutput = nativeOutput;
-      let bestIdx = parseChoiceIndex(nativeOutput);
-      let parseSource: 'prompt_final_answer' | 'repair_final_answer' | 'logits_fallback' = 'prompt_final_answer';
-
-      // Repair turn: keep free-form output style but enforce final-answer line if missing.
-      if (bestIdx < 0) {
-        const repairPrompt = [
-          'Your previous response is invalid.',
-          'Respond with only one letter (A, B, C, or D) and no explanation.',
-        ].join('\n');
-        const repair = await withBenchTimeout(runtime.chatFromNode(judged.nodeId, repairPrompt, {
-          nPredict: 16,
-          abortSignal: signal,
-          sampling: {
-            temp: 0,
-            top_k: 10,
-          },
-          onChunk: () => {
-            if (!firstTokenAt) {
-              firstTokenAt = performance.now();
-            }
-          },
-        }), `MMLU/${mode}/question/repairChatFromNode`);
-        nativeFinalOutput = repair.assistantText || '';
-        bestIdx = parseChoiceIndex(nativeFinalOutput);
-        if (bestIdx >= 0) {
-          parseSource = 'repair_final_answer';
-        }
-      }
-
-      // Final fallback: infer from logits at a neutral final-answer cue.
-      if (bestIdx < 0) {
-        const finalStepPrompt = 'Final answer (A/B/C/D):';
-        await withBenchTimeout(runtime.chatFromNode(judged.nodeId, finalStepPrompt, {
-          nPredict: 0,
-          abortSignal: signal,
-        }), `MMLU/${mode}/question/finalCueChatFromNode`);
-
-        const dist = await getNextTokenDistribution(runtime);
-        firstTokenAt = firstTokenAt || performance.now();
-
-        bestIdx = 0;
-        let bestP = -1;
-        const probs: number[] = [];
-        for (let j = 0; j < optionTokenCandidates.length; j += 1) {
-          let p = 0;
-          for (const tok of optionTokenCandidates[j]) {
-            p = Math.max(p, dist.get(tok) ?? 0);
-          }
-          probs.push(p);
-          if (p > bestP) {
-            bestP = p;
-            bestIdx = j;
-          }
-        }
-
-        nativeFinalOutput = `pA=${probs[0]?.toFixed(6) ?? '0'} pB=${probs[1]?.toFixed(6) ?? '0'} pC=${probs[2]?.toFixed(6) ?? '0'} pD=${probs[3]?.toFixed(6) ?? '0'}`;
-        parseSource = 'logits_fallback';
-      }
-
-      let answerText: string = CHOICE_LABELS[bestIdx];
-      if (parseSource !== 'logits_fallback') {
-        answerText = nativeFinalOutput;
-      }
-
-      if (parseSource === 'logits_fallback') {
-        answerText = `${answerText}\n[FALLBACK] ${CHOICE_LABELS[bestIdx]}`;
-      }
+      const nativeFinalOutput = nativeOutput;
+      const bestIdx = parseChoiceIndex(nativeOutput);
+      const parseSource: 'prompt_final_answer' = 'prompt_final_answer';
+      const answerText = nativeFinalOutput;
 
       const latency = Math.max(0, performance.now() - startedAt);
       const ttft = Math.max(0, (firstTokenAt || performance.now()) - startedAt);
@@ -1698,6 +1525,7 @@ async function runHella(
   const evalItems = data.slice(shots, shots + evalCount);
   const sharedPrefix = buildHellaSharedPrefix(shotItems);
   let rootNodeId = 0;
+  let sharedNodeId = 0;
   if (mode === 'tree') {
     await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
       treeMemoryCapBytes,
@@ -1710,6 +1538,12 @@ async function runHella(
     ));
     rootNodeId = state.rootId;
     onLog?.({ text: `[Hella/${mode}] chat session ready root=${rootNodeId}` });
+    const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+      nPredict: 0,
+      abortSignal: signal,
+    }), `Hella/${mode}/sharedPrefixChatFromNode`);
+    sharedNodeId = setup.nodeId;
+    onLog?.({ text: `[Hella/${mode}] shared node prepared node=${sharedNodeId}` });
   }
 
   const rows: QAResult[] = [];
@@ -1721,11 +1555,29 @@ async function runHella(
   for (let i = 0; i < evalItems.length; i += 1) {
     assertNotAborted(signal);
     const q = evalItems[i];
-    const prompt = buildHellaChoicePrompt(sharedPrefix, q);
+    const questionPrompt = buildHellaQuestionOnlyPrompt(q);
+    const t0 = performance.now();
     let solved = false;
     for (let attempt = 0; attempt < 2 && !solved; attempt += 1) {
       try {
-        const out = await runChoicePrompt(runtime, mode, prompt, signal, rootNodeId);
+        let out: { predIndex: number; answerText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number };
+        if (mode === 'flat') {
+          await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+            treeMemoryCapBytes,
+            tieredCacheOpts
+          ), `Hella/${mode}/${q.id}/chatSessionInit`));
+          const state = await trackCacheOp(() => withBenchTimeout(
+            runtime.chatGetState(),
+            `Hella/${mode}/${q.id}/chatGetState`
+          ));
+          const setup = await withBenchTimeout(runtime.chatFromNode(state.rootId, sharedPrefix, {
+            nPredict: 0,
+            abortSignal: signal,
+          }), `Hella/${mode}/${q.id}/sharedPrefixChatFromNode`);
+          out = await runChoicePrompt(runtime, mode, questionPrompt, signal, setup.nodeId, t0);
+        } else {
+          out = await runChoicePrompt(runtime, mode, questionPrompt, signal, sharedNodeId, t0);
+        }
         latencyMs.push(out.latencyMs);
         ttftMs.push(out.ttftMs);
         tokensPerSecond.push(out.tokensPerSecond);
@@ -1754,7 +1606,7 @@ async function runHella(
         if (kind === 'timeout' && timeoutDiagCount < 3) {
           timeoutDiagCount += 1;
           const phase = extractBenchTimeoutPhase(msg);
-          onLog?.({ text: `[TimeoutDiag/Hella/${mode}] q=${q.id} attempt=${attempt + 1} phase=${phase} promptChars=${prompt.length} rootNode=${rootNodeId}` });
+          onLog?.({ text: `[TimeoutDiag/Hella/${mode}] q=${q.id} attempt=${attempt + 1} phase=${phase} promptChars=${questionPrompt.length} sharedNode=${sharedNodeId}` });
           await probeTreeState(runtime, `Hella/${mode}/timeout/${q.id}/attempt=${attempt + 1}`, onLog);
         }
         onLog?.({ text: `[Hella/${mode}] ${q.id} attempt=${attempt + 1} failed: ${msg}` });
@@ -1777,6 +1629,11 @@ async function runHella(
               `Hella/${mode}/${q.id}/recover/chatGetState`
             ));
             rootNodeId = state.rootId;
+            const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+              nPredict: 0,
+              abortSignal: signal,
+            }), `Hella/${mode}/${q.id}/recover/sharedPrefixChatFromNode`);
+            sharedNodeId = setup.nodeId;
           }
           onLog?.({ text: `[Hella/${mode}] ${q.id} retrying on recreated runtime` });
           continue;
@@ -1795,6 +1652,11 @@ async function runHella(
               `Hella/${mode}/${q.id}/recover-nonretry/chatGetState`
             ));
             rootNodeId = state.rootId;
+            const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+              nPredict: 0,
+              abortSignal: signal,
+            }), `Hella/${mode}/${q.id}/recover-nonretry/sharedPrefixChatFromNode`);
+            sharedNodeId = setup.nodeId;
           }
         }
 
@@ -1978,6 +1840,7 @@ async function tryGetTreeState(runtime: Wllama): Promise<{
 type RequestPerf = {
   ttftMs: number;
   latencyMs: number;
+  tokenCount: number;
   tokensPerSecond: number;
 };
 
@@ -1985,12 +1848,14 @@ function summarizePerf(rows: RequestPerf[], failed: number): {
   avgTtftMs: number;
   avgLatencyMs: number;
   avgTokensPerSecond: number;
+  totalTokens: number;
   failed: number;
 } {
   return {
     avgTtftMs: avg(rows.map((x) => x.ttftMs)),
     avgLatencyMs: avg(rows.map((x) => x.latencyMs)),
     avgTokensPerSecond: avg(rows.map((x) => x.tokensPerSecond)),
+    totalTokens: rows.reduce((sum, x) => sum + Math.max(0, x.tokenCount), 0),
     failed,
   };
 }
@@ -2005,6 +1870,12 @@ async function runQueueVsDirectMmlu(
 ): Promise<{ summary: QueueVsDirectSummary; wllama: Wllama }> {
   let runtime = wllama;
   let recoveryChain: Promise<void> = Promise.resolve();
+
+  const shouldTraceRequest = (idx: number, total: number): boolean => {
+    if (idx < 3) return true;
+    if (idx === total - 1) return true;
+    return idx % 16 === 0;
+  };
 
   const recoverRuntime = async (badRuntime: Wllama, reason: string): Promise<void> => {
     if (!recoverWllama) {
@@ -2029,58 +1900,85 @@ async function runQueueVsDirectMmlu(
   const timeoutError = (phase: string, requestId: number) =>
     `[Exp4Timeout] ${phase} request=${requestId} timed out after ${EXP4_REQUEST_TIMEOUT_MS}ms`;
 
-  const evalItems = mmluData.slice(config.mmluShots, config.mmluShots + Math.max(1, config.exp4Concurrency));
+  const evalQueue = mmluData.slice(config.mmluShots);
+  const sampleCount = Math.max(1, Number(config.exp4SampleCount) || 1);
+  const evalItems = shuffleWithSeed(evalQueue, config.randomSeed + 404).slice(0, sampleCount);
+  onLog?.({
+    text: `[Exp4] sampling availableEval=${evalQueue.length} requested=${sampleCount} selected=${evalItems.length} seed=${config.randomSeed + 404}`,
+  });
+  if (evalItems.length > 0) {
+    const samplePreview = evalItems.slice(0, 5).map((x) => x.id).join(', ');
+    onLog?.({ text: `[Exp4] samplePreview(first<=5)=${samplePreview}` });
+  }
   const prompts = evalItems.map((q) => [
     'Answer with exactly one letter: A, B, C, or D.',
     mmluQuestionBlock(q, false),
   ].join('\n\n'));
 
-  const runBatch = async (useQueue: boolean): Promise<{ rows: RequestPerf[]; failed: number }> => {
+  const runBatch = async (useQueue: boolean): Promise<{ rows: RequestPerf[]; failed: number; wallClockMs: number }> => {
     const rows: RequestPerf[] = [];
     let failed = 0;
+    const mode = useQueue ? 'queue' : 'direct';
+    const batchStartedAt = performance.now();
+    onLog?.({ text: `[Exp4/${mode}] batchStart requestCount=${prompts.length}` });
 
-    const runOne = async (prompt: string, i: number): Promise<void> => {
+    const runOne = async (prompt: string, i: number, arrivedAtMs: number): Promise<void> => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const activeRuntime = runtime;
-        const t0 = performance.now();
+        const serviceStartedAt = performance.now();
+        const t0 = arrivedAtMs;
         let firstTokenAt = 0;
+        const traced = shouldTraceRequest(i, prompts.length);
+        const queueWaitMs = Math.max(0, serviceStartedAt - arrivedAtMs);
+        if (traced) {
+          onLog?.({ text: `[Exp4/${mode}] request=${i} attempt=${attempt + 1} start queueWaitMs=${queueWaitMs.toFixed(2)}` });
+        }
         try {
-          const options = {
+          const markFirstToken = () => {
+            if (!firstTokenAt) {
+              firstTokenAt = performance.now();
+              if (traced) {
+                onLog?.({ text: `[Exp4/${mode}] request=${i} attempt=${attempt + 1} firstTokenCaptured` });
+              }
+            }
+          };
+
+          const commonOptions = {
             nPredict: Math.max(1, config.exp4OutputTokens),
             abortSignal: signal,
-            onNewToken: () => {
-              if (!firstTokenAt) {
-                firstTokenAt = performance.now();
-              }
+          };
+
+          const treeChatOptions = {
+            ...commonOptions,
+            // chatFromNode surfaces streaming via onChunk.
+            onChunk: () => {
+              markFirstToken();
             },
           };
 
-          let text = '';
-          if (useQueue) {
-            const out = await withTimeout(
+          const text = (
+            await withTimeout(
               (activeRuntime as unknown as {
                 chatFromNode: (parentId: number, userText: string, options: unknown) => Promise<{ assistantText: string }>;
-              }).chatFromNode(0, prompt, options),
+              }).chatFromNode(0, prompt, treeChatOptions),
               EXP4_REQUEST_TIMEOUT_MS,
-              timeoutError('queue', i)
-            );
-            text = out.assistantText;
-          } else {
-            text = await withTimeout(
-              activeRuntime.createChatCompletion(
-                [{ role: 'user', content: prompt }],
-                options
-              ),
-              EXP4_REQUEST_TIMEOUT_MS,
-              timeoutError('direct', i)
-            );
-          }
+              timeoutError(useQueue ? 'queue' : 'direct-tree', i)
+            )
+          ).assistantText;
 
           const latencyMs = Math.max(0, performance.now() - t0);
           const ttftMs = Math.max(0, (firstTokenAt || performance.now()) - t0);
           const tokCount = Math.max(1, (await activeRuntime.tokenize(text, true)).length);
           const tokensPerSecond = (tokCount * 1000) / Math.max(1e-6, latencyMs);
-          rows.push({ ttftMs, latencyMs, tokensPerSecond });
+          if (!firstTokenAt && traced) {
+            onLog?.({ text: `[Exp4/${mode}] request=${i} attempt=${attempt + 1} firstTokenMissingFallback=true` });
+          }
+          rows.push({ ttftMs, latencyMs, tokenCount: tokCount, tokensPerSecond });
+          if (traced) {
+            onLog?.({
+              text: `[Exp4/${mode}] request=${i} attempt=${attempt + 1} done ttftMs=${ttftMs.toFixed(2)} latencyMs=${latencyMs.toFixed(2)} toks=${tokCount} tps=${tokensPerSecond.toFixed(3)}`,
+            });
+          }
           return;
         } catch (err) {
           const retryable = isExp4TimeoutError(err) || isRuntimeDisposedError(err);
@@ -2104,15 +2002,21 @@ async function runQueueVsDirectMmlu(
     };
 
     if (useQueue) {
-      await Promise.all(prompts.map((prompt, i) => runOne(prompt, i)));
+      onLog?.({
+        text: `[Exp4/queue] scheduler=runtime-rfg arrival=simultaneous-at-batchStart submit=all-at-once requestCount=${prompts.length}`,
+      });
+      await Promise.all(prompts.map((prompt, i) => runOne(prompt, i, batchStartedAt)));
     } else {
-      onLog?.({ text: '[Exp4/direct] running sequentially to avoid shared-runtime concurrent context corruption' });
+      onLog?.({ text: '[Exp4/direct] scheduler=fcfs arrival=simultaneous-at-batchStart dispatch=sequential path=chatFromNode' });
       for (let i = 0; i < prompts.length; i += 1) {
-        await runOne(prompts[i], i);
+        await runOne(prompts[i], i, batchStartedAt);
       }
     }
 
-    return { rows, failed };
+    const wallClockMs = Math.max(0, performance.now() - batchStartedAt);
+    onLog?.({ text: `[Exp4/${mode}] batchDone success=${rows.length} failed=${failed} wallClockMs=${wallClockMs.toFixed(2)}` });
+
+    return { rows, failed, wallClockMs };
   };
 
   const queueBatch = await runBatch(true);
@@ -2122,6 +2026,7 @@ async function runQueueVsDirectMmlu(
       EXP4_REQUEST_TIMEOUT_MS,
       `[Exp4Timeout] chatReset timed out after ${EXP4_REQUEST_TIMEOUT_MS}ms`
     );
+    onLog?.({ text: '[Exp4] chatReset done before direct batch' });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     onLog?.({ text: `[Exp4] chatReset failed: ${msg}` });
@@ -2135,6 +2040,10 @@ async function runQueueVsDirectMmlu(
 
   const queueSummary = summarizePerf(queueBatch.rows, queueBatch.failed);
   const directSummary = summarizePerf(directBatch.rows, directBatch.failed);
+  const batchTokensPerSecondQueue =
+    (queueSummary.totalTokens * 1000) / Math.max(1e-6, queueBatch.wallClockMs);
+  const batchTokensPerSecondDirect =
+    (directSummary.totalTokens * 1000) / Math.max(1e-6, directBatch.wallClockMs);
   return {
     wllama: runtime,
     summary: {
@@ -2147,8 +2056,278 @@ async function runQueueVsDirectMmlu(
     avgLatencyMsDirect: directSummary.avgLatencyMs,
     avgTokensPerSecondQueue: queueSummary.avgTokensPerSecond,
     avgTokensPerSecondDirect: directSummary.avgTokensPerSecond,
+    batchWallClockMsQueue: queueBatch.wallClockMs,
+    batchWallClockMsDirect: directBatch.wallClockMs,
+    batchTokensPerSecondQueue,
+    batchTokensPerSecondDirect,
     },
   };
+}
+
+function summarizeSinglePath(
+  benchmark: 'MMLU' | 'HellaSwag',
+  shots: number,
+  evalCount: number,
+  rows: QAResult[],
+  latency: number[],
+  ttft: number[],
+  tps: number[]
+): BenchSummary {
+  const acc = rows.filter((r) => r.correctTree).length / Math.max(1, rows.length);
+  const avgLatency = avg(latency);
+  const avgTtft = avg(ttft);
+  const avgTps = avg(tps);
+  return {
+    benchmark,
+    shots,
+    evalCount,
+    accFlat: acc,
+    accTree: acc,
+    avgTtftMsFlat: avgTtft,
+    avgTtftMsTree: avgTtft,
+    ttftSpeedupPct: 0,
+    avgTokensPerSecondFlat: avgTps,
+    avgTokensPerSecondTree: avgTps,
+    tpsGainPct: 0,
+    avgLatencyMsFlat: avgLatency,
+    avgLatencyMsTree: avgLatency,
+    speedupPct: 0,
+    results: rows,
+  };
+}
+
+async function runWebllmNoCacheChoice(
+  engine: any,
+  prompt: string,
+  options: {
+    maxTokens: number;
+    temperature: number;
+    topP: number;
+    hardConstraintABCD?: boolean;
+  }
+): Promise<{ predIndex: number; answerText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number }> {
+  const t0 = performance.now();
+  let firstTokenAt = 0;
+  let answerText = '';
+  let completionTokens = 0;
+
+  // Ensure strict no-cache semantics per sample.
+  await engine.resetChat();
+
+  const request: Record<string, unknown> = {
+    messages: [{ role: 'user', content: prompt }],
+    temperature: options.temperature,
+    top_p: options.topP,
+    max_tokens: options.maxTokens,
+    stream: true,
+    stream_options: { include_usage: true },
+  };
+  if (options.hardConstraintABCD) {
+    request.response_format = {
+      type: 'grammar',
+      grammar: 'root ::= "A" | "B" | "C" | "D"',
+    };
+  }
+
+  const stream = await engine.chat.completions.create(request);
+
+  for await (const chunk of stream) {
+    const c = chunk as {
+      choices?: Array<{
+        delta?: { content?: string | null };
+      }>;
+      usage?: { completion_tokens?: number };
+    };
+    const delta = c.choices?.[0]?.delta?.content ?? '';
+    if (delta) {
+      if (!firstTokenAt) {
+        firstTokenAt = performance.now();
+      }
+      answerText += delta;
+    }
+    if (typeof c.usage?.completion_tokens === 'number') {
+      completionTokens = c.usage.completion_tokens;
+    }
+  }
+
+  const latencyMs = Math.max(0, performance.now() - t0);
+  const ttftMs = Math.max(0, (firstTokenAt || performance.now()) - t0);
+  if (completionTokens <= 0) {
+    completionTokens = Math.max(1, safeText(answerText).length > 0 ? 1 : 0);
+  }
+  const tokensPerSecond = (completionTokens * 1000) / Math.max(1e-6, latencyMs);
+
+  const predIndex = parseChoiceIndex(answerText);
+  return { predIndex, answerText, latencyMs, ttftMs, tokensPerSecond };
+}
+
+async function runWebllmNoCacheBench(
+  config: BenchConfig,
+  mmluData: MMLUItem[],
+  hellaData: HellaSwagItem[],
+  onLog?: (e: BenchLogEvent) => void,
+  onProgress?: (e: BenchProgressEvent) => void,
+  signal?: AbortSignal
+): Promise<BenchReport> {
+  const webllm = await import('@mlc-ai/web-llm');
+  const runMmluTarget = config.target === 'mmlu' || config.target === 'both';
+  const runHellaTarget = config.target === 'hella' || config.target === 'both';
+  let totalQuestions = 0;
+  if (runMmluTarget && config.mmluEvalCount > 0) {
+    totalQuestions += estimateMmluEvalItemCount(
+      mmluData,
+      config.mmluShots,
+      config.mmluEvalCount,
+      'exp1-sequential-once'
+    );
+  }
+  if (runHellaTarget && config.hellaEvalCount > 0) {
+    totalQuestions += estimateHellaEvalItemCount(hellaData, config.hellaShots, config.hellaEvalCount);
+  }
+
+  let doneQuestions = 0;
+  onProgress?.({ current: 0, total: totalQuestions, label: 'Loading web-llm' });
+  onLog?.({ text: `[web-llm] loading model=${config.webllmModelId}` });
+  const engine = await webllm.CreateMLCEngine(config.webllmModelId, {
+    initProgressCallback: (p: { progress?: number; text?: string }) => {
+      const progressPct = typeof p?.progress === 'number' ? ` ${(p.progress * 100).toFixed(1)}%` : '';
+      onLog?.({ text: `[web-llm/init]${progressPct} ${p?.text ?? ''}`.trim() });
+    },
+  });
+  onLog?.({ text: '[web-llm] model loaded.' });
+
+  const reportQuestionDone = (label: string) => {
+    doneQuestions += 1;
+    onProgress?.({ current: doneQuestions, total: totalQuestions, label });
+  };
+
+  try {
+    let mmluSummary: BenchSummary | undefined;
+    if (runMmluTarget && config.mmluEvalCount > 0) {
+      const grouped = new Map<string, MMLUItem[]>();
+      for (const item of mmluData) {
+        const key = item.subject || 'unknown';
+        const list = grouped.get(key) ?? [];
+        list.push(item);
+        grouped.set(key, list);
+      }
+      const rows: QAResult[] = [];
+      const latencyMs: number[] = [];
+      const ttftMs: number[] = [];
+      const tokensPerSecond: number[] = [];
+
+      for (const [subject, items] of grouped.entries()) {
+        const shotItems = items.slice(0, config.mmluShots);
+        const evalItems = items.slice(config.mmluShots, config.mmluShots + config.mmluEvalCount);
+        if (!evalItems.length) continue;
+
+        const sharedPrefix = buildMmluSharedPrefix(shotItems);
+        for (const q of evalItems) {
+          assertNotAborted(signal);
+          const prompt = [sharedPrefix, buildMmluQuestionOnlyPrompt(q)].join('\n\n');
+          const out = await runWebllmNoCacheChoice(engine, prompt, {
+            maxTokens: 40,
+            temperature: 0.2,
+            topP: 0.9,
+            hardConstraintABCD: false,
+          });
+          const bestIdx = out.predIndex;
+          rows.push({
+            id: q.id,
+            gtIndex: q.answerIndex,
+            predIndexFlat: bestIdx,
+            predIndexTree: bestIdx,
+            correctFlat: bestIdx === q.answerIndex,
+            correctTree: bestIdx === q.answerIndex,
+            explainFlat: `pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'}`,
+            explainTree: `pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'}`,
+          });
+          latencyMs.push(out.latencyMs);
+          ttftMs.push(out.ttftMs);
+          tokensPerSecond.push(out.tokensPerSecond);
+          onLog?.({
+            text: `[MMLU/web-llm] ${q.id} subject=${subject} pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'} gt=${CHOICE_LABELS[q.answerIndex]} raw="${safeText(out.answerText)}"`,
+          });
+          reportQuestionDone('MMLU web-llm');
+        }
+      }
+      mmluSummary = summarizeSinglePath('MMLU', config.mmluShots, rows.length, rows, latencyMs, ttftMs, tokensPerSecond);
+    }
+
+    let hellaSummary: BenchSummary | undefined;
+    if (runHellaTarget && config.hellaEvalCount > 0) {
+      const shotItems = hellaData.slice(0, config.hellaShots);
+      const evalItems = hellaData.slice(config.hellaShots, config.hellaShots + config.hellaEvalCount);
+      const sharedPrefix = buildHellaSharedPrefix(shotItems);
+      const rows: QAResult[] = [];
+      const latencyMs: number[] = [];
+      const ttftMs: number[] = [];
+      const tokensPerSecond: number[] = [];
+
+      for (const q of evalItems) {
+        assertNotAborted(signal);
+        const prompt = [sharedPrefix, buildHellaQuestionOnlyPrompt(q)].join('\n\n');
+        const out = await runWebllmNoCacheChoice(engine, prompt, {
+          maxTokens: 1,
+          temperature: 0,
+          topP: 1,
+          hardConstraintABCD: true,
+        });
+        const bestIdx = out.predIndex;
+        rows.push({
+          id: q.id,
+          gtIndex: q.label,
+          predIndexFlat: bestIdx,
+          predIndexTree: bestIdx,
+          correctFlat: bestIdx === q.label,
+          correctTree: bestIdx === q.label,
+          explainFlat: `pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'}`,
+          explainTree: `pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'}`,
+        });
+        latencyMs.push(out.latencyMs);
+        ttftMs.push(out.ttftMs);
+        tokensPerSecond.push(out.tokensPerSecond);
+        onLog?.({
+          text: `[Hella/web-llm] ${q.id} pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'} gt=${CHOICE_LABELS[q.label]} raw="${safeText(out.answerText)}"`,
+        });
+        reportQuestionDone('Hella web-llm');
+      }
+      hellaSummary = summarizeSinglePath('HellaSwag', config.hellaShots, rows.length, rows, latencyMs, ttftMs, tokensPerSecond);
+    }
+
+    onProgress?.({ current: doneQuestions, total: totalQuestions, label: 'Done' });
+
+    return {
+      modelUrl: config.modelUrl,
+      config,
+      mmlu: mmluSummary,
+      hella: hellaSummary,
+      cacheProfile: {
+        maintenanceMs: 0,
+        runTotalMs: 0,
+        maintenancePct: 0,
+        snapshotTokenBytes: 0,
+        tierL1Tokens: 0,
+        tierL2Tokens: 0,
+        tierL3Tokens: 0,
+      },
+      diagnostics: {
+        runtimeRestartCount: 0,
+        timeoutFailureCount: 0,
+        abortFailureCount: 0,
+        disposedFailureCount: 0,
+        otherFailureCount: 0,
+      },
+    };
+  } finally {
+    try {
+      await engine.unload();
+      onLog?.({ text: '[web-llm] unloaded.' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onLog?.({ text: `[web-llm] unload failed: ${msg}` });
+    }
+  }
 }
 
 export async function runSglangStyleBench(
@@ -2159,6 +2338,10 @@ export async function runSglangStyleBench(
   onProgress?: (e: BenchProgressEvent) => void,
   signal?: AbortSignal
 ): Promise<BenchReport> {
+  if (config.backend === 'web-llm') {
+    return runWebllmNoCacheBench(config, mmluData, hellaData, onLog, onProgress, signal);
+  }
+
   let wllama: Wllama | null = await createLoadedWllama(config, onLog);
   const runStartedAt = performance.now();
   let cacheMaintenanceMs = 0;
@@ -2168,18 +2351,22 @@ export async function runSglangStyleBench(
 
   let totalQuestions = 0;
   let doneQuestions = 0;
+  const runExp4Only = config.experimentRunMode === 'exp4';
+  const activeMmluExperimentMode = config.experimentRunMode === 'exp2'
+    ? 'exp2-random-twice'
+    : 'exp1-sequential-once';
   const runMmluTarget = config.target === 'mmlu' || config.target === 'both';
   const runHellaTarget = config.target === 'hella' || config.target === 'both';
-  if (runMmluTarget && config.mmluEvalCount > 0) {
+  if (!runExp4Only && runMmluTarget && config.mmluEvalCount > 0) {
     const mmluEvalTotal = estimateMmluEvalItemCount(
       mmluData,
       config.mmluShots,
       config.mmluEvalCount,
-      config.mmluExperimentMode
+      activeMmluExperimentMode
     );
-    totalQuestions += config.mmluExperimentMode === 'exp2-random-twice' ? mmluEvalTotal : mmluEvalTotal * 2;
+    totalQuestions += activeMmluExperimentMode === 'exp2-random-twice' ? mmluEvalTotal : mmluEvalTotal * 2;
   }
-  if (runHellaTarget && config.hellaEvalCount > 0) {
+  if (!runExp4Only && runHellaTarget && config.hellaEvalCount > 0) {
     const hellaEvalTotal = estimateHellaEvalItemCount(hellaData, config.hellaShots, config.hellaEvalCount);
     totalQuestions += hellaEvalTotal * 2;
   }
@@ -2217,7 +2404,7 @@ export async function runSglangStyleBench(
   try {
     assertNotAborted(signal);
     const runMmluTree = true;
-    onLog?.({ text: `[Bench] target=${config.target} mmluExperimentMode=${config.mmluExperimentMode}` });
+    onLog?.({ text: `[Bench] target=${config.target} runMode=${config.experimentRunMode} mmluExperimentMode=${activeMmluExperimentMode}` });
     let exp2NodeCacheStats:
       | {
         attempts: number;
@@ -2231,8 +2418,8 @@ export async function runSglangStyleBench(
       | undefined;
 
     let mmluSummary: BenchSummary | undefined;
-    if (runMmluTarget && config.mmluEvalCount > 0) {
-      if (config.mmluExperimentMode === 'exp2-random-twice') {
+    if (!runExp4Only && runMmluTarget && config.mmluEvalCount > 0) {
+      if (activeMmluExperimentMode === 'exp2-random-twice') {
         onLog?.({ text: 'Running MMLU (Exp2 tree-only policy ablation)...' });
         const mmluTree = await runMmlu(
           wllama,
@@ -2241,7 +2428,7 @@ export async function runSglangStyleBench(
           config.mmluEvalCount,
           'tree',
           config,
-          config.mmluExperimentMode,
+          activeMmluExperimentMode,
           config.randomSeed,
           1,
           onLog,
@@ -2278,7 +2465,7 @@ export async function runSglangStyleBench(
           config.mmluEvalCount,
           'flat',
           config,
-          config.mmluExperimentMode,
+          activeMmluExperimentMode,
           config.randomSeed,
           1,
           onLog,
@@ -2295,7 +2482,7 @@ export async function runSglangStyleBench(
         wllama = mmluFlat.wllama;
 
         if (runMmluTree) {
-          onLog?.({ text: `Running MMLU (tree, mode=${config.mmluExperimentMode})...` });
+          onLog?.({ text: `Running MMLU (tree, mode=${activeMmluExperimentMode})...` });
           const mmluTree = await runMmlu(
             wllama,
             mmluData,
@@ -2303,7 +2490,7 @@ export async function runSglangStyleBench(
             config.mmluEvalCount,
             'tree',
             config,
-            config.mmluExperimentMode,
+            activeMmluExperimentMode,
             config.randomSeed,
             1,
             onLog,
@@ -2334,13 +2521,13 @@ export async function runSglangStyleBench(
           );
         }
       }
-    } else if (runMmluTarget) {
+    } else if (!runExp4Only && runMmluTarget) {
       onLog?.({ text: 'Skipping MMLU (mmluEvalCount=0).' });
       mmluSummary = emptySummary('MMLU', config.mmluShots, config.mmluEvalCount);
     }
 
     let hellaSummary: BenchSummary | undefined;
-    if (runHellaTarget && config.hellaEvalCount > 0) {
+    if (!runExp4Only && runHellaTarget && config.hellaEvalCount > 0) {
       onLog?.({ text: 'Running HellaSwag (flat)...' });
       const hellaFlat = await runHella(
         wllama,
@@ -2398,14 +2585,15 @@ export async function runSglangStyleBench(
         hellaFlat.tokensPerSecond,
         hellaTree.tokensPerSecond
       );
-    } else if (runHellaTarget) {
+    } else if (!runExp4Only && runHellaTarget) {
       onLog?.({ text: 'Skipping HellaSwag (hellaEvalCount=0).' });
       hellaSummary = emptySummary('HellaSwag', config.hellaShots, config.hellaEvalCount);
     }
 
     let queueVsDirect: QueueVsDirectSummary | undefined;
-    if (config.runExp4 && runMmluTarget && config.exp4Concurrency > 1 && mmluData.length > config.mmluShots + 1) {
-      onLog?.({ text: `[Exp4] queue vs direct, concurrency=${config.exp4Concurrency}` });
+    const exp4AvailableEvalItems = Math.max(0, mmluData.length - config.mmluShots);
+    if (runExp4Only && runMmluTarget && exp4AvailableEvalItems > 0) {
+      onLog?.({ text: `[Exp4] queue vs direct, concurrency=${config.exp4Concurrency}, sampleCount=${config.exp4SampleCount}` });
       const exp4 = await runQueueVsDirectMmlu(
         wllama,
         mmluData,
@@ -2421,8 +2609,12 @@ export async function runSglangStyleBench(
       );
       queueVsDirect = exp4.summary;
       wllama = exp4.wllama;
-    } else if (!config.runExp4) {
-      onLog?.({ text: '[Exp4] skipped (runExp4=false) to keep Test2/Test3 non-concurrent.' });
+    } else if (runExp4Only && runMmluTarget) {
+      onLog?.({ text: '[Exp4] skipped because there are no evaluable MMLU rows after shots.' });
+    } else if (runExp4Only && !runMmluTarget) {
+      onLog?.({ text: '[Exp4] skipped because target has no MMLU.' });
+    } else if (!runExp4Only) {
+      onLog?.({ text: '[Exp4] skipped because runMode is not exp4.' });
     }
 
     onProgress?.({ current: Math.min(doneQuestions, totalQuestions), total: totalQuestions, label: 'Done' });

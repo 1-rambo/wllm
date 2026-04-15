@@ -1,0 +1,177 @@
+:root {
+  --bg1: #f8fbff;
+  --bg2: #eef7f2;
+  --panel: #ffffffde;
+  --line: #c9d9e9;
+  --text: #123047;
+  --accent: #146c43;
+  --accent-2: #259c5e;
+  --warn: #8a3a00;
+  font-family: 'Avenir Next', 'PingFang SC', 'Microsoft Yahei', sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 12% 12%, var(--bg1) 0%, var(--bg2) 62%, #fdf7eb 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 32px;
+}
+
+.hero p {
+  margin: 10px 0 0;
+  line-height: 1.6;
+}
+
+.panel {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 14px;
+  backdrop-filter: blur(2px);
+}
+
+h2 {
+  margin: 0 0 10px;
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+label span {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #a8bfd8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.actionRow {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  color: #fff;
+  font-weight: 700;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+button.ghost {
+  background: #eaf3ff;
+  color: #194565;
+  border: 1px solid #bcd3eb;
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.status {
+  font-weight: 700;
+}
+
+.badge {
+  margin-left: auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid #d4e2f0;
+  background: #f3f9ff;
+  font-size: 12px;
+}
+
+.hint {
+  margin-top: 8px;
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.vizCanvas {
+  width: 100%;
+  height: 210px;
+  border-radius: 10px;
+  border: 1px solid #d5e3ef;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid #d8e4ef;
+  padding: 8px;
+  font-size: 13px;
+}
+
+th {
+  background: #f4f9ff;
+}
+
+.logBox {
+  border: 1px solid #cfdeed;
+  border-radius: 8px;
+  background: #f8fbff;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.logLine {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  border-bottom: 1px dashed #dae7f2;
+  padding: 2px 0;
+}
+
+@media (max-width: 880px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .badge {
+    margin-left: 0;
+  }
+}

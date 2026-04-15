@@ -16,6 +16,13 @@ The benchmark target can now be split and run independently:
 - `HellaSwag` only
 - `MMLU + HellaSwag`
 
+Backends:
+
+- `wllama`: existing flat/tree comparison path.
+- `web-llm (no cache)`: Exp1-aligned no-cache path for filling cross-framework rows.
+	- For this backend, each sample is run as a fresh request and does not reuse prior chat context.
+	- Run mode is forced to `exp1` semantics.
+
 Experiment controls:
 
 - Exp2 (MMLU ablation): `full`, `FCFS`, `Random`, `no-tree`

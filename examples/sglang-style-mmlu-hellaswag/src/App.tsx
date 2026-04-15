@@ -7,17 +7,20 @@ import {
   loadRealMmluFromLocal,
 } from './bench/data-real';
 import { runSglangStyleBench } from './bench/runner';
-import type { BenchConfig, BenchProgressEvent, BenchReport, BenchTarget, QAResult } from './bench/types';
+import type { BenchBackend, BenchConfig, BenchProgressEvent, BenchReport, BenchTarget, ExperimentRunMode, QAResult } from './bench/types';
 
-const MODEL_BASE_DIR = '/Users/rambo/Desktop/wllama-webgpu/examples/agentic-benchmark-ab/public';
+const MODEL_BASE_DIR = '/Users/rambo/Desktop/wllama-webgpu/model';
 const MODEL_FILE = 'Llama-3.2-1B-Instruct-Q4_0.gguf';
 
 const DEFAULT_CONFIG: BenchConfig = {
+  backend: 'wllama',
+  webllmModelId: 'Llama-3.2-1B-Instruct-q4f32_1-MLC',
   modelUrl: `${window.location.origin}/@fs${encodeURI(`${MODEL_BASE_DIR}/${MODEL_FILE}`)}`,
   nCtx: 8192,
   nBatch: 512,
   treeBackend: 'true-tree',
   target: 'mmlu',
+  experimentRunMode: 'exp1',
   mmluExperimentMode: 'exp1-sequential-once',
   randomSeed: 42,
   trueTreeMemoryCapMB: 4096,
@@ -32,9 +35,9 @@ const DEFAULT_CONFIG: BenchConfig = {
   hellaShots: 20,
   mmluEvalCount: 1,
   hellaEvalCount: 1,
-  runExp4: false,
   exp4Concurrency: 4,
-  exp4OutputTokens: 32,
+  exp4SampleCount: 256,
+  exp4OutputTokens: 1,
 };
 
 const DEFAULT_HELLA_URL = '/datasets/hellaswag/hellaswag_val.jsonl';
@@ -83,9 +86,15 @@ function rowsMismatched(rows: QAResult[]): QAResult[] {
 function reportSummaryLines(report: BenchReport): string[] {
   const lines: string[] = [];
   const INT32_MAX = 2147483647;
+  const isWebllmNoCache = report.config.backend === 'web-llm';
   if (report.mmlu) {
     const isMmluExp2 = report.config.mmluExperimentMode === 'exp2-random-twice';
-    if (isMmluExp2) {
+    if (isWebllmNoCache) {
+      lines.push(`[MMLU/web-llm-no-cache] acc=${(report.mmlu.accTree * 100).toFixed(2)}%`);
+      lines.push(`[MMLU/web-llm-no-cache] ttft=${report.mmlu.avgTtftMsTree.toFixed(2)}ms`);
+      lines.push(`[MMLU/web-llm-no-cache] latency=${report.mmlu.avgLatencyMsTree.toFixed(2)}ms`);
+      lines.push(`[MMLU/web-llm-no-cache] tokens/s=${report.mmlu.avgTokensPerSecondTree.toFixed(2)}`);
+    } else if (isMmluExp2) {
       lines.push(`[MMLU/Exp2] acc(tree)=${(report.mmlu.accTree * 100).toFixed(2)}%`);
       lines.push(`[MMLU/Exp2] ttft(tree)=${report.mmlu.avgTtftMsTree.toFixed(2)}ms`);
       lines.push(`[MMLU/Exp2] latency(tree)=${report.mmlu.avgLatencyMsTree.toFixed(2)}ms`);
@@ -98,10 +107,17 @@ function reportSummaryLines(report: BenchReport): string[] {
     }
   }
   if (report.hella) {
-    lines.push(`[Hella] acc(flat/tree)=${(report.hella.accFlat * 100).toFixed(2)}%/${(report.hella.accTree * 100).toFixed(2)}%`);
-    lines.push(`[Hella] ttft(flat/tree)=${report.hella.avgTtftMsFlat.toFixed(2)}ms/${report.hella.avgTtftMsTree.toFixed(2)}ms`);
-    lines.push(`[Hella] latency(flat/tree)=${report.hella.avgLatencyMsFlat.toFixed(2)}ms/${report.hella.avgLatencyMsTree.toFixed(2)}ms`);
-    lines.push(`[Hella] speedup=${report.hella.speedupPct.toFixed(2)}% ttftSpeedup=${report.hella.ttftSpeedupPct.toFixed(2)}%`);
+    if (isWebllmNoCache) {
+      lines.push(`[Hella/web-llm-no-cache] acc=${(report.hella.accTree * 100).toFixed(2)}%`);
+      lines.push(`[Hella/web-llm-no-cache] ttft=${report.hella.avgTtftMsTree.toFixed(2)}ms`);
+      lines.push(`[Hella/web-llm-no-cache] latency=${report.hella.avgLatencyMsTree.toFixed(2)}ms`);
+      lines.push(`[Hella/web-llm-no-cache] tokens/s=${report.hella.avgTokensPerSecondTree.toFixed(2)}`);
+    } else {
+      lines.push(`[Hella] acc(flat/tree)=${(report.hella.accFlat * 100).toFixed(2)}%/${(report.hella.accTree * 100).toFixed(2)}%`);
+      lines.push(`[Hella] ttft(flat/tree)=${report.hella.avgTtftMsFlat.toFixed(2)}ms/${report.hella.avgTtftMsTree.toFixed(2)}ms`);
+      lines.push(`[Hella] latency(flat/tree)=${report.hella.avgLatencyMsFlat.toFixed(2)}ms/${report.hella.avgLatencyMsTree.toFixed(2)}ms`);
+      lines.push(`[Hella] speedup=${report.hella.speedupPct.toFixed(2)}% ttftSpeedup=${report.hella.ttftSpeedupPct.toFixed(2)}%`);
+    }
   }
   if (report.cacheProfile) {
     lines.push(`[Exp3] maintenance=${report.cacheProfile.maintenanceMs.toFixed(2)}ms total=${report.cacheProfile.runTotalMs.toFixed(2)}ms ratio=${report.cacheProfile.maintenancePct.toFixed(4)}%`);
@@ -112,6 +128,8 @@ function reportSummaryLines(report: BenchReport): string[] {
     lines.push(`[Exp4] requestCount=${report.queueVsDirect.requestCount} failed(queue/direct)=${report.queueVsDirect.failedCountQueue}/${report.queueVsDirect.failedCountDirect}`);
     lines.push(`[Exp4] ttft(queue/direct)=${report.queueVsDirect.avgTtftMsQueue.toFixed(2)}ms/${report.queueVsDirect.avgTtftMsDirect.toFixed(2)}ms`);
     lines.push(`[Exp4] latency(queue/direct)=${report.queueVsDirect.avgLatencyMsQueue.toFixed(2)}ms/${report.queueVsDirect.avgLatencyMsDirect.toFixed(2)}ms`);
+    lines.push(`[Exp4] avgReqTps(queue/direct)=${report.queueVsDirect.avgTokensPerSecondQueue.toFixed(3)}/${report.queueVsDirect.avgTokensPerSecondDirect.toFixed(3)}`);
+    lines.push(`[Exp4] batchTps(queue/direct)=${report.queueVsDirect.batchTokensPerSecondQueue.toFixed(3)}/${report.queueVsDirect.batchTokensPerSecondDirect.toFixed(3)} wallClockMs(queue/direct)=${report.queueVsDirect.batchWallClockMsQueue.toFixed(2)}/${report.queueVsDirect.batchWallClockMsDirect.toFixed(2)}`);
   }
   if (report.diagnostics) {
     lines.push(`[Diag] restarts=${report.diagnostics.runtimeRestartCount} failures(timeout/abort/disposed/other)=${report.diagnostics.timeoutFailureCount}/${report.diagnostics.abortFailureCount}/${report.diagnostics.disposedFailureCount}/${report.diagnostics.otherFailureCount}`);
@@ -162,16 +180,22 @@ export default function App() {
   const [progress, setProgress] = useState<BenchProgressEvent>({ current: 0, total: 0, label: 'Idle' });
   const logsRef = useRef<string[]>([]);
   const metricLinesRef = useRef<string[]>([]);
+  const effectiveTarget = cfg.experimentRunMode === 'exp1' ? cfg.target : 'mmlu';
+  const isHellaOnlyMode = effectiveTarget === 'hella';
+  const isExp4Mode = cfg.experimentRunMode === 'exp4';
   const progressPct = progress.total > 0
     ? Math.min(100, Math.max(0, (progress.current / progress.total) * 100))
     : 0;
 
   const canRun = useMemo(() => {
-    const needHella = cfg.target === 'hella' || cfg.target === 'both';
+    const needHella = effectiveTarget === 'hella' || effectiveTarget === 'both';
+    const hasBackendModel = cfg.backend === 'wllama'
+      ? cfg.modelUrl.trim().length > 0
+      : cfg.webllmModelId.trim().length > 0;
     return !running
-      && cfg.modelUrl.trim().length > 0
+      && hasBackendModel
       && (!needHella || hellaDataUrl.trim().length > 0);
-  }, [running, cfg.modelUrl, cfg.target, hellaDataUrl]);
+  }, [running, cfg.backend, cfg.modelUrl, cfg.webllmModelId, effectiveTarget, hellaDataUrl]);
 
   const appendLog = (text: string) => {
     const line = `[${new Date().toISOString()}] ${text}`;
@@ -193,6 +217,29 @@ export default function App() {
 
     try {
       const effectiveCfg: BenchConfig = { ...cfg };
+      if (effectiveCfg.backend === 'web-llm') {
+        if (effectiveCfg.experimentRunMode !== 'exp1') {
+          appendLog('[Mode] web-llm backend only supports Exp1-style no-cache path; run mode forced to exp1.');
+        }
+        effectiveCfg.experimentRunMode = 'exp1';
+        effectiveCfg.mmluExperimentMode = 'exp1-sequential-once';
+      }
+      if (effectiveCfg.experimentRunMode === 'exp2') {
+        if (effectiveCfg.target !== 'mmlu') {
+          appendLog('[Mode] Exp2 runs MMLU only; target forced to mmlu.');
+        }
+        effectiveCfg.target = 'mmlu';
+        effectiveCfg.mmluExperimentMode = 'exp2-random-twice';
+      } else if (effectiveCfg.experimentRunMode === 'exp4') {
+        if (effectiveCfg.target !== 'mmlu') {
+          appendLog('[Mode] Exp4 runs MMLU only; target forced to mmlu.');
+        }
+        effectiveCfg.target = 'mmlu';
+        effectiveCfg.mmluExperimentMode = 'exp1-sequential-once';
+      } else {
+        effectiveCfg.mmluExperimentMode = 'exp1-sequential-once';
+      }
+
       const runMmluTarget = effectiveCfg.target === 'mmlu' || effectiveCfg.target === 'both';
       const runHellaTarget = effectiveCfg.target === 'hella' || effectiveCfg.target === 'both';
       let mmluSubjectsToRun = [mmluSubject];
@@ -247,8 +294,22 @@ export default function App() {
 
       if (!runMmluTarget) {
         effectiveCfg.mmluEvalCount = 0;
-      } else if (effectiveCfg.mmluExperimentMode === 'exp2-random-twice' && !runFullDataset) {
+      } else if (effectiveCfg.experimentRunMode === 'exp2' && !runFullDataset) {
         appendLog('Exp2 is using a single MMLU subject; random order is mostly intra-subject. Enable Run Full Dataset for cross-subject mixing.');
+      } else if (effectiveCfg.experimentRunMode === 'exp4' && !runFullDataset) {
+        const counts = await getLocalMmluSubjectCounts(mmluSubject);
+        const desiredSamples = Math.max(1, effectiveCfg.exp4SampleCount);
+        const autoEvalCount = Math.max(1, Math.min(desiredSamples, counts.testCount));
+        effectiveCfg.mmluEvalCount = autoEvalCount;
+        if (autoEvalCount < desiredSamples) {
+          appendLog(
+            `[Exp4] sampleCount=${desiredSamples} exceeds available test rows=${counts.testCount} for subject=${mmluSubject}; clamped to ${autoEvalCount}.`
+          );
+        } else {
+          appendLog(
+            `[Exp4] auto-set mmluEvalCount=${autoEvalCount} from exp4SampleCount=${desiredSamples}.`
+          );
+        }
       }
 
       let mmlu: Awaited<ReturnType<typeof loadRealMmluFromLocal>> = [];
@@ -363,11 +424,14 @@ export default function App() {
       const header = [
         `timestamp: ${new Date().toISOString()}`,
         `error: ${errText}`,
+        `backend: ${cfg.backend}`,
+        `webllmModelId: ${cfg.webllmModelId}`,
         `modelUrl: ${cfg.modelUrl}`,
         `nCtx: ${cfg.nCtx}`,
         `nBatch: ${cfg.nBatch}`,
         `treeBackend: ${cfg.treeBackend}`,
         `target: ${cfg.target}`,
+        `experimentRunMode: ${cfg.experimentRunMode}`,
         `mmluExperimentMode: ${cfg.mmluExperimentMode}`,
         `randomSeed: ${cfg.randomSeed}`,
         `trueTreeMemoryCapMB: ${cfg.trueTreeMemoryCapMB}`,
@@ -382,8 +446,8 @@ export default function App() {
         `hellaShots: ${cfg.hellaShots}`,
         `mmluEvalCount: ${cfg.mmluEvalCount}`,
         `hellaEvalCount: ${cfg.hellaEvalCount}`,
-        `runExp4: ${cfg.runExp4}`,
         `exp4Concurrency: ${cfg.exp4Concurrency}`,
+        `exp4SampleCount: ${cfg.exp4SampleCount}`,
         `exp4OutputTokens: ${cfg.exp4OutputTokens}`,
         `runFullDataset: ${runFullDataset}`,
         `mmluSubject: ${mmluSubject}`,
@@ -397,11 +461,14 @@ export default function App() {
         timestamp: new Date().toISOString(),
         error: errText,
         config: {
+          backend: cfg.backend,
+          webllmModelId: cfg.webllmModelId,
           modelUrl: cfg.modelUrl,
           nCtx: cfg.nCtx,
           nBatch: cfg.nBatch,
           treeBackend: cfg.treeBackend,
           target: cfg.target,
+          experimentRunMode: cfg.experimentRunMode,
           mmluExperimentMode: cfg.mmluExperimentMode,
           randomSeed: cfg.randomSeed,
           trueTreeMemoryCapMB: cfg.trueTreeMemoryCapMB,
@@ -416,8 +483,8 @@ export default function App() {
           hellaShots: cfg.hellaShots,
           mmluEvalCount: cfg.mmluEvalCount,
           hellaEvalCount: cfg.hellaEvalCount,
-          runExp4: cfg.runExp4,
           exp4Concurrency: cfg.exp4Concurrency,
+          exp4SampleCount: cfg.exp4SampleCount,
           exp4OutputTokens: cfg.exp4OutputTokens,
           runFullDataset,
           mmluSubject,
@@ -433,7 +500,8 @@ export default function App() {
     }
   };
 
-  const isMmluExp2 = cfg.mmluExperimentMode === 'exp2-random-twice';
+  const isMmluExp2 = (report?.config.experimentRunMode ?? cfg.experimentRunMode) === 'exp2';
+  const isWebllmNoCache = (report?.config.backend ?? cfg.backend) === 'web-llm';
   const mmluDiff = isMmluExp2 ? [] : rowsMismatched(report?.mmlu?.results ?? []);
   const hellaDiff = rowsMismatched(report?.hella?.results ?? []);
 
@@ -450,12 +518,32 @@ export default function App() {
       <section className="panel">
         <h2>配置</h2>
         <label>
+          <span>Backend</span>
+          <select
+            value={cfg.backend}
+            onChange={(e) => setCfg((p) => ({ ...p, backend: e.target.value as BenchBackend }))}
+            disabled={running}
+          >
+            <option value="wllama">wllama</option>
+            <option value="web-llm">web-llm (no cache)</option>
+          </select>
+        </label>
+        <label>
           <span>Model URL</span>
           <input
             className="text-input"
             value={cfg.modelUrl}
             onChange={(e) => setCfg((p) => ({ ...p, modelUrl: e.target.value }))}
-            disabled={running}
+            disabled={running || cfg.backend !== 'wllama'}
+          />
+        </label>
+        <label>
+          <span>web-llm Model ID</span>
+          <input
+            className="text-input"
+            value={cfg.webllmModelId}
+            onChange={(e) => setCfg((p) => ({ ...p, webllmModelId: e.target.value }))}
+            disabled={running || cfg.backend !== 'web-llm'}
           />
         </label>
         <label>
@@ -468,11 +556,23 @@ export default function App() {
           />
         </label>
         <label>
+          <span>Run Mode</span>
+          <select
+            value={cfg.experimentRunMode}
+            onChange={(e) => setCfg((p) => ({ ...p, experimentRunMode: e.target.value as ExperimentRunMode }))}
+            disabled={running}
+          >
+            <option value="exp1">Exp1: Flat vs Tree</option>
+            <option value="exp2">Exp2: Random x2 (Tree-only)</option>
+            <option value="exp4">Exp4: Queue vs Direct</option>
+          </select>
+        </label>
+        <label>
           <span>Target</span>
           <select
             value={cfg.target}
             onChange={(e) => setCfg((p) => ({ ...p, target: e.target.value as BenchTarget }))}
-            disabled={running}
+            disabled={running || cfg.experimentRunMode !== 'exp1'}
           >
             <option value="mmlu">MMLU</option>
             <option value="hella">HellaSwag</option>
@@ -480,15 +580,8 @@ export default function App() {
           </select>
         </label>
         <label>
-          <span>MMLU Experiment Mode</span>
-          <select
-            value={cfg.mmluExperimentMode}
-            onChange={(e) => setCfg((p) => ({ ...p, mmluExperimentMode: e.target.value as BenchConfig['mmluExperimentMode'] }))}
-            disabled={running || cfg.target === 'hella'}
-          >
-            <option value="exp1-sequential-once">Exp1: Sequential x1</option>
-            <option value="exp2-random-twice">Exp2: Random x2</option>
-          </select>
+          <span>Effective Target</span>
+          <input className="text-input" value={effectiveTarget} disabled />
         </label>
         <label>
           <span>MMLU Subject (local CSV)</span>
@@ -496,7 +589,7 @@ export default function App() {
             className="text-input"
             value={mmluSubject}
             onChange={(e) => setMmluSubject(e.target.value.trim())}
-            disabled={running || cfg.target === 'hella' || (cfg.mmluEvalCount === 0 && !runFullDataset)}
+            disabled={running || isHellaOnlyMode || (cfg.mmluEvalCount === 0 && !runFullDataset)}
           />
         </label>
         <label>
@@ -505,7 +598,7 @@ export default function App() {
             className="text-input"
             value={hellaDataUrl}
             onChange={(e) => setHellaDataUrl(e.target.value)}
-            disabled={running || cfg.target === 'mmlu'}
+            disabled={running || effectiveTarget === 'mmlu'}
           />
         </label>
 
@@ -630,7 +723,7 @@ export default function App() {
               type="number"
               value={cfg.nCtx}
               onChange={(e) => setCfg((p) => ({ ...p, nCtx: Math.max(1024, Number(e.target.value) || 8192) }))}
-              disabled={running}
+              disabled={running || cfg.backend !== 'wllama'}
             />
           </label>
           <label>
@@ -640,7 +733,7 @@ export default function App() {
               type="number"
               value={cfg.nBatch}
               onChange={(e) => setCfg((p) => ({ ...p, nBatch: Math.max(64, Number(e.target.value) || 512) }))}
-              disabled={running}
+              disabled={running || cfg.backend !== 'wllama'}
             />
           </label>
           <label>
@@ -660,7 +753,7 @@ export default function App() {
               type="number"
               value={cfg.hellaShots}
               onChange={(e) => setCfg((p) => ({ ...p, hellaShots: Math.max(1, Number(e.target.value) || 20) }))}
-              disabled={running || cfg.target === 'mmlu'}
+              disabled={running || effectiveTarget === 'mmlu'}
             />
           </label>
         </div>
@@ -673,7 +766,7 @@ export default function App() {
               type="number"
               value={cfg.mmluEvalCount}
               onChange={(e) => setCfg((p) => ({ ...p, mmluEvalCount: Math.max(0, Number(e.target.value) || 0) }))}
-              disabled={running}
+              disabled={running || isExp4Mode}
             />
           </label>
           <label>
@@ -683,21 +776,12 @@ export default function App() {
               type="number"
               value={cfg.hellaEvalCount}
               onChange={(e) => setCfg((p) => ({ ...p, hellaEvalCount: Math.max(1, Number(e.target.value) || 4) }))}
-              disabled={running || cfg.target === 'mmlu'}
+              disabled={running || effectiveTarget === 'mmlu'}
             />
           </label>
         </div>
 
         <div className="row4">
-          <label>
-            <span>Run Exp4 (Concurrent Injection)</span>
-            <input
-              type="checkbox"
-              checked={cfg.runExp4}
-              onChange={(e) => setCfg((p) => ({ ...p, runExp4: e.target.checked }))}
-              disabled={running || cfg.target === 'hella'}
-            />
-          </label>
           <label>
             <span>Random Seed (MMLU Exp)</span>
             <input
@@ -715,7 +799,17 @@ export default function App() {
               type="number"
               value={cfg.exp4Concurrency}
               onChange={(e) => setCfg((p) => ({ ...p, exp4Concurrency: Math.max(1, Number(e.target.value) || 4) }))}
-              disabled={running || cfg.target === 'hella' || !cfg.runExp4}
+              disabled={running || !isExp4Mode}
+            />
+          </label>
+          <label>
+            <span>Exp4 Sample Count</span>
+            <input
+              className="text-input"
+              type="number"
+              value={cfg.exp4SampleCount}
+              onChange={(e) => setCfg((p) => ({ ...p, exp4SampleCount: Math.max(1, Number(e.target.value) || 256) }))}
+              disabled={running || !isExp4Mode}
             />
           </label>
           <label>
@@ -725,7 +819,7 @@ export default function App() {
               type="number"
               value={cfg.exp4OutputTokens}
               onChange={(e) => setCfg((p) => ({ ...p, exp4OutputTokens: Math.max(1, Number(e.target.value) || 32) }))}
-              disabled={running || cfg.target === 'hella' || !cfg.runExp4}
+              disabled={running || !isExp4Mode}
             />
           </label>
         </div>
@@ -762,12 +856,12 @@ export default function App() {
             <section className="panel">
               <h2>MMLU Summary</h2>
               <div className="grid3">
-                <div>Tree acc: {pct01(report.mmlu.accTree)}</div>
-                <div>Tree TTFT: {ms(report.mmlu.avgTtftMsTree)}</div>
-                <div>Tree tokens/s: {tps(report.mmlu.avgTokensPerSecondTree)}</div>
-                <div>Tree avg latency: {ms(report.mmlu.avgLatencyMsTree)}</div>
+                <div>{isWebllmNoCache ? 'web-llm(no-cache) acc' : 'Tree acc'}: {pct01(report.mmlu.accTree)}</div>
+                <div>{isWebllmNoCache ? 'web-llm(no-cache) TTFT' : 'Tree TTFT'}: {ms(report.mmlu.avgTtftMsTree)}</div>
+                <div>{isWebllmNoCache ? 'web-llm(no-cache) tokens/s' : 'Tree tokens/s'}: {tps(report.mmlu.avgTokensPerSecondTree)}</div>
+                <div>{isWebllmNoCache ? 'web-llm(no-cache) avg latency' : 'Tree avg latency'}: {ms(report.mmlu.avgLatencyMsTree)}</div>
                 <div>Eval count: {report.mmlu.evalCount}</div>
-                {isMmluExp2 ? null : (
+                {isMmluExp2 || isWebllmNoCache ? null : (
                   <>
                     <div>Flat acc: {pct01(report.mmlu.accFlat)}</div>
                     <div>Tree latency speedup: {speed(report.mmlu.speedupPct)}</div>
@@ -786,17 +880,28 @@ export default function App() {
             <section className="panel">
               <h2>HellaSwag Summary</h2>
               <div className="grid3">
-                <div>Flat acc: {pct01(report.hella.accFlat)}</div>
-                <div>Tree acc: {pct01(report.hella.accTree)}</div>
-                <div>Tree latency speedup: {speed(report.hella.speedupPct)}</div>
-                <div>Flat TTFT: {ms(report.hella.avgTtftMsFlat)}</div>
-                <div>Tree TTFT: {ms(report.hella.avgTtftMsTree)}</div>
-                <div>Tree TTFT speedup: {speed(report.hella.ttftSpeedupPct)}</div>
-                <div>Flat tokens/s: {tps(report.hella.avgTokensPerSecondFlat)}</div>
-                <div>Tree tokens/s: {tps(report.hella.avgTokensPerSecondTree)}</div>
-                <div>Tree tokens/s gain: {speed(report.hella.tpsGainPct)}</div>
-                <div>Flat avg latency: {ms(report.hella.avgLatencyMsFlat)}</div>
-                <div>Tree avg latency: {ms(report.hella.avgLatencyMsTree)}</div>
+                {isWebllmNoCache ? (
+                  <>
+                    <div>web-llm(no-cache) acc: {pct01(report.hella.accTree)}</div>
+                    <div>web-llm(no-cache) TTFT: {ms(report.hella.avgTtftMsTree)}</div>
+                    <div>web-llm(no-cache) tokens/s: {tps(report.hella.avgTokensPerSecondTree)}</div>
+                    <div>web-llm(no-cache) avg latency: {ms(report.hella.avgLatencyMsTree)}</div>
+                  </>
+                ) : (
+                  <>
+                    <div>Flat acc: {pct01(report.hella.accFlat)}</div>
+                    <div>Tree acc: {pct01(report.hella.accTree)}</div>
+                    <div>Tree latency speedup: {speed(report.hella.speedupPct)}</div>
+                    <div>Flat TTFT: {ms(report.hella.avgTtftMsFlat)}</div>
+                    <div>Tree TTFT: {ms(report.hella.avgTtftMsTree)}</div>
+                    <div>Tree TTFT speedup: {speed(report.hella.ttftSpeedupPct)}</div>
+                    <div>Flat tokens/s: {tps(report.hella.avgTokensPerSecondFlat)}</div>
+                    <div>Tree tokens/s: {tps(report.hella.avgTokensPerSecondTree)}</div>
+                    <div>Tree tokens/s gain: {speed(report.hella.tpsGainPct)}</div>
+                    <div>Flat avg latency: {ms(report.hella.avgLatencyMsFlat)}</div>
+                    <div>Tree avg latency: {ms(report.hella.avgLatencyMsTree)}</div>
+                  </>
+                )}
                 <div>Eval count: {report.hella.evalCount}</div>
               </div>
             </section>
@@ -828,8 +933,12 @@ export default function App() {
                 <div>Direct avg TTFT: {ms(report.queueVsDirect.avgTtftMsDirect)}</div>
                 <div>Queue avg latency: {ms(report.queueVsDirect.avgLatencyMsQueue)}</div>
                 <div>Direct avg latency: {ms(report.queueVsDirect.avgLatencyMsDirect)}</div>
-                <div>Queue avg tokens/s: {tps(report.queueVsDirect.avgTokensPerSecondQueue)}</div>
-                <div>Direct avg tokens/s: {tps(report.queueVsDirect.avgTokensPerSecondDirect)}</div>
+                <div>Queue avg request tokens/s: {tps(report.queueVsDirect.avgTokensPerSecondQueue)}</div>
+                <div>Direct avg request tokens/s: {tps(report.queueVsDirect.avgTokensPerSecondDirect)}</div>
+                <div>Queue batch tokens/s: {tps(report.queueVsDirect.batchTokensPerSecondQueue)}</div>
+                <div>Direct batch tokens/s: {tps(report.queueVsDirect.batchTokensPerSecondDirect)}</div>
+                <div>Queue batch wall-clock: {ms(report.queueVsDirect.batchWallClockMsQueue)}</div>
+                <div>Direct batch wall-clock: {ms(report.queueVsDirect.batchWallClockMsDirect)}</div>
               </div>
             </section>
           ) : null}
@@ -847,7 +956,7 @@ export default function App() {
             </section>
           ) : null}
 
-          {report.mmlu && !isMmluExp2 ? (
+          {report.mmlu && !isMmluExp2 && !isWebllmNoCache ? (
             <section className="panel">
               <h2>MMLU Disagreement (Flat vs Tree)</h2>
               <p>Count: {mmluDiff.length}</p>
@@ -876,7 +985,7 @@ export default function App() {
             </section>
           ) : null}
 
-          {report.hella ? (
+          {report.hella && !isWebllmNoCache ? (
             <section className="panel">
               <h2>HellaSwag Disagreement (Flat vs Tree)</h2>
               <p>Count: {hellaDiff.length}</p>
