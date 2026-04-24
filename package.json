@@ -10,6 +10,7 @@
   "scripts": {
     "serve": "node ./scripts/http_server.js",
     "serve:mt": "MULTITHREAD=1 node ./scripts/http_server.js",
+    "example:ui-stability-bench": "npm --prefix examples/ui-stability-bench run dev",
     "clean": "rm -rf ./esm && rm -rf ./docs && rm -rf ./wasm",
     "build:worker": "./scripts/build_worker.sh",
     "build:glue": "node ./cpp/generate_glue_prototype.js",

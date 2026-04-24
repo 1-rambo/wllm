@@ -1206,6 +1206,11 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       },
       {
         "type": "arr_int",
+        "name": "cache_tier_levels",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
         "name": "snapshot_token_bytes",
         "isNullable": false
       },
@@ -1565,6 +1570,123 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       }
     ]
   },
+  "tchi_req": {
+    "name": "tchi_req",
+    "structName": "glue_msg_tree_cache_hint_req",
+    "className": "GlueMsgTreeCacheHintReq",
+    "fields": [
+      {
+        "type": "arr_int",
+        "name": "hot_node_ids",
+        "isNullable": false
+      },
+      {
+        "type": "float",
+        "name": "queue_pressure",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchi_res": {
+    "name": "tchi_res",
+    "structName": "glue_msg_tree_cache_hint_res",
+    "className": "GlueMsgTreeCacheHintRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchr_req": {
+    "name": "tchr_req",
+    "structName": "glue_msg_tree_chat_resume_req",
+    "className": "GlueMsgTreeChatResumeReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchr_res": {
+    "name": "tchr_res",
+    "structName": "glue_msg_tree_chat_resume_res",
+    "className": "GlueMsgTreeChatResumeRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "restore_cache_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "rebuild_prompt_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "resumed_prefix_token_count",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchp_req": {
+    "name": "tchp_req",
+    "structName": "glue_msg_tree_chat_checkpoint_req",
+    "className": "GlueMsgTreeChatCheckpointReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "assistant_text",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "generation_time_ms",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchp_res": {
+    "name": "tchp_res",
+    "structName": "glue_msg_tree_chat_checkpoint_res",
+    "className": "GlueMsgTreeChatCheckpointRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
   "tchs_req": {
     "name": "tchs_req",
     "structName": "glue_msg_tree_chat_start_req",
@@ -1600,6 +1722,135 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "int",
         "name": "node_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "restore_cache_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "rebuild_prompt_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "parent_recover_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "start_overhead_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "restore_attempted",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "restore_hit",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "rebuild_used",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "roles",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "contents",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "formatted_chat",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchh_req": {
+    "name": "tchh_req",
+    "structName": "glue_msg_tree_chat_start_hist_req",
+    "className": "GlueMsgTreeChatStartHistReq",
+    "fields": [
+      {
+        "type": "arr_str",
+        "name": "roles",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "contents",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "user_text",
+        "isNullable": false
+      }
+    ]
+  },
+  "tchh_res": {
+    "name": "tchh_res",
+    "structName": "glue_msg_tree_chat_start_hist_res",
+    "className": "GlueMsgTreeChatStartHistRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "node_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "restore_cache_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "rebuild_prompt_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "parent_recover_ms",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "start_overhead_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "restore_attempted",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "restore_hit",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "rebuild_used",
         "isNullable": false
       },
       {
@@ -2088,6 +2339,7 @@ export interface GlueMsgTreeStateRes {
   prefix_token_counts: number[];
   generation_time_ms: number[];
   cached_token_counts: number[];
+  cache_tier_levels: number[];
   snapshot_token_bytes: number[];
   created_at_s: number[];
   last_accessed_at_s: number[];
@@ -2198,6 +2450,51 @@ export interface GlueMsgTreeResetRes {
   message: string;
 }
 
+// struct glue_msg_tree_cache_hint_req
+export interface GlueMsgTreeCacheHintReq {
+  _name: "tchi_req";
+  hot_node_ids: number[];
+  queue_pressure: number;
+}
+
+// struct glue_msg_tree_cache_hint_res
+export interface GlueMsgTreeCacheHintRes {
+  _name: "tchi_res";
+  success: boolean;
+  message: string;
+}
+
+// struct glue_msg_tree_chat_resume_req
+export interface GlueMsgTreeChatResumeReq {
+  _name: "tchr_req";
+  node_id: number;
+}
+
+// struct glue_msg_tree_chat_resume_res
+export interface GlueMsgTreeChatResumeRes {
+  _name: "tchr_res";
+  success: boolean;
+  message: string;
+  restore_cache_ms: number;
+  rebuild_prompt_ms: number;
+  resumed_prefix_token_count: number;
+}
+
+// struct glue_msg_tree_chat_checkpoint_req
+export interface GlueMsgTreeChatCheckpointReq {
+  _name: "tchp_req";
+  node_id: number;
+  assistant_text: string;
+  generation_time_ms: number;
+}
+
+// struct glue_msg_tree_chat_checkpoint_res
+export interface GlueMsgTreeChatCheckpointRes {
+  _name: "tchp_res";
+  success: boolean;
+  message: string;
+}
+
 // struct glue_msg_tree_chat_start_req
 export interface GlueMsgTreeChatStartReq {
   _name: "tchs_req";
@@ -2211,6 +2508,39 @@ export interface GlueMsgTreeChatStartRes {
   success: boolean;
   message: string;
   node_id: number;
+  restore_cache_ms: number;
+  rebuild_prompt_ms: number;
+  parent_recover_ms: number;
+  start_overhead_ms: number;
+  restore_attempted: boolean;
+  restore_hit: boolean;
+  rebuild_used: boolean;
+  roles: string[];
+  contents: string[];
+  formatted_chat: string;
+}
+
+// struct glue_msg_tree_chat_start_hist_req
+export interface GlueMsgTreeChatStartHistReq {
+  _name: "tchh_req";
+  roles: string[];
+  contents: string[];
+  user_text: string;
+}
+
+// struct glue_msg_tree_chat_start_hist_res
+export interface GlueMsgTreeChatStartHistRes {
+  _name: "tchh_res";
+  success: boolean;
+  message: string;
+  node_id: number;
+  restore_cache_ms: number;
+  rebuild_prompt_ms: number;
+  parent_recover_ms: number;
+  start_overhead_ms: number;
+  restore_attempted: boolean;
+  restore_hit: boolean;
+  rebuild_used: boolean;
   roles: string[];
   contents: string[];
   formatted_chat: string;
@@ -2233,4 +2563,4 @@ export interface GlueMsgTreeChatFinishRes {
 }
 
 
-export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes | GlueMsgTreeInitReq | GlueMsgTreeInitRes | GlueMsgTreeStateReq | GlueMsgTreeStateRes | GlueMsgTreeSwitchReq | GlueMsgTreeSwitchRes | GlueMsgTreePrepareTurnReq | GlueMsgTreePrepareTurnRes | GlueMsgTreeFinishTurnReq | GlueMsgTreeFinishTurnRes | GlueMsgTreeDeleteReq | GlueMsgTreeDeleteRes | GlueMsgTreeResetReq | GlueMsgTreeResetRes | GlueMsgTreeChatStartReq | GlueMsgTreeChatStartRes | GlueMsgTreeChatFinishReq | GlueMsgTreeChatFinishRes;
+export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes | GlueMsgTreeInitReq | GlueMsgTreeInitRes | GlueMsgTreeStateReq | GlueMsgTreeStateRes | GlueMsgTreeSwitchReq | GlueMsgTreeSwitchRes | GlueMsgTreePrepareTurnReq | GlueMsgTreePrepareTurnRes | GlueMsgTreeFinishTurnReq | GlueMsgTreeFinishTurnRes | GlueMsgTreeDeleteReq | GlueMsgTreeDeleteRes | GlueMsgTreeResetReq | GlueMsgTreeResetRes | GlueMsgTreeCacheHintReq | GlueMsgTreeCacheHintRes | GlueMsgTreeChatResumeReq | GlueMsgTreeChatResumeRes | GlueMsgTreeChatCheckpointReq | GlueMsgTreeChatCheckpointRes | GlueMsgTreeChatStartReq | GlueMsgTreeChatStartRes | GlueMsgTreeChatStartHistReq | GlueMsgTreeChatStartHistRes | GlueMsgTreeChatFinishReq | GlueMsgTreeChatFinishRes;

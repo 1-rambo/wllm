@@ -345,35 +345,6 @@ export default function App() {
     return `${payload}\n\n${payload}\n${payload}`;
   }, []);
 
-  // const normalizeHistoryForBase = useCallback((raw: WllamaChatMessage[]): {
-  //   safe: WllamaChatMessage[];
-  //   droppedDanglingUser: boolean;
-  // } => {
-  //   const safe: WllamaChatMessage[] = [];
-  //   let pendingUser: WllamaChatMessage | null = null;
-
-  //   for (const msg of raw) {
-  //     if (msg.role === 'system') {
-  //       continue;
-  //     }
-  //     if (msg.role === 'user') {
-  //       pendingUser = msg;
-  //       continue;
-  //     }
-  //     if (msg.role === 'assistant') {
-  //       if (pendingUser) {
-  //         safe.push(pendingUser, msg);
-  //         pendingUser = null;
-  //       }
-  //     }
-  //   }
-
-  //   return {
-  //     safe,
-  //     droppedDanglingUser: pendingUser !== null,
-  //   };
-  // }, []);
-
   const runAutoScenario = useCallback(async (
     manager: PrefixTreeManagerImpl,
     abortController: AbortController,

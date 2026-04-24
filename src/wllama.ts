@@ -33,7 +33,11 @@ import type {
   GlueMsgTestPerplexityRes,
   GlueMsgTokenizeRes,
   GlueMsgTreeDeleteRes,
+  GlueMsgTreeChatCheckpointRes,
   GlueMsgTreeChatFinishRes,
+  GlueMsgTreeCacheHintRes,
+  GlueMsgTreeChatResumeRes,
+  GlueMsgTreeChatStartHistRes,
   GlueMsgTreeChatStartRes,
   GlueMsgTreeInitRes,
   GlueMsgTreeResetRes,
@@ -49,6 +53,19 @@ const MAX_SAFE_N_SEQ_MAX = 256;
 const MIN_CTX_PER_SEQUENCE = 1024;
 const DEFAULT_ENGINE_CHAT_SERVICE_UPPER_BOUND_MS = 30000;
 const DEFAULT_ENGINE_CHAT_QUEUE_MAX_PENDING = 128;
+const DEFAULT_ENGINE_CHAT_SLICE_TOKEN_BUDGET = 128;
+const DEFAULT_ENGINE_CHAT_EVICTION_HINT_TOP_K = 4;
+const DEFAULT_ENGINE_CHAT_COST_PREFILL_PER_TOKEN_MS = 3;
+const DEFAULT_ENGINE_CHAT_COST_DECODE_PER_TOKEN_MS = 4;
+const DEFAULT_ENGINE_CHAT_COST_POST_MS = 2;
+const DEFAULT_ENGINE_CHAT_PREFILL_SLICE_MAX_MS = 5000;
+const DEFAULT_ENGINE_CHAT_COST_RESTORE_L1_PER_TOKEN_MS = 0.02;
+const DEFAULT_ENGINE_CHAT_COST_RESTORE_L2_PER_TOKEN_MS = 0.5;
+const DEFAULT_ENGINE_CHAT_COST_RESTORE_L3_PER_TOKEN_MS = 2;
+const DEFAULT_ENGINE_CHAT_COST_REBUILD_PER_TOKEN_MS = 4;
+const DEFAULT_ENGINE_CHAT_COST_PARENT_RECOVER_MS = 1;
+const DEFAULT_ENGINE_CHAT_COST_WARMUP_REQUESTS = 20;
+const DEFAULT_ENGINE_CHAT_COST_SAMPLE_WINDOW = 256;
 
 export interface WllamaLogger {
   debug: typeof console.debug;
@@ -110,6 +127,90 @@ export interface WllamaConfig {
    * Default: 128
    */
   engineChatQueueMaxPending?: number;
+  /**
+   * Maximum token budget per serve slice for long generation requests.
+   *
+  * Default: 128
+   */
+  engineChatSliceTokenBudget?: number;
+  /**
+   * Number of queued parent nodes sent to native cache-hint path.
+   *
+   * Default: 4
+   */
+  engineChatEvictionHintTopK?: number;
+  /**
+   * Estimated prefill cost per prompt token (ms).
+   *
+   * Default: 3
+   */
+  engineChatPrefillCostPerTokenMs?: number;
+  /**
+   * Legacy alias of `engineChatPrefillCostPerTokenMs`.
+   */
+  engineChatPrefillCostPerUnitMs?: number;
+  /**
+   * Estimated decode cost per generated token (ms).
+   *
+   * Default: 4
+   */
+  engineChatDecodeCostPerTokenMs?: number;
+  /**
+   * Estimated post-processing cost (ms).
+   *
+   * Default: 2
+   */
+  engineChatPostCostMs?: number;
+  /**
+   * Maximum wall time budget of one prefill round for very long prompts (ms).
+   *
+   * Default: 5000
+   */
+  engineChatPrefillSliceMaxMs?: number;
+  /**
+   * Estimated L1 restore cost per token (ms).
+   */
+  engineChatRestoreL1CostPerTokenMs?: number;
+  /**
+   * Estimated L2 restore/replay cost per token (ms).
+   */
+  engineChatRestoreL2CostPerTokenMs?: number;
+  /**
+   * Estimated L3 restore/readback cost per token (ms).
+   */
+  engineChatRestoreL3CostPerTokenMs?: number;
+  /**
+   * Estimated rebuild cost per token (ms).
+   */
+  engineChatRebuildCostPerTokenMs?: number;
+  /**
+   * Legacy alias of `engineChatRestoreL2CostPerTokenMs`.
+   */
+  engineChatCacheMoveCostPerUnitMs?: number;
+  /**
+   * Legacy alias of `engineChatRebuildCostPerTokenMs`.
+   */
+  engineChatRebuildCostPerUnitMs?: number;
+  /**
+   * Estimated parent-recover fixed overhead cost (ms).
+   *
+   * Default: 1
+   */
+  engineChatParentRecoverCostMs?: number;
+  /**
+   * Number of completed requests recorded before enabling time estimation.
+   * During warmup, queue records observations only and uses conservative
+   * upper-bound service time for budgeting.
+   *
+   * Default: 20
+   */
+  engineChatCostWarmupRequests?: number;
+  /**
+   * Max number of recent observations retained for online fitting.
+   *
+   * Default: 256
+   */
+  engineChatCostSampleWindow?: number;
   /**
    * Enable detailed engine-chat tracing logs for diagnosing random stalls/timeouts.
    *
@@ -304,6 +405,7 @@ export interface WllamaTreeNode {
   prefixTokenCount: number;
   generationTimeMs: number;
   cachedTokenCount: number;
+  cacheTierLevel: number;
   snapshotTokenBytes: number;
   createdAt: number;
   lastAccessedAt: number;
@@ -367,19 +469,105 @@ export interface WllamaChatFromNodeOptions extends ChatCompletionOptions {
 
 export interface WllamaChatSessionOptions extends WllamaChatFromNodeOptions {}
 
+type EngineChatRestoreSource = 'none' | 'l1' | 'l2' | 'l3' | 'rebuild';
+
+interface EngineChatPreparedPrompt {
+  prompt: string;
+  promptTokens: number[];
+  promptTokenCount: number;
+  parentNodeId?: number | undefined;
+  parentPrefixTokens: number;
+  restoreSource: EngineChatRestoreSource;
+  restoredPrefixTokens: number;
+  rebuiltPrefixTokens: number;
+  promptTailTokens: number;
+  estimatedParentRecoverMs: number;
+}
+
+interface EngineChatRuntime {
+  nodeId: number;
+  stage: 'prefill' | 'decode';
+  prompt: string;
+  promptTokens: number[];
+  remainingPromptTokens: number[];
+  samplingHistoryTokens: number[];
+  assistantText: string;
+  generatedTokenIds: number[];
+  generatedTokensLimit: number;
+  generatedTokensSoFar: number;
+  startedAt: number;
+  firstTokenAt?: number;
+  cacheLoadMs: number;
+  rebuildMs: number;
+  parentRecoverMs: number;
+  startOverheadMs: number;
+  accumulatedPrefillMs: number;
+  accumulatedDecodeMs: number;
+  restoredPrefixTokens: number;
+  rebuiltPrefixTokens: number;
+  restoreSource: EngineChatRestoreSource;
+  promptTokenCount: number;
+  promptTailTokenCount: number;
+  resumedPrefixTokenCount: number;
+}
+
 interface EngineChatRequest {
   id: number;
-  parentId: number;
+  parentId?: number | undefined;
+  baseHistory?: WllamaChatMessage[] | undefined;
   userText: string;
   options: WllamaChatFromNodeOptions;
+  queueType: 'normal' | 'overdue';
   enqueuedAt: number;
   nAheadAtEnqueue: number;
+  estimatedServiceMs: number;
+  estimatedPrefillMs: number;
+  estimatedDecodeMs: number;
+  estimatedPostMs: number;
+  estimatedCacheMoveMs: number;
+  estimatedRebuildMs: number;
+  estimatedParentRecoverMs: number;
+  estimatedPromptTokens: number;
+  estimatedPromptTailTokens: number;
+  estimatedRestoredPrefixTokens: number;
+  estimatedRebuiltPrefixTokens: number;
+  estimatedRestoreSource: EngineChatRestoreSource;
+  targetPredictTokens: number;
+  generatedTokens: number;
+  sliceCount: number;
   baselineWorkMs: number;
   waitBudgetMs: number;
-  processingStartedAt?: number;
+  processingStartedAt?: number | undefined;
+  preparedPrompt?: EngineChatPreparedPrompt | undefined;
+  runtime?: EngineChatRuntime | undefined;
   resolve: (value: { nodeId: number; assistantText: string; state: WllamaTreeState }) => void;
   reject: (reason?: unknown) => void;
-  cleanupAbort?: () => void;
+  cleanupAbort?: (() => void) | undefined;
+}
+
+interface EngineChatDetailedResult {
+  text: string;
+  generatedTokens: number;
+  stoppedByEog: boolean;
+  stoppedByStopToken: boolean;
+  aborted: boolean;
+  prefillMs: number;
+  decodeMs: number;
+}
+
+interface EngineChatCostObservation {
+  promptTailTokens: number;
+  decodeTokens: number;
+  restoredPrefixTokens: number;
+  restoredFromTier: 0 | 1 | 2 | 3;
+  rebuiltPrefixTokens: number;
+  prefillMs: number;
+  decodeMs: number;
+  postMs: number;
+  cacheLoadMs: number;
+  rebuildMs: number;
+  parentRecoverMs: number;
+  totalServiceMs: number;
 }
 
 /**
@@ -445,8 +633,19 @@ export class Wllama {
   private decoderStartToken: number = -1;
   private nCachedTokens: number = 0;
   private nextEngineChatRequestId: number = 1;
-  private engineChatQueue: EngineChatRequest[] = [];
+  private engineChatNormalQueue: EngineChatRequest[] = [];
+  private engineChatOverdueQueue: EngineChatRequest[] = [];
   private engineChatQueueRunning: boolean = false;
+  private engineChatCostObservations: EngineChatCostObservation[] = [];
+  private engineChatCostObservedCount: number = 0;
+  private engineChatLearnedPrefillCostPerTokenMs?: number;
+  private engineChatLearnedDecodeCostPerTokenMs?: number;
+  private engineChatLearnedPostCostMs?: number;
+  private engineChatLearnedRestoreL1CostPerTokenMs?: number;
+  private engineChatLearnedRestoreL2CostPerTokenMs?: number;
+  private engineChatLearnedRestoreL3CostPerTokenMs?: number;
+  private engineChatLearnedRebuildCostPerTokenMs?: number;
+  private engineChatLearnedParentRecoverCostMs?: number;
 
   constructor(pathConfig: AssetsPathConfig, wllamaConfig: WllamaConfig = {}) {
     checkEnvironmentCompatible();
@@ -970,57 +1169,137 @@ export class Wllama {
     prompt: string,
     options: ChatCompletionOptions
   ): Promise<string> {
+    const detail = await this.createCompletionDetailed(prompt, options);
+    return detail.text;
+  }
+
+  private async createCompletionDetailed(
+    prompt: string,
+    options: ChatCompletionOptions
+  ): Promise<EngineChatDetailedResult> {
     this.checkModelLoaded();
+    const stagePrefillWallStart = Date.now();
     this.samplingConfig = options.sampling ?? {};
     await this.samplingInit(this.samplingConfig);
+    await this.resetPerfContext();
     const stopTokens = new Set(options.stopTokens ?? []);
-    // process prompt
+
     let tokens = await this.tokenize(prompt, true);
     if (this.addBosToken && tokens[0] !== this.bosToken) {
       tokens.unshift(this.bosToken);
     }
-    // maybe reuse KV cache
+
     if (options.useCache) {
       tokens = await this.computeNonCachedTokens(tokens);
     } else {
       await this.kvClear();
     }
-    // decode/encode tokens
-    await this.samplingAccept(tokens);
-    if (this.isEncoderDecoderArchitecture()) {
-      await this.encode(tokens);
-      await this.decode([this.getDecoderStartToken()], {});
-    } else {
-      await this.decode(tokens, {});
-    }
+
+    await this.prefillPromptWithTimeSlices(tokens, options.abortSignal);
+
     let outBuf = new Uint8Array();
-    // abort signal
-    let abort = false;
-    // abortSignalFn is a legacy function, use options.abortSignal instead
+    let generatedTokens = 0;
+    let aborted = false;
+    let stoppedByEog = false;
+    let stoppedByStopToken = false;
+
     const abortSignalFn = () => {
-      abort = true;
+      aborted = true;
     };
-    // predict next tokens
-    for (let i = 0; i < (options.nPredict ?? Infinity); i++) {
+
+    const stageDecodeWallStart = Date.now();
+
+    const maxPredict = options.nPredict ?? Infinity;
+    for (let i = 0; i < maxPredict; i++) {
       const sampled = await this.samplingSample();
-      if (this.isTokenEOG(sampled.token) || stopTokens.has(sampled.token)) {
-        break; // stop token
+      if (this.isTokenEOG(sampled.token)) {
+        stoppedByEog = true;
+        break;
       }
+      if (stopTokens.has(sampled.token)) {
+        stoppedByStopToken = true;
+        break;
+      }
+
       // @ts-ignore Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'Uint8Array<ArrayBuffer>'
       outBuf = joinBuffers([outBuf, sampled.piece]);
+      generatedTokens += 1;
+
       if (options.onNewToken) {
         options.onNewToken(sampled.token, sampled.piece, bufToText(outBuf), {
-          abortSignal: abortSignalFn, // legacy
+          abortSignal: abortSignalFn,
         });
       }
-      if (abort || options.abortSignal?.aborted) {
-        break; // abort signal is set
+      if (aborted || options.abortSignal?.aborted) {
+        aborted = true;
+        break;
       }
-      // decode next token
+
       await this.samplingAccept([sampled.token]);
       await this.decode([sampled.token], {});
     }
-    return bufToText(outBuf);
+
+    const perf = await this.getPerfContext();
+    const measuredPrefillMs =
+      Number.isFinite(perf?.t_p_eval_ms) && (perf?.t_p_eval_ms ?? 0) > 0
+        ? perf.t_p_eval_ms
+        : Math.max(0, stageDecodeWallStart - stagePrefillWallStart);
+    const measuredDecodeMs =
+      Number.isFinite(perf?.t_eval_ms) && (perf?.t_eval_ms ?? 0) > 0
+        ? perf.t_eval_ms
+        : Math.max(0, Date.now() - stageDecodeWallStart);
+
+    return {
+      text: bufToText(outBuf),
+      generatedTokens,
+      stoppedByEog,
+      stoppedByStopToken,
+      aborted,
+      prefillMs: measuredPrefillMs,
+      decodeMs: measuredDecodeMs,
+    };
+  }
+
+  private async prefillPromptWithTimeSlices(
+    tokens: number[],
+    abortSignal?: AbortSignal
+  ): Promise<void> {
+    if (tokens.length === 0) {
+      return;
+    }
+
+    const roundBudgetMs = this.getEngineChatPrefillSliceMaxMs();
+    const chunkSize = Math.max(1, this.loadedContextInfo?.n_batch ?? 1);
+    const completionOpts = abortSignal ? { abortSignal } : {};
+    let cursor = 0;
+
+    while (cursor < tokens.length) {
+      const roundStartedAt = Date.now();
+      while (cursor < tokens.length) {
+        if (abortSignal?.aborted) {
+          throw new WllamaAbortError();
+        }
+
+        const end = Math.min(tokens.length, cursor + chunkSize);
+        const chunk = tokens.slice(cursor, end);
+        await this.samplingAccept(chunk);
+
+        if (this.isEncoderDecoderArchitecture()) {
+          await this.encode(chunk, completionOpts);
+        } else {
+          await this.decode(chunk, completionOpts);
+        }
+
+        cursor = end;
+        if (cursor < tokens.length && Date.now() - roundStartedAt >= roundBudgetMs) {
+          break;
+        }
+      }
+    }
+
+    if (this.isEncoderDecoderArchitecture()) {
+      await this.decode([this.getDecoderStartToken()], completionOpts);
+    }
   }
 
   /**
@@ -1454,6 +1733,7 @@ export class Wllama {
         prefixTokenCount: result.prefix_token_counts[i] ?? -1,
         generationTimeMs: result.generation_time_ms[i] ?? -1,
         cachedTokenCount: result.cached_token_counts[i] ?? 0,
+        cacheTierLevel: result.cache_tier_levels[i] ?? -1,
         snapshotTokenBytes: result.snapshot_token_bytes[i] ?? 0,
         createdAt: (result.created_at_s[i] ?? 0) * 1000,
         lastAccessedAt: (result.last_accessed_at_s[i] ?? 0) * 1000,
@@ -1573,9 +1853,8 @@ export class Wllama {
     userText: string,
     options: WllamaChatSessionOptions = {}
   ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
-    const state = await this.chatEnsureReady();
-    const parentId = this.resolveNodeIdByHistory(state, history);
-    return this.chatFromNode(parentId, userText, options);
+    await this.chatEnsureReady();
+    return this.enqueueEngineChatByHistory(history, userText, options);
   }
 
   async chatSessionFinish(): Promise<WllamaTreeState> {
@@ -1587,8 +1866,7 @@ export class Wllama {
     userText: string,
     options: WllamaChatFromNodeOptions = {}
   ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
-    await this.chatEnsureReady();
-
+    // await this.chatEnsureReady();
     return this.enqueueEngineChat(parentId, userText, options);
   }
 
@@ -1597,48 +1875,83 @@ export class Wllama {
     userText: string,
     options: WllamaChatFromNodeOptions
   ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+    return this.enqueueEngineChatInternal(parentId, undefined, userText, options);
+  }
+
+  private enqueueEngineChatByHistory(
+    history: WllamaChatMessage[],
+    userText: string,
+    options: WllamaChatFromNodeOptions
+  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+    return this.enqueueEngineChatInternal(undefined, history, userText, options);
+  }
+
+  private async enqueueEngineChatInternal(
+    parentId: number | undefined,
+    baseHistory: WllamaChatMessage[] | undefined,
+    userText: string,
+    options: WllamaChatFromNodeOptions
+  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+    await this.chatEnsureReady();
     if (options.abortSignal?.aborted) {
-      return Promise.reject(new WllamaAbortError());
+      throw new WllamaAbortError();
     }
 
     const maxPending = this.getEngineChatQueueMaxPending();
-    if (this.engineChatQueue.length >= maxPending) {
+    const pendingNow = this.getEngineChatPendingCount();
+    if (pendingNow >= maxPending) {
       this.traceEngineChat(
-        `reject queue_overloaded pending=${this.engineChatQueue.length} max=${maxPending} parent=${parentId}`,
+        `reject queue_overloaded pending=${pendingNow} max=${maxPending} parent=${parentId ?? 'history'}`,
         'warn'
       );
-      return Promise.reject(
-        new WllamaError(
-          `engine chat queue is full (pending=${this.engineChatQueue.length}, max=${maxPending})`,
-          'queue_overloaded'
-        )
+      throw new WllamaError(
+        `engine chat queue is full (pending=${pendingNow}, max=${maxPending})`,
+        'queue_overloaded'
       );
     }
 
+    const state = await this.treeGetState();
+    const preparedPrompt = await this.prepareEngineChatPrompt(state, parentId, baseHistory, userText);
+
     return new Promise((resolve, reject) => {
-      const nAheadAtEnqueue = this.engineChatQueue.length;
-      const pMaxMs = this.getEngineChatServiceUpperBoundMs();
-      const baselineWorkMs = nAheadAtEnqueue * pMaxMs;
-      const waitBudgetMs = baselineWorkMs + pMaxMs;
+      const nAheadAtEnqueue = this.getEngineChatPendingCount();
       const req: EngineChatRequest = {
         id: this.nextEngineChatRequestId++,
         parentId,
+        baseHistory: baseHistory ? [...baseHistory] : undefined,
         userText,
         options,
+        queueType: 'normal',
         enqueuedAt: Date.now(),
         nAheadAtEnqueue,
-        baselineWorkMs,
-        waitBudgetMs,
+        estimatedServiceMs: 0,
+        estimatedPrefillMs: 0,
+        estimatedDecodeMs: 0,
+        estimatedPostMs: 0,
+        estimatedCacheMoveMs: 0,
+        estimatedRebuildMs: 0,
+        estimatedParentRecoverMs: 0,
+        estimatedPromptTokens: preparedPrompt.promptTokenCount,
+        estimatedPromptTailTokens: preparedPrompt.promptTailTokens,
+        estimatedRestoredPrefixTokens: preparedPrompt.restoredPrefixTokens,
+        estimatedRebuiltPrefixTokens: preparedPrompt.rebuiltPrefixTokens,
+        estimatedRestoreSource: preparedPrompt.restoreSource,
+        targetPredictTokens: 0,
+        generatedTokens: 0,
+        sliceCount: 0,
+        baselineWorkMs: 0,
+        waitBudgetMs: 0,
+        preparedPrompt,
         resolve,
         reject,
       };
+      this.refreshEngineChatRequestEstimate(req, state, 0, nAheadAtEnqueue);
 
       const abortSignal = options.abortSignal;
       if (abortSignal) {
         const onAbort = () => {
-          const idx = this.engineChatQueue.findIndex((x) => x.id === req.id);
-          if (idx >= 0) {
-            this.engineChatQueue.splice(idx, 1);
+          const removed = this.removeRequestFromQueues(req.id);
+          if (removed) {
             req.reject(new WllamaAbortError());
           }
         };
@@ -1646,9 +1959,9 @@ export class Wllama {
         abortSignal.addEventListener('abort', onAbort, { once: true });
       }
 
-      this.engineChatQueue.push(req);
+      this.engineChatNormalQueue.push(req);
       this.traceEngineChat(
-        `enqueue req=${req.id} parent=${parentId} pending=${this.engineChatQueue.length} nAhead=${req.nAheadAtEnqueue} budgetMs=${req.waitBudgetMs}`
+        `enqueue req=${req.id} parent=${parentId ?? preparedPrompt.parentNodeId ?? 'history'} pending=${this.getEngineChatPendingCount()} nAhead=${req.nAheadAtEnqueue} budgetMs=${req.waitBudgetMs} estMs=${Math.round(req.estimatedServiceMs)}`
       );
       void this.processEngineChatQueue();
     });
@@ -1660,9 +1973,12 @@ export class Wllama {
     }
 
     this.engineChatQueueRunning = true;
-    this.traceEngineChat(`queue loop start pending=${this.engineChatQueue.length}`);
+    this.traceEngineChat(`queue loop start pending=${this.getEngineChatPendingCount()}`);
     try {
-      while (this.engineChatQueue.length > 0) {
+      while (this.getEngineChatPendingCount() > 0) {
+        this.promoteOverdueEngineChatRequests();
+        await this.sendEngineChatCacheHint();
+
         const req = await this.pickNextEngineChatRequest();
         if (!req) {
           break;
@@ -1676,20 +1992,28 @@ export class Wllama {
         }
 
         try {
-          req.processingStartedAt = Date.now();
+          if (!req.processingStartedAt) {
+            req.processingStartedAt = Date.now();
+          }
           this.traceEngineChat(
-            `start req=${req.id} waitMs=${req.processingStartedAt - req.enqueuedAt} pendingAfterPick=${this.engineChatQueue.length}`
+            `start req=${req.id} q=${req.queueType} waitMs=${Date.now() - req.enqueuedAt} pendingAfterPick=${this.getEngineChatPendingCount()} slices=${req.sliceCount}`
           );
-          const result = await this.chatFromNodeDirect(
-            req.parentId,
-            req.userText,
-            ({ ...req.options, __engineReqId: req.id } as unknown as WllamaChatFromNodeOptions)
-          );
-          const doneAt = Date.now();
-          this.traceEngineChat(
-            `finish req=${req.id} serviceMs=${doneAt - (req.processingStartedAt ?? doneAt)} totalMs=${doneAt - req.enqueuedAt}`
-          );
-          req.resolve(result);
+          const slice = await this.executeEngineChatSlice(req);
+          if (slice.done) {
+            const doneAt = Date.now();
+            const serviceMs = doneAt - (req.processingStartedAt ?? doneAt);
+            this.recordEngineChatCostObservation(req, slice.phases, serviceMs);
+            this.traceEngineChat(
+              `finish req=${req.id} serviceMs=${serviceMs} totalMs=${doneAt - req.enqueuedAt} slices=${req.sliceCount} generatedTokens=${req.generatedTokens}`
+            );
+            req.cleanupAbort?.();
+            req.resolve(slice.result);
+          } else {
+            this.requeueEngineChatRequest(req);
+            this.traceEngineChat(
+              `yield req=${req.id} nextStage=${req.runtime?.stage ?? 'na'} pending=${this.getEngineChatPendingCount()} slices=${req.sliceCount}`
+            );
+          }
         } catch (err) {
           const failAt = Date.now();
           const msg = err instanceof Error ? err.message : String(err);
@@ -1697,31 +2021,106 @@ export class Wllama {
             `fail req=${req.id} serviceMs=${req.processingStartedAt ? failAt - req.processingStartedAt : -1} totalMs=${failAt - req.enqueuedAt} err=${msg}`,
             'warn'
           );
-          req.reject(err);
-        } finally {
           req.cleanupAbort?.();
+          req.reject(err);
         }
       }
     } finally {
       this.engineChatQueueRunning = false;
-      this.traceEngineChat(`queue loop end pending=${this.engineChatQueue.length}`);
-      if (this.engineChatQueue.length > 0) {
+      this.traceEngineChat(`queue loop end pending=${this.getEngineChatPendingCount()}`);
+      if (this.getEngineChatPendingCount() > 0) {
         void this.processEngineChatQueue();
       }
     }
   }
 
-  private async pickNextEngineChatRequest(): Promise<EngineChatRequest | undefined> {
-    if (this.engineChatQueue.length === 0) {
-      return undefined;
+  private getEngineChatPendingCount(): number {
+    return this.engineChatNormalQueue.length + this.engineChatOverdueQueue.length;
+  }
+
+  private removeRequestFromQueues(reqId: number): boolean {
+    let idx = this.engineChatNormalQueue.findIndex((x) => x.id === reqId);
+    if (idx >= 0) {
+      this.engineChatNormalQueue.splice(idx, 1);
+      return true;
     }
-    if (this.engineChatQueue.length === 1) {
-      return this.engineChatQueue.shift();
+    idx = this.engineChatOverdueQueue.findIndex((x) => x.id === reqId);
+    if (idx >= 0) {
+      this.engineChatOverdueQueue.splice(idx, 1);
+      return true;
+    }
+    return false;
+  }
+
+  private promoteOverdueEngineChatRequests(): void {
+    if (this.engineChatNormalQueue.length === 0) {
+      return;
     }
 
-    // RFG scheduling:
-    // 1) If overdue set is non-empty, pick from overdue set.
-    // 2) Otherwise pick by reuse-first lexicographic order.
+    const now = Date.now();
+    for (let i = this.engineChatNormalQueue.length - 1; i >= 0; i--) {
+      const req = this.engineChatNormalQueue[i];
+      const waitMs = Math.max(0, now - req.enqueuedAt);
+      if (waitMs < req.waitBudgetMs) {
+        continue;
+      }
+      this.engineChatNormalQueue.splice(i, 1);
+      req.queueType = 'overdue';
+      this.engineChatOverdueQueue.push(req);
+      this.traceEngineChat(
+        `promote-overdue req=${req.id} waitMs=${waitMs} budgetMs=${req.waitBudgetMs} overdueSize=${this.engineChatOverdueQueue.length}`
+      );
+    }
+  }
+
+  private async sendEngineChatCacheHint(): Promise<void> {
+    const hotNodeIds = this.collectHotParentNodeIdsForHint();
+    if (hotNodeIds.length === 0) {
+      return;
+    }
+    const pending = this.getEngineChatPendingCount();
+    const maxPending = Math.max(1, this.getEngineChatQueueMaxPending());
+    const queuePressure = Math.max(0, Math.min(1, pending / maxPending));
+    try {
+      await this.treeCacheHint(hotNodeIds, queuePressure);
+    } catch {
+      // Non-critical best-effort hint path.
+    }
+  }
+
+  private collectHotParentNodeIdsForHint(): number[] {
+    const k = Math.max(1, this.getEngineChatEvictionHintTopK());
+    const ids: number[] = [];
+    const seen = new Set<number>();
+    const appendFrom = (queue: EngineChatRequest[]) => {
+      for (const req of queue) {
+        if (ids.length >= k) {
+          break;
+        }
+        const candidates = [req.runtime?.nodeId, req.parentId, req.preparedPrompt?.parentNodeId];
+        for (const candidate of candidates) {
+          if (ids.length >= k) {
+            break;
+          }
+          if (typeof candidate !== 'number' || candidate < 0 || seen.has(candidate)) {
+            continue;
+          }
+          seen.add(candidate);
+          ids.push(candidate);
+        }
+      }
+    };
+    appendFrom(this.engineChatOverdueQueue);
+    appendFrom(this.engineChatNormalQueue);
+    return ids;
+  }
+
+  private async pickNextEngineChatRequest(): Promise<EngineChatRequest | undefined> {
+    const pending = this.getEngineChatPendingCount();
+    if (pending === 0) {
+      return undefined;
+    }
+
     let state: WllamaTreeState | null = null;
     try {
       state = await this.treeGetState();
@@ -1732,51 +2131,713 @@ export class Wllama {
     interface CandidateMetrics {
       req: EngineChatRequest;
       idx: number;
+      queueType: 'normal' | 'overdue';
       waitMs: number;
-      overdue: boolean;
-      reuseDepth: number;
-      newPrefillWork: number;
+      estimatedServiceMs: number;
+      blockedByPendingNodeId?: number | undefined;
+      pendingDependencyDepth: number;
     }
 
-    const now = Date.now();
-    const candidates: CandidateMetrics[] = [];
-
-    for (let i = 0; i < this.engineChatQueue.length; i++) {
-      const req = this.engineChatQueue[i];
-      const waitMs = Math.max(0, now - req.enqueuedAt);
-
-      let reuseDepth = 0;
-      let newPrefillWork = 0;
-      if (state) {
-        reuseDepth = this.sharedPrefixDepthInTree(state, state.activeNodeId, req.parentId);
-        const promptDepth = this.pathNodeIdsInTree(state, req.parentId).length;
-        newPrefillWork = Math.max(0, promptDepth - reuseDepth);
+    const buildCandidates = (
+      queue: EngineChatRequest[],
+      queueType: 'normal' | 'overdue'
+    ): CandidateMetrics[] => {
+      const now = Date.now();
+      const candidates: CandidateMetrics[] = [];
+      for (let i = 0; i < queue.length; i++) {
+        const req = queue[i];
+        const waitMs = Math.max(0, now - req.enqueuedAt);
+        this.refreshEngineChatRequestEstimate(req, state, waitMs);
+        const pendingDependency = this.findPendingDependencyForEngineChatRequest(req, state);
+        candidates.push({
+          req,
+          idx: i,
+          queueType,
+          waitMs,
+          estimatedServiceMs: req.estimatedServiceMs,
+          blockedByPendingNodeId: pendingDependency?.nodeId,
+          pendingDependencyDepth: pendingDependency?.depth ?? 0,
+        });
       }
+      return candidates;
+    };
 
-      candidates.push({
-        req,
-        idx: i,
-        waitMs,
-        overdue: waitMs >= req.waitBudgetMs,
-        reuseDepth,
-        newPrefillWork,
-      });
-    }
-
-    const overdueCandidates = candidates.filter((x) => x.overdue);
-    const activeSet = overdueCandidates.length > 0 ? overdueCandidates : candidates;
-    const useOverdueOrder = overdueCandidates.length > 0;
-
-    let best = activeSet[0];
-    for (let i = 1; i < activeSet.length; i++) {
-      const cur = activeSet[i];
-      if (this.isBetterEngineChatCandidate(cur, best, useOverdueOrder)) {
-        best = cur;
+    const pickBest = (
+      candidates: CandidateMetrics[],
+      useOverdueOrder: boolean
+    ): CandidateMetrics | undefined => {
+      if (candidates.length === 0) {
+        return undefined;
       }
+      let best = candidates[0];
+      for (let i = 1; i < candidates.length; i++) {
+        const cur = candidates[i];
+        if (this.isBetterEngineChatCandidate(cur, best, useOverdueOrder)) {
+          best = cur;
+        }
+      }
+      return best;
+    };
+
+    const overdueCandidates = buildCandidates(this.engineChatOverdueQueue, 'overdue');
+    const normalCandidates = buildCandidates(this.engineChatNormalQueue, 'normal');
+    const runnableOverdue = overdueCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
+    const runnableNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
+    const blockedOverdue = overdueCandidates.filter((candidate) => candidate.blockedByPendingNodeId !== undefined);
+    const blockedNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId !== undefined);
+
+    const best =
+      pickBest(runnableOverdue, true)
+      ?? pickBest(runnableNormal, false)
+      ?? pickBest(blockedOverdue, true)
+      ?? pickBest(blockedNormal, false);
+
+    if (!best) {
+      return undefined;
     }
 
-    const [picked] = this.engineChatQueue.splice(best.idx, 1);
+    if (best.blockedByPendingNodeId !== undefined) {
+      this.traceEngineChat(
+        `pick blocked req=${best.req.id} q=${best.queueType} blockedByPending=${best.blockedByPendingNodeId} depth=${best.pendingDependencyDepth}`,
+        'warn'
+      );
+    }
+
+    const targetQueue = best.queueType === 'overdue'
+      ? this.engineChatOverdueQueue
+      : this.engineChatNormalQueue;
+    const [picked] = targetQueue.splice(best.idx, 1);
+    if (picked) {
+      picked.queueType = best.queueType;
+    }
     return picked;
+  }
+
+  private findPendingDependencyForEngineChatRequest(
+    req: EngineChatRequest,
+    state: WllamaTreeState | null
+  ): { nodeId: number; depth: number } | undefined {
+    if (!state) {
+      return undefined;
+    }
+
+    let cursorId: number | null | undefined;
+    if (req.runtime) {
+      const runtimeNode = state.nodes.get(req.runtime.nodeId);
+      cursorId = runtimeNode?.parentId;
+    } else {
+      cursorId = req.preparedPrompt?.parentNodeId ?? req.parentId;
+    }
+
+    let depth = 0;
+    while (typeof cursorId === 'number' && cursorId >= 0) {
+      const node = state.nodes.get(cursorId);
+      if (!node) {
+        break;
+      }
+      depth += 1;
+      if (node.status === 'pending') {
+        return { nodeId: node.id, depth };
+      }
+      cursorId = node.parentId;
+    }
+
+    return undefined;
+  }
+
+  private async prepareEngineChatPrompt(
+    state: WllamaTreeState,
+    parentId: number | undefined,
+    baseHistory: WllamaChatMessage[] | undefined,
+    userText: string
+  ): Promise<EngineChatPreparedPrompt> {
+    let resolvedParentId = parentId;
+    let messages: WllamaChatMessage[];
+    if (typeof parentId === 'number' && parentId >= 0) {
+      messages = this.buildPromptMessagesForNode(state, parentId, userText);
+    } else {
+      messages = [...(baseHistory ?? []), { role: 'user', content: userText }];
+      if (Array.isArray(baseHistory) && baseHistory.length > 0) {
+        try {
+          resolvedParentId = this.resolveNodeIdByHistory(state, baseHistory);
+        } catch {
+          resolvedParentId = undefined;
+        }
+      }
+    }
+
+    const prompt = await this.formatChat(messages, true);
+    const promptTokens = await this.tokenizePromptForEngineChat(prompt);
+    const parentNode = typeof resolvedParentId === 'number'
+      ? state.nodes.get(resolvedParentId)
+      : undefined;
+    const parentPrefixTokens =
+      parentNode && resolvedParentId !== state.rootId
+        ? Math.max(0, parentNode.prefixTokenCount)
+        : 0;
+    const restoreSource = this.classifyEngineChatRestoreSource(parentNode, parentPrefixTokens);
+    const restoredPrefixTokens =
+      restoreSource === 'l1' || restoreSource === 'l2' || restoreSource === 'l3'
+        ? parentPrefixTokens
+        : 0;
+    const rebuiltPrefixTokens = restoreSource === 'rebuild' ? parentPrefixTokens : 0;
+
+    return {
+      prompt,
+      promptTokens,
+      promptTokenCount: promptTokens.length,
+      parentNodeId: resolvedParentId,
+      parentPrefixTokens,
+      restoreSource,
+      restoredPrefixTokens,
+      rebuiltPrefixTokens,
+      promptTailTokens: Math.max(0, promptTokens.length - parentPrefixTokens),
+      estimatedParentRecoverMs: 0,
+    };
+  }
+
+  private buildPromptMessagesForNode(
+    state: WllamaTreeState,
+    parentId: number,
+    userText: string
+  ): WllamaChatMessage[] {
+    const messages: WllamaChatMessage[] = [];
+    for (const nodeId of this.pathNodeIdsInTree(state, parentId)) {
+      const node = state.nodes.get(nodeId);
+      if (!node || node.id === state.rootId) {
+        continue;
+      }
+      if (node.turn.user) {
+        messages.push({ role: 'user', content: node.turn.user });
+      }
+      if (node.turn.assistant) {
+        messages.push({ role: 'assistant', content: node.turn.assistant });
+      }
+    }
+    messages.push({ role: 'user', content: userText });
+    return messages;
+  }
+
+  private async tokenizePromptForEngineChat(prompt: string): Promise<number[]> {
+    let tokens = await this.tokenize(prompt, true);
+    if (this.addBosToken && tokens[0] !== this.bosToken) {
+      tokens = [this.bosToken, ...tokens];
+    }
+    return tokens;
+  }
+
+  private classifyEngineChatRestoreSource(
+    node: WllamaTreeNode | undefined,
+    prefixTokens: number
+  ): EngineChatRestoreSource {
+    if (!node || prefixTokens <= 0) {
+      return 'none';
+    }
+    if (node.cacheTierLevel === 1) {
+      return 'l1';
+    }
+    if (node.cacheTierLevel === 2) {
+      return 'l2';
+    }
+    if (node.cacheTierLevel === 3) {
+      return 'l3';
+    }
+    return 'rebuild';
+  }
+
+  private refreshEngineChatPreparedPrompt(
+    req: EngineChatRequest,
+    state: WllamaTreeState | null
+  ): EngineChatPreparedPrompt {
+    const fallback = req.preparedPrompt!;
+    const runtime = req.runtime;
+    if (!state) {
+      if (!runtime) {
+        return fallback;
+      }
+      return {
+        ...fallback,
+        parentNodeId: runtime.nodeId,
+        parentPrefixTokens: Math.max(0, runtime.resumedPrefixTokenCount),
+        restoreSource: runtime.restoreSource,
+        restoredPrefixTokens: runtime.restoreSource === 'l1' || runtime.restoreSource === 'l2' || runtime.restoreSource === 'l3'
+          ? Math.max(0, runtime.resumedPrefixTokenCount)
+          : 0,
+        rebuiltPrefixTokens: runtime.restoreSource === 'rebuild'
+          ? Math.max(0, runtime.resumedPrefixTokenCount)
+          : 0,
+        promptTailTokens: Math.max(0, runtime.remainingPromptTokens.length),
+      };
+    }
+
+    const parentNodeId = runtime?.nodeId ?? fallback.parentNodeId;
+    const parentNode = typeof parentNodeId === 'number' ? state.nodes.get(parentNodeId) : undefined;
+    const parentPrefixTokens = runtime
+      ? Math.max(0, runtime.resumedPrefixTokenCount)
+      : (parentNode && parentNodeId !== state.rootId ? Math.max(0, parentNode.prefixTokenCount) : 0);
+    const restoreSource = this.classifyEngineChatRestoreSource(parentNode, parentPrefixTokens);
+
+    return {
+      ...fallback,
+      parentNodeId,
+      parentPrefixTokens,
+      restoreSource,
+      restoredPrefixTokens:
+        restoreSource === 'l1' || restoreSource === 'l2' || restoreSource === 'l3'
+          ? parentPrefixTokens
+          : 0,
+      rebuiltPrefixTokens: restoreSource === 'rebuild' ? parentPrefixTokens : 0,
+      promptTailTokens: runtime
+        ? Math.max(0, runtime.remainingPromptTokens.length)
+        : Math.max(0, fallback.promptTokenCount - parentPrefixTokens),
+    };
+  }
+
+  private refreshEngineChatRequestEstimate(
+    req: EngineChatRequest,
+    state: WllamaTreeState | null,
+    waitMs: number = 0,
+    nAheadAtEnqueue?: number
+  ): void {
+    const prepared = this.refreshEngineChatPreparedPrompt(req, state);
+    req.preparedPrompt = prepared;
+    const est = this.estimateEngineChatServiceCost(prepared, req.options.nPredict, req.runtime, waitMs);
+    req.estimatedServiceMs = est.totalMs;
+    req.estimatedPrefillMs = est.prefillMs;
+    req.estimatedDecodeMs = est.decodeMs;
+    req.estimatedPostMs = est.postMs;
+    req.estimatedCacheMoveMs = est.cacheMoveMs;
+    req.estimatedRebuildMs = est.rebuildMs;
+    req.estimatedParentRecoverMs = est.parentRecoverMs;
+    req.estimatedPromptTokens = prepared.promptTokenCount;
+    req.estimatedPromptTailTokens = prepared.promptTailTokens;
+    req.estimatedRestoredPrefixTokens = prepared.restoredPrefixTokens;
+    req.estimatedRebuiltPrefixTokens = prepared.rebuiltPrefixTokens;
+    req.estimatedRestoreSource = prepared.restoreSource;
+    req.targetPredictTokens = est.predictTokens;
+    const nAhead = nAheadAtEnqueue ?? req.nAheadAtEnqueue;
+    const pMaxMs = Math.max(this.getEngineChatServiceUpperBoundMs(), Math.ceil(est.totalMs));
+    req.baselineWorkMs = nAhead * pMaxMs;
+    req.waitBudgetMs = req.baselineWorkMs + pMaxMs;
+  }
+
+  private estimateEngineChatServiceCost(
+    prepared: EngineChatPreparedPrompt,
+    nPredict: number | undefined,
+    runtime?: EngineChatRuntime,
+    waitMs: number = 0
+  ): {
+      prefillMs: number;
+      decodeMs: number;
+      postMs: number;
+      cacheMoveMs: number;
+      rebuildMs: number;
+      parentRecoverMs: number;
+      totalMs: number;
+      predictTokens: number;
+    } {
+    const warmupRequests = this.getEngineChatCostWarmupRequests();
+    if (this.engineChatCostObservedCount < warmupRequests) {
+      return {
+        prefillMs: 0,
+        decodeMs: 0,
+        postMs: 0,
+        cacheMoveMs: 0,
+        rebuildMs: 0,
+        parentRecoverMs: 0,
+        totalMs: this.getEngineChatServiceUpperBoundMs(),
+        predictTokens: runtime ? this.getEngineChatNextDecodeSliceTokens(runtime) : this.getEngineChatInitialDecodeSliceTokens(nPredict),
+      };
+    }
+
+    const prefillPerToken = this.engineChatLearnedPrefillCostPerTokenMs
+      ?? this.getEngineChatPrefillCostPerTokenMs();
+    const decodePerToken = this.engineChatLearnedDecodeCostPerTokenMs
+      ?? this.getEngineChatDecodeCostPerTokenMs();
+    const postMs = this.engineChatLearnedPostCostMs ?? this.getEngineChatPostCostMs();
+    const rebuildPerToken = this.engineChatLearnedRebuildCostPerTokenMs
+      ?? this.getEngineChatRebuildCostPerTokenMs();
+    const parentRecoverMs = this.engineChatLearnedParentRecoverCostMs
+      ?? prepared.estimatedParentRecoverMs
+      ?? this.getEngineChatParentRecoverCostMs();
+
+    const prefillTokens =
+      runtime?.stage === 'prefill'
+        ? Math.min(prepared.promptTailTokens, this.getEngineChatPrefillSliceTokenBudget())
+        : !runtime && prepared.promptTailTokens > 0
+          ? Math.min(prepared.promptTailTokens, this.getEngineChatPrefillSliceTokenBudget())
+          : 0;
+    const predictTokens =
+      runtime?.stage === 'decode'
+        ? this.getEngineChatNextDecodeSliceTokens(runtime)
+        : !runtime && prepared.promptTailTokens === 0
+          ? this.getEngineChatInitialDecodeSliceTokens(nPredict)
+          : 0;
+
+    const restoreCostPerToken =
+      prepared.restoreSource === 'l1'
+        ? (this.engineChatLearnedRestoreL1CostPerTokenMs ?? this.getEngineChatRestoreL1CostPerTokenMs())
+        : prepared.restoreSource === 'l2'
+          ? (this.engineChatLearnedRestoreL2CostPerTokenMs ?? this.getEngineChatRestoreL2CostPerTokenMs())
+          : prepared.restoreSource === 'l3'
+            ? (this.engineChatLearnedRestoreL3CostPerTokenMs ?? this.getEngineChatRestoreL3CostPerTokenMs())
+            : 0;
+
+    const prefillMs = prefillTokens * prefillPerToken;
+    const decodeMs = predictTokens * decodePerToken;
+    const cacheMoveMs = prepared.restoredPrefixTokens * restoreCostPerToken;
+    const rebuildMs = prepared.rebuiltPrefixTokens * rebuildPerToken;
+    const queuePenaltyMs = waitMs > 0 ? Math.min(waitMs * 0.05, prefillMs + decodeMs) : 0;
+    const totalMs = Math.max(
+      1,
+      prefillMs + decodeMs + postMs + cacheMoveMs + rebuildMs + parentRecoverMs + queuePenaltyMs
+    );
+
+    return {
+      prefillMs,
+      decodeMs,
+      postMs,
+      cacheMoveMs,
+      rebuildMs,
+      parentRecoverMs,
+      totalMs,
+      predictTokens,
+    };
+  }
+
+  private requeueEngineChatRequest(req: EngineChatRequest): void {
+    req.queueType = 'normal';
+    req.enqueuedAt = Date.now();
+    req.nAheadAtEnqueue = this.getEngineChatPendingCount();
+    this.refreshEngineChatRequestEstimate(req, null, 0, req.nAheadAtEnqueue);
+    this.engineChatNormalQueue.push(req);
+  }
+
+  private async ensureEngineChatRuntimeReady(req: EngineChatRequest): Promise<void> {
+    if (!req.runtime) {
+      await this.initializeEngineChatRuntime(req);
+    } else {
+      await this.resumeEngineChatRuntime(req);
+    }
+    if (!req.runtime) {
+      throw new WllamaError(`engine chat runtime missing for req=${req.id}`);
+    }
+    await this.samplingInit(req.options.sampling ?? {}, req.runtime.samplingHistoryTokens);
+  }
+
+  private async initializeEngineChatRuntime(req: EngineChatRequest): Promise<void> {
+    const started =
+      Array.isArray(req.baseHistory)
+        ? await this.treeChatStartFromHistory(req.baseHistory, req.userText)
+        : await this.treeChatStart(req.parentId ?? 0, req.userText);
+    const prompt = started.formattedPrompt || req.preparedPrompt?.prompt || (await this.formatChat(started.messages, true));
+    const promptTokens = req.preparedPrompt?.promptTokens ?? (await this.tokenizePromptForEngineChat(prompt));
+    const { cachedPrefixTokens, promptTailTokens } = await this.alignPromptWithCurrentCache(promptTokens);
+    const rebuildUsed = started.timing.rebuildPromptMs > 0;
+    req.runtime = {
+      nodeId: started.nodeId,
+      stage: promptTailTokens.length > 0 ? 'prefill' : 'decode',
+      prompt,
+      promptTokens,
+      remainingPromptTokens: promptTailTokens,
+      samplingHistoryTokens: [],
+      assistantText: '',
+      generatedTokenIds: [],
+      generatedTokensLimit: Number.isFinite(req.options.nPredict as number)
+        ? Math.max(0, Math.floor(req.options.nPredict as number))
+        : Number.POSITIVE_INFINITY,
+      generatedTokensSoFar: 0,
+      startedAt: Date.now(),
+      cacheLoadMs: started.timing.restoreCacheMs,
+      rebuildMs: started.timing.rebuildPromptMs,
+      parentRecoverMs: started.timing.parentRecoverMs,
+      startOverheadMs: started.timing.startOverheadMs,
+      accumulatedPrefillMs: 0,
+      accumulatedDecodeMs: 0,
+      restoredPrefixTokens: rebuildUsed ? 0 : cachedPrefixTokens,
+      rebuiltPrefixTokens: rebuildUsed ? cachedPrefixTokens : 0,
+      restoreSource: rebuildUsed ? 'rebuild' : (req.preparedPrompt?.restoreSource ?? 'none'),
+      promptTokenCount: promptTokens.length,
+      promptTailTokenCount: promptTailTokens.length,
+      resumedPrefixTokenCount: cachedPrefixTokens,
+    };
+  }
+
+  private async resumeEngineChatRuntime(req: EngineChatRequest): Promise<void> {
+    if (!req.runtime) {
+      return;
+    }
+    const resumed = await this.treeChatResume(req.runtime.nodeId);
+    req.runtime.cacheLoadMs += resumed.restoreCacheMs;
+    req.runtime.rebuildMs += resumed.rebuildPromptMs;
+    req.runtime.resumedPrefixTokenCount = resumed.resumedPrefixTokenCount;
+  }
+
+  private async rollbackEngineChatRuntime(req: EngineChatRequest): Promise<void> {
+    if (!req.runtime) {
+      return;
+    }
+    try {
+      await this.treeChatFinish(
+        req.runtime.nodeId,
+        req.runtime.assistantText,
+        Math.max(0, Date.now() - req.runtime.startedAt),
+        true
+      );
+    } catch {
+      // Ignore rollback failure and rethrow the original error.
+    } finally {
+      req.runtime = undefined;
+    }
+  }
+
+  private async alignPromptWithCurrentCache(promptTokens: number[]): Promise<{
+    cachedPrefixTokens: number;
+    promptTailTokens: number[];
+  }> {
+    const cachedTokens = await this.getCachedTokens();
+    let cachedPrefixTokens = 0;
+    for (; cachedPrefixTokens < Math.min(cachedTokens.length, promptTokens.length); cachedPrefixTokens++) {
+      if (cachedTokens[cachedPrefixTokens] !== promptTokens[cachedPrefixTokens]) {
+        break;
+      }
+    }
+    try {
+      await this.kvRemove(cachedPrefixTokens, -1);
+      return {
+        cachedPrefixTokens,
+        promptTailTokens: promptTokens.slice(cachedPrefixTokens),
+      };
+    } catch {
+      await this.kvClear();
+      return {
+        cachedPrefixTokens: 0,
+        promptTailTokens: promptTokens,
+      };
+    }
+  }
+
+  private async executeEngineChatPrefillSlice(req: EngineChatRequest): Promise<number> {
+    if (!req.runtime) {
+      throw new WllamaError(`engine chat runtime missing for prefill req=${req.id}`);
+    }
+    const runtime = req.runtime;
+    if (runtime.remainingPromptTokens.length === 0) {
+      return 0;
+    }
+
+    await this.resetPerfContext();
+    const roundBudgetMs = this.getEngineChatPrefillSliceMaxMs();
+    const tokenBudget = this.getEngineChatPrefillSliceTokenBudget();
+    const chunkSize = Math.max(1, this.loadedContextInfo?.n_batch ?? 1);
+    const completionOpts = req.options.abortSignal ? { abortSignal: req.options.abortSignal } : {};
+    const startedAt = Date.now();
+    let processed = 0;
+
+    while (runtime.remainingPromptTokens.length > 0 && processed < tokenBudget) {
+      if (req.options.abortSignal?.aborted) {
+        throw new WllamaAbortError();
+      }
+      const take = Math.min(chunkSize, tokenBudget - processed, runtime.remainingPromptTokens.length);
+      const chunk = runtime.remainingPromptTokens.slice(0, take);
+      const isFinalOverallChunk = take === runtime.remainingPromptTokens.length;
+      await this.samplingAccept(chunk);
+      runtime.samplingHistoryTokens.push(...chunk);
+      if (this.isEncoderDecoderArchitecture()) {
+        await this.encode(chunk, completionOpts);
+      } else {
+        await this.decode(chunk, {
+          ...completionOpts,
+          skipLogits: !isFinalOverallChunk,
+        });
+      }
+      runtime.remainingPromptTokens.splice(0, take);
+      processed += take;
+      if (runtime.remainingPromptTokens.length > 0 && Date.now() - startedAt >= roundBudgetMs) {
+        break;
+      }
+    }
+
+    if (runtime.remainingPromptTokens.length === 0 && this.isEncoderDecoderArchitecture()) {
+      await this.decode([this.getDecoderStartToken()], completionOpts);
+    }
+
+    const perf = await this.getPerfContext();
+    return Number.isFinite(perf?.t_p_eval_ms) && (perf?.t_p_eval_ms ?? 0) > 0
+      ? perf.t_p_eval_ms
+      : Math.max(0, Date.now() - startedAt);
+  }
+
+  private async executeEngineChatDecodeSlice(req: EngineChatRequest): Promise<{
+    decodeMs: number;
+    aborted: boolean;
+    finished: boolean;
+  }> {
+    if (!req.runtime) {
+      throw new WllamaError(`engine chat runtime missing for decode req=${req.id}`);
+    }
+    const runtime = req.runtime;
+    const stopTokens = new Set(req.options.stopTokens ?? []);
+    const maxTokens = this.getEngineChatNextDecodeSliceTokens(runtime);
+    if (maxTokens <= 0) {
+      return { decodeMs: 0, aborted: false, finished: true };
+    }
+
+    await this.resetPerfContext();
+    const stageStartedAt = Date.now();
+    let aborted = false;
+    let finished = false;
+    for (let i = 0; i < maxTokens; i++) {
+      const sampled = await this.samplingSample();
+      if (this.isTokenEOG(sampled.token) || stopTokens.has(sampled.token)) {
+        finished = true;
+        break;
+      }
+
+      const piece = new TextDecoder().decode(sampled.piece, { stream: true });
+      runtime.generatedTokenIds.push(sampled.token);
+      runtime.generatedTokensSoFar += 1;
+      runtime.assistantText += piece;
+      runtime.firstTokenAt ??= Date.now();
+      req.options.onChunk?.(piece, runtime.assistantText);
+
+      if (req.options.abortSignal?.aborted) {
+        aborted = true;
+        break;
+      }
+
+      await this.samplingAccept([sampled.token]);
+      runtime.samplingHistoryTokens.push(sampled.token);
+      await this.decode([sampled.token], {});
+
+      if (Number.isFinite(runtime.generatedTokensLimit)
+        && runtime.generatedTokensSoFar >= runtime.generatedTokensLimit) {
+        finished = true;
+        break;
+      }
+    }
+
+    const perf = await this.getPerfContext();
+    const decodeMs =
+      Number.isFinite(perf?.t_eval_ms) && (perf?.t_eval_ms ?? 0) > 0
+        ? perf.t_eval_ms
+        : Math.max(0, Date.now() - stageStartedAt);
+    return { decodeMs, aborted, finished };
+  }
+
+  private async executeEngineChatSlice(
+    req: EngineChatRequest
+  ): Promise<
+    | {
+      done: true;
+      result: { nodeId: number; assistantText: string; state: WllamaTreeState };
+      phases: {
+        prefillMs: number;
+        decodeMs: number;
+        postMs: number;
+        cacheLoadMs: number;
+        rebuildMs: number;
+        parentRecoverMs: number;
+      };
+    }
+    | { done: false }
+  > {
+    try {
+      await this.ensureEngineChatRuntimeReady(req);
+      if (!req.runtime) {
+        throw new WllamaError(`engine chat runtime missing for req=${req.id}`);
+      }
+
+      if (req.runtime.stage === 'prefill') {
+        const prefillMs = await this.executeEngineChatPrefillSlice(req);
+        req.runtime.accumulatedPrefillMs += prefillMs;
+        req.sliceCount += 1;
+        req.runtime.resumedPrefixTokenCount = this.getEngineChatRuntimeLiveTokenCount(req.runtime);
+        if (req.runtime.remainingPromptTokens.length > 0) {
+          await this.treeChatCheckpoint(
+            req.runtime.nodeId,
+            req.runtime.assistantText,
+            Date.now() - req.runtime.startedAt
+          );
+          return { done: false };
+        }
+        req.runtime.stage = 'decode';
+        await this.treeChatCheckpoint(
+          req.runtime.nodeId,
+          req.runtime.assistantText,
+          Date.now() - req.runtime.startedAt
+        );
+        return { done: false };
+      }
+
+      const detail = await this.executeEngineChatDecodeSlice(req);
+      req.runtime.accumulatedDecodeMs += detail.decodeMs;
+      req.generatedTokens = req.runtime.generatedTokensSoFar;
+      req.sliceCount += 1;
+      req.runtime.resumedPrefixTokenCount = this.getEngineChatRuntimeLiveTokenCount(req.runtime);
+
+      if (detail.aborted) {
+        const state = await this.treeChatFinish(
+          req.runtime.nodeId,
+          req.runtime.assistantText,
+          Date.now() - req.runtime.startedAt,
+          true
+        );
+        return {
+          done: true,
+          result: {
+            nodeId: req.runtime.nodeId,
+            assistantText: req.runtime.assistantText,
+            state,
+          },
+          phases: {
+            prefillMs: req.runtime.accumulatedPrefillMs,
+            decodeMs: req.runtime.accumulatedDecodeMs,
+            postMs: 0,
+            cacheLoadMs: req.runtime.cacheLoadMs,
+            rebuildMs: req.runtime.rebuildMs,
+            parentRecoverMs: req.runtime.parentRecoverMs,
+          },
+        };
+      }
+
+      if (!detail.finished) {
+        await this.treeChatCheckpoint(
+          req.runtime.nodeId,
+          req.runtime.assistantText,
+          Date.now() - req.runtime.startedAt
+        );
+        return { done: false };
+      }
+
+      const postStartedAt = Date.now();
+      const state = await this.treeChatFinish(
+        req.runtime.nodeId,
+        req.runtime.assistantText,
+        Date.now() - req.runtime.startedAt,
+        false
+      );
+      const postMs = Math.max(0, Date.now() - postStartedAt);
+      return {
+        done: true,
+        result: {
+          nodeId: req.runtime.nodeId,
+          assistantText: req.runtime.assistantText,
+          state,
+        },
+        phases: {
+          prefillMs: req.runtime.accumulatedPrefillMs,
+          decodeMs: req.runtime.accumulatedDecodeMs,
+          postMs,
+          cacheLoadMs: req.runtime.cacheLoadMs,
+          rebuildMs: req.runtime.rebuildMs,
+          parentRecoverMs: req.runtime.parentRecoverMs,
+        },
+      };
+    } catch (err) {
+      await this.rollbackEngineChatRuntime(req);
+      throw err;
+    }
   }
 
   private getEngineChatServiceUpperBoundMs(): number {
@@ -1795,50 +2856,357 @@ export class Wllama {
     return Math.floor(configured);
   }
 
+  private getEngineChatSliceTokenBudget(): number {
+    const configured = this.config.engineChatSliceTokenBudget;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_SLICE_TOKEN_BUDGET;
+    }
+    return Math.max(1, Math.floor(configured));
+  }
+
+  private getEngineChatEvictionHintTopK(): number {
+    const configured = this.config.engineChatEvictionHintTopK;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_EVICTION_HINT_TOP_K;
+    }
+    return Math.max(1, Math.floor(configured));
+  }
+
+  private getEngineChatPrefillCostPerTokenMs(): number {
+    const configured =
+      this.config.engineChatPrefillCostPerTokenMs ?? this.config.engineChatPrefillCostPerUnitMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_COST_PREFILL_PER_TOKEN_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatDecodeCostPerTokenMs(): number {
+    const configured = this.config.engineChatDecodeCostPerTokenMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_COST_DECODE_PER_TOKEN_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatPostCostMs(): number {
+    const configured = this.config.engineChatPostCostMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_COST_POST_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatPrefillSliceMaxMs(): number {
+    const configured = this.config.engineChatPrefillSliceMaxMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_PREFILL_SLICE_MAX_MS;
+    }
+    return Math.max(100, Math.floor(configured));
+  }
+
+  private getEngineChatPrefillSliceTokenBudget(): number {
+    const perTokenMs = Math.max(0.1, this.getEngineChatPrefillCostPerTokenMs());
+    return Math.max(1, Math.floor(this.getEngineChatPrefillSliceMaxMs() / perTokenMs));
+  }
+
+  private getEngineChatRestoreL1CostPerTokenMs(): number {
+    const configured = this.config.engineChatRestoreL1CostPerTokenMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+      return DEFAULT_ENGINE_CHAT_COST_RESTORE_L1_PER_TOKEN_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatRestoreL2CostPerTokenMs(): number {
+    const configured =
+      this.config.engineChatRestoreL2CostPerTokenMs ?? this.config.engineChatCacheMoveCostPerUnitMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+      return DEFAULT_ENGINE_CHAT_COST_RESTORE_L2_PER_TOKEN_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatRestoreL3CostPerTokenMs(): number {
+    const configured = this.config.engineChatRestoreL3CostPerTokenMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+      return DEFAULT_ENGINE_CHAT_COST_RESTORE_L3_PER_TOKEN_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatRebuildCostPerTokenMs(): number {
+    const configured =
+      this.config.engineChatRebuildCostPerTokenMs ?? this.config.engineChatRebuildCostPerUnitMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+      return DEFAULT_ENGINE_CHAT_COST_REBUILD_PER_TOKEN_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatParentRecoverCostMs(): number {
+    const configured = this.config.engineChatParentRecoverCostMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+      return DEFAULT_ENGINE_CHAT_COST_PARENT_RECOVER_MS;
+    }
+    return configured;
+  }
+
+  private getEngineChatCostWarmupRequests(): number {
+    const configured = this.config.engineChatCostWarmupRequests;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_COST_WARMUP_REQUESTS;
+    }
+    return Math.max(1, Math.floor(configured));
+  }
+
+  private getEngineChatCostSampleWindow(): number {
+    const configured = this.config.engineChatCostSampleWindow;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return DEFAULT_ENGINE_CHAT_COST_SAMPLE_WINDOW;
+    }
+    return Math.max(16, Math.floor(configured));
+  }
+
+  private recordEngineChatCostObservation(
+    req: EngineChatRequest,
+    phases: {
+      prefillMs: number;
+      decodeMs: number;
+      postMs: number;
+      cacheLoadMs: number;
+      rebuildMs: number;
+      parentRecoverMs: number;
+    },
+    totalServiceMs: number
+  ): void {
+    if (!Number.isFinite(totalServiceMs) || totalServiceMs <= 0) {
+      return;
+    }
+
+    const decodeTokens = Math.max(0, Math.floor(req.generatedTokens));
+    const promptTailTokens = Math.max(
+      0,
+      Math.floor(req.runtime?.promptTailTokenCount ?? req.estimatedPromptTailTokens)
+    );
+    const restoredPrefixTokens = Math.max(
+      0,
+      Math.floor(req.runtime?.restoredPrefixTokens ?? req.estimatedRestoredPrefixTokens)
+    );
+    const rebuiltPrefixTokens = Math.max(
+      0,
+      Math.floor(req.runtime?.rebuiltPrefixTokens ?? req.estimatedRebuiltPrefixTokens)
+    );
+    const restoredFromTier =
+      req.runtime?.restoreSource === 'l1' || req.estimatedRestoreSource === 'l1'
+        ? 1
+        : req.runtime?.restoreSource === 'l2' || req.estimatedRestoreSource === 'l2'
+          ? 2
+          : req.runtime?.restoreSource === 'l3' || req.estimatedRestoreSource === 'l3'
+            ? 3
+            : 0;
+
+    const obs: EngineChatCostObservation = {
+      promptTailTokens,
+      decodeTokens,
+      restoredPrefixTokens,
+      restoredFromTier: restoredFromTier as 0 | 1 | 2 | 3,
+      rebuiltPrefixTokens,
+      prefillMs: Math.max(0, phases.prefillMs),
+      decodeMs: Math.max(0, phases.decodeMs),
+      postMs: Math.max(0, phases.postMs),
+      cacheLoadMs: Math.max(0, phases.cacheLoadMs),
+      rebuildMs: Math.max(0, phases.rebuildMs),
+      parentRecoverMs: Math.max(0, phases.parentRecoverMs),
+      totalServiceMs: Math.max(0, totalServiceMs),
+    };
+
+    this.engineChatCostObservedCount += 1;
+    this.engineChatCostObservations.push(obs);
+
+    const maxWindow = this.getEngineChatCostSampleWindow();
+    if (this.engineChatCostObservations.length > maxWindow) {
+      this.engineChatCostObservations.splice(0, this.engineChatCostObservations.length - maxWindow);
+    }
+
+    this.maybeUpdateEngineChatLearnedCostModel();
+  }
+
+  private maybeUpdateEngineChatLearnedCostModel(): void {
+    if (this.engineChatCostObservedCount < this.getEngineChatCostWarmupRequests()) {
+      return;
+    }
+    if (this.engineChatCostObservations.length < 5) {
+      return;
+    }
+
+    let prefillWeightedMs = 0;
+    let prefillWeight = 0;
+    let decodeWeightedMs = 0;
+    let decodeWeight = 0;
+    let postMsSum = 0;
+    let restoreL1WeightedMs = 0;
+    let restoreL1Weight = 0;
+    let restoreL2WeightedMs = 0;
+    let restoreL2Weight = 0;
+    let restoreL3WeightedMs = 0;
+    let restoreL3Weight = 0;
+    let rebuildWeightedMs = 0;
+    let rebuildWeight = 0;
+    let parentRecoverMsSum = 0;
+
+    for (const obs of this.engineChatCostObservations) {
+      if (obs.promptTailTokens > 0) {
+        prefillWeightedMs += obs.prefillMs;
+        prefillWeight += obs.promptTailTokens;
+      }
+      if (obs.decodeTokens > 0) {
+        decodeWeightedMs += obs.decodeMs;
+        decodeWeight += obs.decodeTokens;
+      }
+      if (obs.restoredPrefixTokens > 0) {
+        if (obs.restoredFromTier === 1) {
+          restoreL1WeightedMs += obs.cacheLoadMs;
+          restoreL1Weight += obs.restoredPrefixTokens;
+        } else if (obs.restoredFromTier === 2) {
+          restoreL2WeightedMs += obs.cacheLoadMs;
+          restoreL2Weight += obs.restoredPrefixTokens;
+        } else if (obs.restoredFromTier === 3) {
+          restoreL3WeightedMs += obs.cacheLoadMs;
+          restoreL3Weight += obs.restoredPrefixTokens;
+        }
+      }
+      if (obs.rebuiltPrefixTokens > 0) {
+        rebuildWeightedMs += obs.rebuildMs;
+        rebuildWeight += obs.rebuiltPrefixTokens;
+      }
+      postMsSum += obs.postMs;
+      parentRecoverMsSum += obs.parentRecoverMs;
+    }
+
+    const learnedPrefill = prefillWeight > 0
+      ? prefillWeightedMs / prefillWeight
+      : this.getEngineChatPrefillCostPerTokenMs();
+    const learnedDecode = decodeWeight > 0
+      ? decodeWeightedMs / decodeWeight
+      : this.getEngineChatDecodeCostPerTokenMs();
+    const learnedRestoreL1 = restoreL1Weight > 0
+      ? restoreL1WeightedMs / restoreL1Weight
+      : this.getEngineChatRestoreL1CostPerTokenMs();
+    const learnedRestoreL2 = restoreL2Weight > 0
+      ? restoreL2WeightedMs / restoreL2Weight
+      : this.getEngineChatRestoreL2CostPerTokenMs();
+    const learnedRestoreL3 = restoreL3Weight > 0
+      ? restoreL3WeightedMs / restoreL3Weight
+      : this.getEngineChatRestoreL3CostPerTokenMs();
+    const learnedRebuild = rebuildWeight > 0
+      ? rebuildWeightedMs / rebuildWeight
+      : this.getEngineChatRebuildCostPerTokenMs();
+    const learnedPost = postMsSum / this.engineChatCostObservations.length;
+    const learnedParentRecover = parentRecoverMsSum / this.engineChatCostObservations.length;
+
+    const boundedPrefill = Math.min(200, Math.max(0.1, learnedPrefill));
+    const boundedDecode = Math.min(200, Math.max(0.1, learnedDecode));
+    const boundedRestoreL1 = Math.min(50, Math.max(0, learnedRestoreL1));
+    const boundedRestoreL2 = Math.min(200, Math.max(0, learnedRestoreL2));
+    const boundedRestoreL3 = Math.min(400, Math.max(0, learnedRestoreL3));
+    const boundedRebuild = Math.min(400, Math.max(0, learnedRebuild));
+    const boundedPost = Math.min(2000, Math.max(0, learnedPost));
+    const boundedParentRecover = Math.min(2000, Math.max(0, learnedParentRecover));
+
+    const alpha = 0.2;
+    this.engineChatLearnedPrefillCostPerTokenMs =
+      this.engineChatLearnedPrefillCostPerTokenMs === undefined
+        ? boundedPrefill
+        : (1 - alpha) * this.engineChatLearnedPrefillCostPerTokenMs + alpha * boundedPrefill;
+    this.engineChatLearnedDecodeCostPerTokenMs =
+      this.engineChatLearnedDecodeCostPerTokenMs === undefined
+        ? boundedDecode
+        : (1 - alpha) * this.engineChatLearnedDecodeCostPerTokenMs + alpha * boundedDecode;
+    this.engineChatLearnedPostCostMs =
+      this.engineChatLearnedPostCostMs === undefined
+        ? boundedPost
+        : (1 - alpha) * this.engineChatLearnedPostCostMs + alpha * boundedPost;
+    this.engineChatLearnedRestoreL1CostPerTokenMs =
+      this.engineChatLearnedRestoreL1CostPerTokenMs === undefined
+        ? boundedRestoreL1
+        : (1 - alpha) * this.engineChatLearnedRestoreL1CostPerTokenMs + alpha * boundedRestoreL1;
+    this.engineChatLearnedRestoreL2CostPerTokenMs =
+      this.engineChatLearnedRestoreL2CostPerTokenMs === undefined
+        ? boundedRestoreL2
+        : (1 - alpha) * this.engineChatLearnedRestoreL2CostPerTokenMs + alpha * boundedRestoreL2;
+    this.engineChatLearnedRestoreL3CostPerTokenMs =
+      this.engineChatLearnedRestoreL3CostPerTokenMs === undefined
+        ? boundedRestoreL3
+        : (1 - alpha) * this.engineChatLearnedRestoreL3CostPerTokenMs + alpha * boundedRestoreL3;
+    this.engineChatLearnedRebuildCostPerTokenMs =
+      this.engineChatLearnedRebuildCostPerTokenMs === undefined
+        ? boundedRebuild
+        : (1 - alpha) * this.engineChatLearnedRebuildCostPerTokenMs + alpha * boundedRebuild;
+    this.engineChatLearnedParentRecoverCostMs =
+      this.engineChatLearnedParentRecoverCostMs === undefined
+        ? boundedParentRecover
+        : (1 - alpha) * this.engineChatLearnedParentRecoverCostMs + alpha * boundedParentRecover;
+
+    this.traceEngineChat(
+      `cost-model update n=${this.engineChatCostObservedCount} coeff={prefill:${this.engineChatLearnedPrefillCostPerTokenMs.toFixed(2)}, decode:${this.engineChatLearnedDecodeCostPerTokenMs.toFixed(2)}, post:${this.engineChatLearnedPostCostMs.toFixed(2)}, restoreL1:${this.engineChatLearnedRestoreL1CostPerTokenMs.toFixed(2)}, restoreL2:${this.engineChatLearnedRestoreL2CostPerTokenMs.toFixed(2)}, restoreL3:${this.engineChatLearnedRestoreL3CostPerTokenMs.toFixed(2)}, rebuild:${this.engineChatLearnedRebuildCostPerTokenMs.toFixed(2)}, parentRecover:${this.engineChatLearnedParentRecoverCostMs.toFixed(2)}}`
+    );
+  }
+
   private isBetterEngineChatCandidate(
     a: {
       req: EngineChatRequest;
       waitMs: number;
-      reuseDepth: number;
-      newPrefillWork: number;
+      estimatedServiceMs: number;
     },
     b: {
       req: EngineChatRequest;
       waitMs: number;
-      reuseDepth: number;
-      newPrefillWork: number;
+      estimatedServiceMs: number;
     },
     useOverdueOrder: boolean
   ): boolean {
     if (useOverdueOrder) {
-      // overdue order: (wait, reuse, -newPrefillWork, enqueuedAt, id)
+      // overdue order: (wait, estimatedService, enqueuedAt, id)
       if (a.waitMs !== b.waitMs) return a.waitMs > b.waitMs;
-      if (a.reuseDepth !== b.reuseDepth) return a.reuseDepth > b.reuseDepth;
-      if (a.newPrefillWork !== b.newPrefillWork) return a.newPrefillWork < b.newPrefillWork;
+      if (a.estimatedServiceMs !== b.estimatedServiceMs) {
+        return a.estimatedServiceMs < b.estimatedServiceMs;
+      }
       if (a.req.enqueuedAt !== b.req.enqueuedAt) return a.req.enqueuedAt < b.req.enqueuedAt;
       return a.req.id < b.req.id;
     }
 
-    // non-overdue order: (reuse, -newPrefillWork, wait, enqueuedAt, id)
-    if (a.reuseDepth !== b.reuseDepth) return a.reuseDepth > b.reuseDepth;
-    if (a.newPrefillWork !== b.newPrefillWork) return a.newPrefillWork < b.newPrefillWork;
+    // non-overdue order: (estimatedService, wait, enqueuedAt, id)
+    if (a.estimatedServiceMs !== b.estimatedServiceMs) {
+      return a.estimatedServiceMs < b.estimatedServiceMs;
+    }
     if (a.waitMs !== b.waitMs) return a.waitMs > b.waitMs;
     if (a.req.enqueuedAt !== b.req.enqueuedAt) return a.req.enqueuedAt < b.req.enqueuedAt;
     return a.req.id < b.req.id;
   }
 
-  private sharedPrefixDepthInTree(state: WllamaTreeState, aNodeId: number, bNodeId: number): number {
-    const aPath = this.pathNodeIdsInTree(state, aNodeId);
-    const bPath = this.pathNodeIdsInTree(state, bNodeId);
-    const n = Math.min(aPath.length, bPath.length);
-    let depth = 0;
-    for (let i = 0; i < n; i++) {
-      if (aPath[i] !== bPath[i]) {
-        break;
-      }
-      depth += 1;
+  private getEngineChatInitialDecodeSliceTokens(nPredict: number | undefined): number {
+    if (typeof nPredict !== 'number' || !Number.isFinite(nPredict)) {
+      return this.getEngineChatSliceTokenBudget();
     }
-    return depth;
+    return Math.max(0, Math.floor(nPredict));
+  }
+
+  private getEngineChatRuntimeLiveTokenCount(runtime: EngineChatRuntime): number {
+    return Math.max(
+      0,
+      runtime.promptTokenCount - runtime.remainingPromptTokens.length + runtime.generatedTokensSoFar
+    );
+  }
+
+  private getEngineChatNextDecodeSliceTokens(runtime: EngineChatRuntime): number {
+    if (!Number.isFinite(runtime.generatedTokensLimit)) {
+      return this.getEngineChatSliceTokenBudget();
+    }
+    return Math.max(
+      0,
+      Math.max(0, runtime.generatedTokensLimit - runtime.generatedTokensSoFar)
+    );
   }
 
   private pathNodeIdsInTree(state: WllamaTreeState, nodeId: number): number[] {
@@ -1856,16 +3224,21 @@ export class Wllama {
   }
 
   private async chatFromNodeDirect(
-    parentId: number,
+    parentId: number | undefined,
     userText: string,
-    options: WllamaChatFromNodeOptions = {}
+    options: WllamaChatFromNodeOptions = {},
+    baseHistory?: WllamaChatMessage[]
   ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
     if (options.abortSignal?.aborted) {
       throw new WllamaAbortError();
     }
 
     const reqId = (options as unknown as { __engineReqId?: number }).__engineReqId;
-    const traceKey = `req=${reqId ?? 'na'} parent=${parentId}`;
+    const parentKey =
+      typeof parentId === 'number' && parentId >= 0
+        ? `parent=${parentId}`
+        : `historyLen=${baseHistory?.length ?? 0}`;
+    const traceKey = `req=${reqId ?? 'na'} ${parentKey}`;
     const opStartedAt = Date.now();
     let stage: 'chat_start' | 'create_completion' | 'streaming' | 'chat_finish' | 'rollback' = 'chat_start';
     let chunkCount = 0;
@@ -1881,7 +3254,10 @@ export class Wllama {
       }, 5000)
       : null;
 
-    const started = await this.treeChatStart(parentId, userText);
+    const started =
+      Array.isArray(baseHistory)
+        ? await this.treeChatStartFromHistory(baseHistory, userText)
+        : await this.treeChatStart(parentId ?? 0, userText);
     const t0 = Date.now();
     let assistantText = '';
 
@@ -2009,6 +3385,56 @@ export class Wllama {
     return this.mapTreeState(result);
   }
 
+  private async treeCacheHint(hotNodeIds: number[], queuePressure: number): Promise<void> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeCacheHintRes>('chat_cache_hint', {
+      _name: 'tchi_req',
+      hot_node_ids: hotNodeIds,
+      queue_pressure: queuePressure,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeCacheHint failed: ${result.message}`);
+    }
+  }
+
+  private async treeChatResume(nodeId: number): Promise<{
+    restoreCacheMs: number;
+    rebuildPromptMs: number;
+    resumedPrefixTokenCount: number;
+  }> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatResumeRes>('chat_resume', {
+      _name: 'tchr_req',
+      node_id: nodeId,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeChatResume(${nodeId}) failed: ${result.message}`);
+    }
+    this.nCachedTokens = result.resumed_prefix_token_count ?? 0;
+    return {
+      restoreCacheMs: result.restore_cache_ms ?? 0,
+      rebuildPromptMs: result.rebuild_prompt_ms ?? 0,
+      resumedPrefixTokenCount: result.resumed_prefix_token_count ?? 0,
+    };
+  }
+
+  private async treeChatCheckpoint(
+    nodeId: number,
+    assistantText: string,
+    generationTimeMs: number
+  ): Promise<void> {
+    this.checkModelLoaded();
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatCheckpointRes>('chat_checkpoint', {
+      _name: 'tchp_req',
+      node_id: nodeId,
+      assistant_text: assistantText,
+      generation_time_ms: generationTimeMs,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeChatCheckpoint(${nodeId}) failed: ${result.message}`);
+    }
+  }
+
   private async treeSwitch(nodeId: number): Promise<WllamaTreeState> {
     this.checkModelLoaded();
     const result = await this.proxy.wllamaAction<GlueMsgTreeSwitchRes>('chat_set_active', {
@@ -2023,7 +3449,18 @@ export class Wllama {
     return state;
   }
 
-  private async treeChatStart(parentId: number, userText: string): Promise<{ nodeId: number; messages: WllamaChatMessage[]; formattedPrompt: string; state: WllamaTreeState }> {
+  private async treeChatStart(parentId: number, userText: string): Promise<{
+    nodeId: number;
+    messages: WllamaChatMessage[];
+    formattedPrompt: string;
+    state: WllamaTreeState;
+    timing: {
+      restoreCacheMs: number;
+      rebuildPromptMs: number;
+      parentRecoverMs: number;
+      startOverheadMs: number;
+    };
+  }> {
     this.checkModelLoaded();
     const result = await this.proxy.wllamaAction<GlueMsgTreeChatStartRes>('chat_start', {
       _name: 'tchs_req',
@@ -2051,6 +3488,65 @@ export class Wllama {
       messages,
       formattedPrompt: result.formatted_chat ?? '',
       state,
+      timing: {
+        restoreCacheMs: result.restore_cache_ms ?? 0,
+        rebuildPromptMs: result.rebuild_prompt_ms ?? 0,
+        parentRecoverMs: result.parent_recover_ms ?? 0,
+        startOverheadMs: result.start_overhead_ms ?? 0,
+      },
+    };
+  }
+
+  private async treeChatStartFromHistory(
+    history: WllamaChatMessage[],
+    userText: string
+  ): Promise<{
+    nodeId: number;
+    messages: WllamaChatMessage[];
+    formattedPrompt: string;
+    state: WllamaTreeState;
+    timing: {
+      restoreCacheMs: number;
+      rebuildPromptMs: number;
+      parentRecoverMs: number;
+      startOverheadMs: number;
+    };
+  }> {
+    this.checkModelLoaded();
+    const roles = history.map((m) => m.role);
+    const contents = history.map((m) => m.content);
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatStartHistRes>('chat_start_hist', {
+      _name: 'tchh_req',
+      roles,
+      contents,
+      user_text: userText,
+    });
+    if (!result.success) {
+      throw new WllamaError(`treeChatStartFromHistory failed: ${result.message}`);
+    }
+
+    const messages: WllamaChatMessage[] = [];
+    const len = Math.min(result.roles.length, result.contents.length);
+    for (let i = 0; i < len; i++) {
+      const role = result.roles[i];
+      if (role === 'system' || role === 'user' || role === 'assistant') {
+        messages.push({ role, content: result.contents[i] });
+      }
+    }
+
+    const state = await this.treeGetState();
+    this.nCachedTokens = state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
+    return {
+      nodeId: result.node_id,
+      messages,
+      formattedPrompt: result.formatted_chat ?? '',
+      state,
+      timing: {
+        restoreCacheMs: result.restore_cache_ms ?? 0,
+        rebuildPromptMs: result.rebuild_prompt_ms ?? 0,
+        parentRecoverMs: result.parent_recover_ms ?? 0,
+        startOverheadMs: result.start_overhead_ms ?? 0,
+      },
     };
   }
 
@@ -2195,22 +3691,61 @@ export class Wllama {
     this.checkModelLoaded();
     const nativeDebug = await this.proxy.wllamaDebug();
     const now = Date.now();
-    const pending = this.engineChatQueue.map((req) => ({
+    const toDebugReq = (req: EngineChatRequest) => ({
       id: req.id,
-      parentId: req.parentId,
+      queueType: req.queueType,
+      parentId: req.parentId ?? null,
+      historyLength: req.baseHistory?.length ?? 0,
       enqueuedForMs: now - req.enqueuedAt,
       processingForMs: req.processingStartedAt ? now - req.processingStartedAt : 0,
       nAheadAtEnqueue: req.nAheadAtEnqueue,
       waitBudgetMs: req.waitBudgetMs,
-    }));
+      estimatedServiceMs: req.estimatedServiceMs,
+      estimatedPrefillMs: req.estimatedPrefillMs,
+      estimatedDecodeMs: req.estimatedDecodeMs,
+      estimatedPostMs: req.estimatedPostMs,
+      estimatedCacheMoveMs: req.estimatedCacheMoveMs,
+      estimatedRebuildMs: req.estimatedRebuildMs,
+      estimatedParentRecoverMs: req.estimatedParentRecoverMs,
+      estimatedPromptTokens: req.estimatedPromptTokens,
+      estimatedPromptTailTokens: req.estimatedPromptTailTokens,
+      estimatedRestoredPrefixTokens: req.estimatedRestoredPrefixTokens,
+      estimatedRebuiltPrefixTokens: req.estimatedRebuiltPrefixTokens,
+      estimatedRestoreSource: req.estimatedRestoreSource,
+      targetPredictTokens: req.targetPredictTokens,
+      generatedTokens: req.generatedTokens,
+      sliceCount: req.sliceCount,
+      runtimeNodeId: req.runtime?.nodeId ?? null,
+      runtimeStage: req.runtime?.stage ?? null,
+      runtimeAssistantChars: req.runtime?.assistantText.length ?? 0,
+    });
+    const normalPending = this.engineChatNormalQueue.map(toDebugReq);
+    const overduePending = this.engineChatOverdueQueue.map(toDebugReq);
 
     if (nativeDebug && typeof nativeDebug === 'object') {
       return {
         ...(nativeDebug as Record<string, unknown>),
         engineChat: {
           running: this.engineChatQueueRunning,
-          pendingCount: this.engineChatQueue.length,
-          pending,
+          pendingCount: this.getEngineChatPendingCount(),
+          normalPendingCount: normalPending.length,
+          overduePendingCount: overduePending.length,
+          costModel: {
+            observedCount: this.engineChatCostObservedCount,
+            warmupRequests: this.getEngineChatCostWarmupRequests(),
+            sampleWindow: this.getEngineChatCostSampleWindow(),
+            sampleCount: this.engineChatCostObservations.length,
+            learnedPrefillCostPerTokenMs: this.engineChatLearnedPrefillCostPerTokenMs ?? null,
+            learnedDecodeCostPerTokenMs: this.engineChatLearnedDecodeCostPerTokenMs ?? null,
+            learnedPostCostMs: this.engineChatLearnedPostCostMs ?? null,
+            learnedRestoreL1CostPerTokenMs: this.engineChatLearnedRestoreL1CostPerTokenMs ?? null,
+            learnedRestoreL2CostPerTokenMs: this.engineChatLearnedRestoreL2CostPerTokenMs ?? null,
+            learnedRestoreL3CostPerTokenMs: this.engineChatLearnedRestoreL3CostPerTokenMs ?? null,
+            learnedRebuildCostPerTokenMs: this.engineChatLearnedRebuildCostPerTokenMs ?? null,
+            learnedParentRecoverCostMs: this.engineChatLearnedParentRecoverCostMs ?? null,
+          },
+          normalPending,
+          overduePending,
         },
       };
     }
@@ -2219,8 +3754,25 @@ export class Wllama {
       nativeDebug,
       engineChat: {
         running: this.engineChatQueueRunning,
-        pendingCount: this.engineChatQueue.length,
-        pending,
+        pendingCount: this.getEngineChatPendingCount(),
+        normalPendingCount: normalPending.length,
+        overduePendingCount: overduePending.length,
+        costModel: {
+          observedCount: this.engineChatCostObservedCount,
+          warmupRequests: this.getEngineChatCostWarmupRequests(),
+          sampleWindow: this.getEngineChatCostSampleWindow(),
+          sampleCount: this.engineChatCostObservations.length,
+          learnedPrefillCostPerTokenMs: this.engineChatLearnedPrefillCostPerTokenMs ?? null,
+          learnedDecodeCostPerTokenMs: this.engineChatLearnedDecodeCostPerTokenMs ?? null,
+          learnedPostCostMs: this.engineChatLearnedPostCostMs ?? null,
+          learnedRestoreL1CostPerTokenMs: this.engineChatLearnedRestoreL1CostPerTokenMs ?? null,
+          learnedRestoreL2CostPerTokenMs: this.engineChatLearnedRestoreL2CostPerTokenMs ?? null,
+          learnedRestoreL3CostPerTokenMs: this.engineChatLearnedRestoreL3CostPerTokenMs ?? null,
+          learnedRebuildCostPerTokenMs: this.engineChatLearnedRebuildCostPerTokenMs ?? null,
+          learnedParentRecoverCostMs: this.engineChatLearnedParentRecoverCostMs ?? null,
+        },
+        normalPending,
+        overduePending,
       },
     };
   }

@@ -4,6 +4,7 @@ import wllamaMulti from '@wllama/wllama/src/multi-thread/wllama.wasm?url';
 import type {
   BenchConfig,
   BenchDiagnostics,
+  EngineChatBatchDiagnostics,
   BenchLogEvent,
   BenchProgressEvent,
   BenchReport,
@@ -587,7 +588,13 @@ async function createLoadedWllama(
     preferWebGPU: true,
     noPerf: false,
     suppressNativeLog: false,
-    engineChatTraceEnabled: true,
+    engineChatServiceUpperBoundMs: config.engineChatServiceUpperBoundMs,
+    engineChatQueueMaxPending: config.engineChatQueueMaxPending,
+    engineChatSliceTokenBudget: config.engineChatSliceTokenBudget,
+    engineChatPrefillSliceMaxMs: config.engineChatPrefillSliceMaxMs,
+    engineChatCostWarmupRequests: config.engineChatCostWarmupRequests,
+    engineChatCostSampleWindow: config.engineChatCostSampleWindow,
+    engineChatTraceEnabled: config.engineChatTraceEnabled,
     logger: createBenchWllamaLogger(onLog),
   });
   onLog?.({ text: '[Wllama] loading model...' });
@@ -645,6 +652,205 @@ async function logRuntimeDebugSnapshot(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     onLog?.({ text: `[RuntimeDebug/${label}] unavailable: ${msg}` });
+  }
+}
+
+type EngineChatRuntimeDebug = {
+  running: boolean;
+  pendingCount: number;
+  normalPendingCount: number;
+  overduePendingCount: number;
+  costModel: {
+    observedCount: number;
+    sampleCount: number;
+    learnedPrefillCostPerTokenMs: number | null;
+    learnedDecodeCostPerTokenMs: number | null;
+    learnedPostCostMs: number | null;
+    learnedRestoreL1CostPerTokenMs: number | null;
+    learnedRestoreL2CostPerTokenMs: number | null;
+    learnedRestoreL3CostPerTokenMs: number | null;
+    learnedRebuildCostPerTokenMs: number | null;
+    learnedParentRecoverCostMs: number | null;
+  };
+  pendingRequests: Array<{
+    estimatedServiceMs: number;
+    estimatedPromptTokens: number;
+    sliceCount: number;
+    generatedTokens: number;
+    runtimeAssistantChars: number;
+  }>;
+};
+
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+  return value;
+}
+
+function extractEngineChatDebug(debugInfo: unknown): EngineChatRuntimeDebug | null {
+  if (!debugInfo || typeof debugInfo !== 'object') {
+    return null;
+  }
+  const top = debugInfo as Record<string, unknown>;
+  const rawEngineChat = top.engineChat;
+  if (!rawEngineChat || typeof rawEngineChat !== 'object') {
+    return null;
+  }
+  const engineChat = rawEngineChat as Record<string, unknown>;
+  const rawCostModel =
+    engineChat.costModel && typeof engineChat.costModel === 'object'
+      ? engineChat.costModel as Record<string, unknown>
+      : {};
+  const normalizePending = (value: unknown) => {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return [];
+      }
+      const req = entry as Record<string, unknown>;
+      return [{
+        estimatedServiceMs: toFiniteNumber(req.estimatedServiceMs) ?? 0,
+        estimatedPromptTokens: toFiniteNumber(req.estimatedPromptTokens) ?? 0,
+        sliceCount: toFiniteNumber(req.sliceCount) ?? 0,
+        generatedTokens: toFiniteNumber(req.generatedTokens) ?? 0,
+        runtimeAssistantChars: toFiniteNumber(req.runtimeAssistantChars) ?? 0,
+      }];
+    });
+  };
+
+  return {
+    running: Boolean(engineChat.running),
+    pendingCount: toFiniteNumber(engineChat.pendingCount) ?? 0,
+    normalPendingCount: toFiniteNumber(engineChat.normalPendingCount) ?? 0,
+    overduePendingCount: toFiniteNumber(engineChat.overduePendingCount) ?? 0,
+    costModel: {
+      observedCount: toFiniteNumber(rawCostModel.observedCount) ?? 0,
+      sampleCount: toFiniteNumber(rawCostModel.sampleCount) ?? 0,
+      learnedPrefillCostPerTokenMs: toFiniteNumber(rawCostModel.learnedPrefillCostPerTokenMs),
+      learnedDecodeCostPerTokenMs: toFiniteNumber(rawCostModel.learnedDecodeCostPerTokenMs),
+      learnedPostCostMs: toFiniteNumber(rawCostModel.learnedPostCostMs),
+      learnedRestoreL1CostPerTokenMs: toFiniteNumber(rawCostModel.learnedRestoreL1CostPerTokenMs),
+      learnedRestoreL2CostPerTokenMs: toFiniteNumber(rawCostModel.learnedRestoreL2CostPerTokenMs),
+      learnedRestoreL3CostPerTokenMs: toFiniteNumber(rawCostModel.learnedRestoreL3CostPerTokenMs),
+      learnedRebuildCostPerTokenMs: toFiniteNumber(rawCostModel.learnedRebuildCostPerTokenMs),
+      learnedParentRecoverCostMs: toFiniteNumber(rawCostModel.learnedParentRecoverCostMs),
+    },
+    pendingRequests: [
+      ...normalizePending(engineChat.normalPending),
+      ...normalizePending(engineChat.overduePending),
+    ],
+  };
+}
+
+async function getRuntimeEngineChatDebug(runtime: Wllama): Promise<EngineChatRuntimeDebug | null> {
+  const debugInfo = await withTimeout(
+    (runtime as unknown as { _getDebugInfo: () => Promise<unknown> })._getDebugInfo(),
+    1500,
+    '[RuntimeDebug] _getDebugInfo timed out after 1500ms'
+  );
+  return extractEngineChatDebug(debugInfo);
+}
+
+async function observeEngineChatBatch<T>(
+  getRuntime: () => Wllama,
+  label: string,
+  task: () => Promise<T>,
+  onLog?: (e: BenchLogEvent) => void
+): Promise<{ result: T; diagnostics?: EngineChatBatchDiagnostics }> {
+  const summary: EngineChatBatchDiagnostics = {
+    sampleCount: 0,
+    maxPendingCount: 0,
+    maxNormalPendingCount: 0,
+    maxOverduePendingCount: 0,
+    snapshotsWithOverdue: 0,
+    maxEstimatedServiceMs: 0,
+    maxEstimatedPromptTokens: 0,
+    maxSliceCount: 0,
+    maxGeneratedTokens: 0,
+    maxRuntimeAssistantChars: 0,
+    costModelObservedCount: 0,
+    costModelSampleCount: 0,
+    learnedPrefillCostPerTokenMs: null,
+    learnedDecodeCostPerTokenMs: null,
+    learnedPostCostMs: null,
+    learnedRestoreL1CostPerTokenMs: null,
+    learnedRestoreL2CostPerTokenMs: null,
+    learnedRestoreL3CostPerTokenMs: null,
+    learnedRebuildCostPerTokenMs: null,
+    learnedParentRecoverCostMs: null,
+  };
+
+  const applySnapshot = (snapshot: EngineChatRuntimeDebug | null) => {
+    if (!snapshot) {
+      return;
+    }
+    summary.sampleCount += 1;
+    summary.maxPendingCount = Math.max(summary.maxPendingCount, snapshot.pendingCount);
+    summary.maxNormalPendingCount = Math.max(summary.maxNormalPendingCount, snapshot.normalPendingCount);
+    summary.maxOverduePendingCount = Math.max(summary.maxOverduePendingCount, snapshot.overduePendingCount);
+    if (snapshot.overduePendingCount > 0) {
+      summary.snapshotsWithOverdue += 1;
+    }
+    summary.costModelObservedCount = Math.max(summary.costModelObservedCount, snapshot.costModel.observedCount);
+    summary.costModelSampleCount = Math.max(summary.costModelSampleCount, snapshot.costModel.sampleCount);
+    summary.learnedPrefillCostPerTokenMs = snapshot.costModel.learnedPrefillCostPerTokenMs;
+    summary.learnedDecodeCostPerTokenMs = snapshot.costModel.learnedDecodeCostPerTokenMs;
+    summary.learnedPostCostMs = snapshot.costModel.learnedPostCostMs;
+    summary.learnedRestoreL1CostPerTokenMs = snapshot.costModel.learnedRestoreL1CostPerTokenMs;
+    summary.learnedRestoreL2CostPerTokenMs = snapshot.costModel.learnedRestoreL2CostPerTokenMs;
+    summary.learnedRestoreL3CostPerTokenMs = snapshot.costModel.learnedRestoreL3CostPerTokenMs;
+    summary.learnedRebuildCostPerTokenMs = snapshot.costModel.learnedRebuildCostPerTokenMs;
+    summary.learnedParentRecoverCostMs = snapshot.costModel.learnedParentRecoverCostMs;
+    for (const req of snapshot.pendingRequests) {
+      summary.maxEstimatedServiceMs = Math.max(summary.maxEstimatedServiceMs, req.estimatedServiceMs);
+      summary.maxEstimatedPromptTokens = Math.max(summary.maxEstimatedPromptTokens, req.estimatedPromptTokens);
+      summary.maxSliceCount = Math.max(summary.maxSliceCount, req.sliceCount);
+      summary.maxGeneratedTokens = Math.max(summary.maxGeneratedTokens, req.generatedTokens);
+      summary.maxRuntimeAssistantChars = Math.max(summary.maxRuntimeAssistantChars, req.runtimeAssistantChars);
+    }
+  };
+
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+  const poll = async () => {
+    if (stopped) {
+      return;
+    }
+    try {
+      applySnapshot(await getRuntimeEngineChatDebug(getRuntime()));
+    } catch {
+      // Best-effort observer.
+    } finally {
+      if (!stopped) {
+        pollTimer = setTimeout(() => {
+          void poll();
+        }, 100);
+      }
+    }
+  };
+
+  try {
+    await poll();
+    const result = await task();
+    try {
+      applySnapshot(await getRuntimeEngineChatDebug(getRuntime()));
+    } catch {
+      // Best-effort observer.
+    }
+    if (summary.sampleCount > 0) {
+      onLog?.({
+        text: `[Exp4Diag/${label}] samples=${summary.sampleCount} pendingMax=${summary.maxPendingCount} overdueMax=${summary.maxOverduePendingCount} overdueSamples=${summary.snapshotsWithOverdue} sliceMax=${summary.maxSliceCount} estServiceMaxMs=${summary.maxEstimatedServiceMs.toFixed(2)} promptTokMax=${summary.maxEstimatedPromptTokens} learned(prefill/decode/rebuild)=${summary.learnedPrefillCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${summary.learnedDecodeCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${summary.learnedRebuildCostPerTokenMs?.toFixed(2) ?? 'n/a'}`,
+      });
+    }
+    return { result, diagnostics: summary.sampleCount > 0 ? summary : undefined };
+  } finally {
+    stopped = true;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+    }
   }
 }
 
@@ -1910,12 +2116,29 @@ async function runQueueVsDirectMmlu(
     const samplePreview = evalItems.slice(0, 5).map((x) => x.id).join(', ');
     onLog?.({ text: `[Exp4] samplePreview(first<=5)=${samplePreview}` });
   }
-  const prompts = evalItems.map((q) => [
-    'Answer with exactly one letter: A, B, C, or D.',
-    mmluQuestionBlock(q, false),
-  ].join('\n\n'));
+  const prompts = evalItems.map((q) => {
+    const outputBudget = Math.max(1, config.exp4OutputTokens);
+    const wantsLongerServe = outputBudget > 8;
+    if (wantsLongerServe) {
+      return [
+        'Solve the multiple-choice question below.',
+        'Think briefly in 2-4 short bullet-like lines, then end with exactly one final line in the format: Final Answer: X',
+        'Keep the response concise but not one-token short.',
+        mmluQuestionBlock(q, false),
+      ].join('\n\n');
+    }
+    return [
+      'Answer with exactly one letter: A, B, C, or D.',
+      mmluQuestionBlock(q, false),
+    ].join('\n\n');
+  });
 
-  const runBatch = async (useQueue: boolean): Promise<{ rows: RequestPerf[]; failed: number; wallClockMs: number }> => {
+  const runBatch = async (useQueue: boolean): Promise<{
+    rows: RequestPerf[];
+    failed: number;
+    wallClockMs: number;
+    diagnostics?: EngineChatBatchDiagnostics;
+  }> => {
     const rows: RequestPerf[] = [];
     let failed = 0;
     const mode = useQueue ? 'queue' : 'direct';
@@ -2001,22 +2224,40 @@ async function runQueueVsDirectMmlu(
       }
     };
 
-    if (useQueue) {
-      onLog?.({
-        text: `[Exp4/queue] scheduler=runtime-rfg arrival=simultaneous-at-batchStart submit=all-at-once requestCount=${prompts.length}`,
-      });
-      await Promise.all(prompts.map((prompt, i) => runOne(prompt, i, batchStartedAt)));
-    } else {
-      onLog?.({ text: '[Exp4/direct] scheduler=fcfs arrival=simultaneous-at-batchStart dispatch=sequential path=chatFromNode' });
-      for (let i = 0; i < prompts.length; i += 1) {
-        await runOne(prompts[i], i, batchStartedAt);
+    const execution = async () => {
+      if (useQueue) {
+        const submitWindow = Math.max(1, Number(config.exp4Concurrency) || 1);
+        onLog?.({
+          text: `[Exp4/queue] scheduler=runtime-rfg arrival=simultaneous-at-batchStart submitWindow=${submitWindow} requestCount=${prompts.length}`,
+        });
+        let nextIndex = 0;
+        const workers = Array.from({ length: Math.min(submitWindow, prompts.length) }, async () => {
+          while (nextIndex < prompts.length) {
+            const current = nextIndex;
+            nextIndex += 1;
+            await runOne(prompts[current], current, batchStartedAt);
+          }
+        });
+        await Promise.all(workers);
+      } else {
+        onLog?.({ text: '[Exp4/direct] scheduler=fcfs arrival=simultaneous-at-batchStart dispatch=sequential path=chatFromNode' });
+        for (let i = 0; i < prompts.length; i += 1) {
+          await runOne(prompts[i], i, batchStartedAt);
+        }
       }
-    }
+    };
+
+    const observed = await observeEngineChatBatch(
+      () => runtime,
+      mode,
+      execution,
+      onLog
+    );
 
     const wallClockMs = Math.max(0, performance.now() - batchStartedAt);
     onLog?.({ text: `[Exp4/${mode}] batchDone success=${rows.length} failed=${failed} wallClockMs=${wallClockMs.toFixed(2)}` });
 
-    return { rows, failed, wallClockMs };
+    return { rows, failed, wallClockMs, diagnostics: observed.diagnostics };
   };
 
   const queueBatch = await runBatch(true);
@@ -2047,19 +2288,21 @@ async function runQueueVsDirectMmlu(
   return {
     wllama: runtime,
     summary: {
-    requestCount: prompts.length,
-    failedCountQueue: queueSummary.failed,
-    failedCountDirect: directSummary.failed,
-    avgTtftMsQueue: queueSummary.avgTtftMs,
-    avgTtftMsDirect: directSummary.avgTtftMs,
-    avgLatencyMsQueue: queueSummary.avgLatencyMs,
-    avgLatencyMsDirect: directSummary.avgLatencyMs,
-    avgTokensPerSecondQueue: queueSummary.avgTokensPerSecond,
-    avgTokensPerSecondDirect: directSummary.avgTokensPerSecond,
-    batchWallClockMsQueue: queueBatch.wallClockMs,
-    batchWallClockMsDirect: directBatch.wallClockMs,
-    batchTokensPerSecondQueue,
-    batchTokensPerSecondDirect,
+      requestCount: prompts.length,
+      failedCountQueue: queueSummary.failed,
+      failedCountDirect: directSummary.failed,
+      avgTtftMsQueue: queueSummary.avgTtftMs,
+      avgTtftMsDirect: directSummary.avgTtftMs,
+      avgLatencyMsQueue: queueSummary.avgLatencyMs,
+      avgLatencyMsDirect: directSummary.avgLatencyMs,
+      avgTokensPerSecondQueue: queueSummary.avgTokensPerSecond,
+      avgTokensPerSecondDirect: directSummary.avgTokensPerSecond,
+      batchWallClockMsQueue: queueBatch.wallClockMs,
+      batchWallClockMsDirect: directBatch.wallClockMs,
+      batchTokensPerSecondQueue,
+      batchTokensPerSecondDirect,
+      queueEngineChat: queueBatch.diagnostics,
+      directEngineChat: directBatch.diagnostics,
     },
   };
 }

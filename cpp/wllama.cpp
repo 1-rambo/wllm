@@ -75,6 +75,10 @@ static int64_t action_trace_now_ms()
 static bool action_trace_is_key_action(const std::string &action)
 {
   return action == "chat_start" ||
+         action == "chat_start_hist" ||
+         action == "chat_resume" ||
+         action == "chat_checkpoint" ||
+         action == "chat_cache_hint" ||
          action == "chat_finish" ||
          action == "decode" ||
          action == "sampling_sample";
@@ -180,9 +184,29 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
       auto res = action_tree_reset(app, req_raw);
       res.handler.serialize(output_buffer);
     }
+    else if (action == "chat_cache_hint")
+    {
+      auto res = action_tree_cache_hint(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_resume")
+    {
+      auto res = action_tree_chat_resume(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_checkpoint")
+    {
+      auto res = action_tree_chat_checkpoint(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
     else if (action == "chat_start")
     {
       auto res = action_tree_chat_start(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_start_hist")
+    {
+      auto res = action_tree_chat_start_hist(app, req_raw);
       res.handler.serialize(output_buffer);
     }
     else if (action == "chat_finish")

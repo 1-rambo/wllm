@@ -27,6 +27,13 @@ export interface BenchConfig {
   modelUrl: string;
   nCtx: number;
   nBatch: number;
+  engineChatServiceUpperBoundMs: number;
+  engineChatQueueMaxPending: number;
+  engineChatSliceTokenBudget: number;
+  engineChatPrefillSliceMaxMs: number;
+  engineChatCostWarmupRequests: number;
+  engineChatCostSampleWindow: number;
+  engineChatTraceEnabled: boolean;
   treeBackend: TreeBackend;
   target: BenchTarget;
   experimentRunMode: ExperimentRunMode;
@@ -112,6 +119,31 @@ export interface QueueVsDirectSummary {
   batchWallClockMsDirect: number;
   batchTokensPerSecondQueue: number;
   batchTokensPerSecondDirect: number;
+  queueEngineChat?: EngineChatBatchDiagnostics;
+  directEngineChat?: EngineChatBatchDiagnostics;
+}
+
+export interface EngineChatBatchDiagnostics {
+  sampleCount: number;
+  maxPendingCount: number;
+  maxNormalPendingCount: number;
+  maxOverduePendingCount: number;
+  snapshotsWithOverdue: number;
+  maxEstimatedServiceMs: number;
+  maxEstimatedPromptTokens: number;
+  maxSliceCount: number;
+  maxGeneratedTokens: number;
+  maxRuntimeAssistantChars: number;
+  costModelObservedCount: number;
+  costModelSampleCount: number;
+  learnedPrefillCostPerTokenMs: number | null;
+  learnedDecodeCostPerTokenMs: number | null;
+  learnedPostCostMs: number | null;
+  learnedRestoreL1CostPerTokenMs: number | null;
+  learnedRestoreL2CostPerTokenMs: number | null;
+  learnedRestoreL3CostPerTokenMs: number | null;
+  learnedRebuildCostPerTokenMs: number | null;
+  learnedParentRecoverCostMs: number | null;
 }
 
 export interface BenchDiagnostics {

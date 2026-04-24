@@ -9,7 +9,7 @@ import {
 import { runSglangStyleBench } from './bench/runner';
 import type { BenchBackend, BenchConfig, BenchProgressEvent, BenchReport, BenchTarget, ExperimentRunMode, QAResult } from './bench/types';
 
-const MODEL_BASE_DIR = '/Users/rambo/Desktop/wllama-webgpu/model';
+const MODEL_BASE_DIR = '/Users/rambo/Desktop/wllama-webgpu/examples/sglang-style-mmlu-hellaswag/model/';
 const MODEL_FILE = 'Llama-3.2-1B-Instruct-Q4_0.gguf';
 
 const DEFAULT_CONFIG: BenchConfig = {
@@ -18,6 +18,13 @@ const DEFAULT_CONFIG: BenchConfig = {
   modelUrl: `${window.location.origin}/@fs${encodeURI(`${MODEL_BASE_DIR}/${MODEL_FILE}`)}`,
   nCtx: 8192,
   nBatch: 512,
+  engineChatServiceUpperBoundMs: 30000,
+  engineChatQueueMaxPending: 512,
+  engineChatSliceTokenBudget: 64,
+  engineChatPrefillSliceMaxMs: 1500,
+  engineChatCostWarmupRequests: 8,
+  engineChatCostSampleWindow: 128,
+  engineChatTraceEnabled: true,
   treeBackend: 'true-tree',
   target: 'mmlu',
   experimentRunMode: 'exp1',
@@ -37,7 +44,7 @@ const DEFAULT_CONFIG: BenchConfig = {
   hellaEvalCount: 1,
   exp4Concurrency: 4,
   exp4SampleCount: 256,
-  exp4OutputTokens: 1,
+  exp4OutputTokens: 96,
 };
 
 const DEFAULT_HELLA_URL = '/datasets/hellaswag/hellaswag_val.jsonl';
@@ -130,6 +137,16 @@ function reportSummaryLines(report: BenchReport): string[] {
     lines.push(`[Exp4] latency(queue/direct)=${report.queueVsDirect.avgLatencyMsQueue.toFixed(2)}ms/${report.queueVsDirect.avgLatencyMsDirect.toFixed(2)}ms`);
     lines.push(`[Exp4] avgReqTps(queue/direct)=${report.queueVsDirect.avgTokensPerSecondQueue.toFixed(3)}/${report.queueVsDirect.avgTokensPerSecondDirect.toFixed(3)}`);
     lines.push(`[Exp4] batchTps(queue/direct)=${report.queueVsDirect.batchTokensPerSecondQueue.toFixed(3)}/${report.queueVsDirect.batchTokensPerSecondDirect.toFixed(3)} wallClockMs(queue/direct)=${report.queueVsDirect.batchWallClockMsQueue.toFixed(2)}/${report.queueVsDirect.batchWallClockMsDirect.toFixed(2)}`);
+    if (report.queueVsDirect.queueEngineChat) {
+      const q = report.queueVsDirect.queueEngineChat;
+      lines.push(`[Exp4/QueueDiag] pendingMax=${q.maxPendingCount} overdueMax=${q.maxOverduePendingCount} overdueSamples=${q.snapshotsWithOverdue} sliceMax=${q.maxSliceCount} promptTokMax=${q.maxEstimatedPromptTokens}`);
+      lines.push(`[Exp4/QueueDiag] learned(prefill/decode/rebuild)=${q.learnedPrefillCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${q.learnedDecodeCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${q.learnedRebuildCostPerTokenMs?.toFixed(2) ?? 'n/a'} observed=${q.costModelObservedCount}`);
+    }
+    if (report.queueVsDirect.directEngineChat) {
+      const d = report.queueVsDirect.directEngineChat;
+      lines.push(`[Exp4/DirectDiag] pendingMax=${d.maxPendingCount} overdueMax=${d.maxOverduePendingCount} sliceMax=${d.maxSliceCount} promptTokMax=${d.maxEstimatedPromptTokens}`);
+      lines.push(`[Exp4/DirectDiag] learned(prefill/decode/rebuild)=${d.learnedPrefillCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${d.learnedDecodeCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${d.learnedRebuildCostPerTokenMs?.toFixed(2) ?? 'n/a'} observed=${d.costModelObservedCount}`);
+    }
   }
   if (report.diagnostics) {
     lines.push(`[Diag] restarts=${report.diagnostics.runtimeRestartCount} failures(timeout/abort/disposed/other)=${report.diagnostics.timeoutFailureCount}/${report.diagnostics.abortFailureCount}/${report.diagnostics.disposedFailureCount}/${report.diagnostics.otherFailureCount}`);
@@ -429,6 +446,13 @@ export default function App() {
         `modelUrl: ${cfg.modelUrl}`,
         `nCtx: ${cfg.nCtx}`,
         `nBatch: ${cfg.nBatch}`,
+        `engineChatServiceUpperBoundMs: ${cfg.engineChatServiceUpperBoundMs}`,
+        `engineChatQueueMaxPending: ${cfg.engineChatQueueMaxPending}`,
+        `engineChatSliceTokenBudget: ${cfg.engineChatSliceTokenBudget}`,
+        `engineChatPrefillSliceMaxMs: ${cfg.engineChatPrefillSliceMaxMs}`,
+        `engineChatCostWarmupRequests: ${cfg.engineChatCostWarmupRequests}`,
+        `engineChatCostSampleWindow: ${cfg.engineChatCostSampleWindow}`,
+        `engineChatTraceEnabled: ${cfg.engineChatTraceEnabled}`,
         `treeBackend: ${cfg.treeBackend}`,
         `target: ${cfg.target}`,
         `experimentRunMode: ${cfg.experimentRunMode}`,
@@ -466,6 +490,13 @@ export default function App() {
           modelUrl: cfg.modelUrl,
           nCtx: cfg.nCtx,
           nBatch: cfg.nBatch,
+          engineChatServiceUpperBoundMs: cfg.engineChatServiceUpperBoundMs,
+          engineChatQueueMaxPending: cfg.engineChatQueueMaxPending,
+          engineChatSliceTokenBudget: cfg.engineChatSliceTokenBudget,
+          engineChatPrefillSliceMaxMs: cfg.engineChatPrefillSliceMaxMs,
+          engineChatCostWarmupRequests: cfg.engineChatCostWarmupRequests,
+          engineChatCostSampleWindow: cfg.engineChatCostSampleWindow,
+          engineChatTraceEnabled: cfg.engineChatTraceEnabled,
           treeBackend: cfg.treeBackend,
           target: cfg.target,
           experimentRunMode: cfg.experimentRunMode,
@@ -760,6 +791,81 @@ export default function App() {
 
         <div className="row4">
           <label>
+            <span>Queue Max Pending</span>
+            <input
+              className="text-input"
+              type="number"
+              value={cfg.engineChatQueueMaxPending}
+              onChange={(e) => setCfg((p) => ({ ...p, engineChatQueueMaxPending: Math.max(1, Number(e.target.value) || 128) }))}
+              disabled={running || cfg.backend !== 'wllama'}
+            />
+          </label>
+          <label>
+            <span>Slice Token Budget</span>
+            <input
+              className="text-input"
+              type="number"
+              value={cfg.engineChatSliceTokenBudget}
+              onChange={(e) => setCfg((p) => ({ ...p, engineChatSliceTokenBudget: Math.max(1, Number(e.target.value) || 64) }))}
+              disabled={running || cfg.backend !== 'wllama'}
+            />
+          </label>
+          <label>
+            <span>Prefill Slice Max (ms)</span>
+            <input
+              className="text-input"
+              type="number"
+              value={cfg.engineChatPrefillSliceMaxMs}
+              onChange={(e) => setCfg((p) => ({ ...p, engineChatPrefillSliceMaxMs: Math.max(1, Number(e.target.value) || 1500) }))}
+              disabled={running || cfg.backend !== 'wllama'}
+            />
+          </label>
+          <label>
+            <span>Warmup Requests</span>
+            <input
+              className="text-input"
+              type="number"
+              value={cfg.engineChatCostWarmupRequests}
+              onChange={(e) => setCfg((p) => ({ ...p, engineChatCostWarmupRequests: Math.max(0, Number(e.target.value) || 0) }))}
+              disabled={running || cfg.backend !== 'wllama'}
+            />
+          </label>
+        </div>
+
+        <div className="row4">
+          <label>
+            <span>Cost Sample Window</span>
+            <input
+              className="text-input"
+              type="number"
+              value={cfg.engineChatCostSampleWindow}
+              onChange={(e) => setCfg((p) => ({ ...p, engineChatCostSampleWindow: Math.max(8, Number(e.target.value) || 128) }))}
+              disabled={running || cfg.backend !== 'wllama'}
+            />
+          </label>
+          <label>
+            <span>Service Upper Bound (ms)</span>
+            <input
+              className="text-input"
+              type="number"
+              value={cfg.engineChatServiceUpperBoundMs}
+              onChange={(e) => setCfg((p) => ({ ...p, engineChatServiceUpperBoundMs: Math.max(1000, Number(e.target.value) || 30000) }))}
+              disabled={running || cfg.backend !== 'wllama'}
+            />
+          </label>
+          <label>
+            <span>Engine Trace</span>
+            <input
+              type="checkbox"
+              checked={cfg.engineChatTraceEnabled}
+              onChange={(e) => setCfg((p) => ({ ...p, engineChatTraceEnabled: e.target.checked }))}
+              disabled={running || cfg.backend !== 'wllama'}
+            />
+          </label>
+        </div>
+
+        <div className="row4">
+          <label>
             <span>MMLU eval count</span>
             <input
               className="text-input"
@@ -939,6 +1045,26 @@ export default function App() {
                 <div>Direct batch tokens/s: {tps(report.queueVsDirect.batchTokensPerSecondDirect)}</div>
                 <div>Queue batch wall-clock: {ms(report.queueVsDirect.batchWallClockMsQueue)}</div>
                 <div>Direct batch wall-clock: {ms(report.queueVsDirect.batchWallClockMsDirect)}</div>
+                {report.queueVsDirect.queueEngineChat ? (
+                  <>
+                    <div>Queue pending max: {report.queueVsDirect.queueEngineChat.maxPendingCount}</div>
+                    <div>Queue overdue max: {report.queueVsDirect.queueEngineChat.maxOverduePendingCount}</div>
+                    <div>Queue slice max: {report.queueVsDirect.queueEngineChat.maxSliceCount}</div>
+                    <div>Queue prompt tokens max: {report.queueVsDirect.queueEngineChat.maxEstimatedPromptTokens}</div>
+                    <div>Queue cost obs count: {report.queueVsDirect.queueEngineChat.costModelObservedCount}</div>
+                    <div>Queue learned prefill/decode: {report.queueVsDirect.queueEngineChat.learnedPrefillCostPerTokenMs?.toFixed(2) ?? 'n/a'} / {report.queueVsDirect.queueEngineChat.learnedDecodeCostPerTokenMs?.toFixed(2) ?? 'n/a'}</div>
+                  </>
+                ) : null}
+                {report.queueVsDirect.directEngineChat ? (
+                  <>
+                    <div>Direct pending max: {report.queueVsDirect.directEngineChat.maxPendingCount}</div>
+                    <div>Direct overdue max: {report.queueVsDirect.directEngineChat.maxOverduePendingCount}</div>
+                    <div>Direct slice max: {report.queueVsDirect.directEngineChat.maxSliceCount}</div>
+                    <div>Direct prompt tokens max: {report.queueVsDirect.directEngineChat.maxEstimatedPromptTokens}</div>
+                    <div>Direct cost obs count: {report.queueVsDirect.directEngineChat.costModelObservedCount}</div>
+                    <div>Direct learned prefill/decode: {report.queueVsDirect.directEngineChat.learnedPrefillCostPerTokenMs?.toFixed(2) ?? 'n/a'} / {report.queueVsDirect.directEngineChat.learnedDecodeCostPerTokenMs?.toFixed(2) ?? 'n/a'}</div>
+                  </>
+                ) : null}
               </div>
             </section>
           ) : null}

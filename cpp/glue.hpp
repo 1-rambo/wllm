@@ -949,6 +949,7 @@ struct glue_msg_tree_state_res
   GLUE_FIELD(arr_int, prefix_token_counts)
   GLUE_FIELD(arr_int, generation_time_ms)
   GLUE_FIELD(arr_int, cached_token_counts)
+  GLUE_FIELD(arr_int, cache_tier_levels)
   GLUE_FIELD(arr_int, snapshot_token_bytes)
   GLUE_FIELD(arr_int, created_at_s)
   GLUE_FIELD(arr_int, last_accessed_at_s)
@@ -1059,6 +1060,51 @@ struct glue_msg_tree_reset_res
   GLUE_FIELD(str, message)
 };
 
+struct glue_msg_tree_cache_hint_req
+{
+  GLUE_HANDLER("tchi_req")
+  GLUE_FIELD(arr_int, hot_node_ids)
+  GLUE_FIELD(float, queue_pressure)
+};
+
+struct glue_msg_tree_cache_hint_res
+{
+  GLUE_HANDLER("tchi_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
+struct glue_msg_tree_chat_resume_req
+{
+  GLUE_HANDLER("tchr_req")
+  GLUE_FIELD(int, node_id)
+};
+
+struct glue_msg_tree_chat_resume_res
+{
+  GLUE_HANDLER("tchr_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(int, restore_cache_ms)
+  GLUE_FIELD(int, rebuild_prompt_ms)
+  GLUE_FIELD(int, resumed_prefix_token_count)
+};
+
+struct glue_msg_tree_chat_checkpoint_req
+{
+  GLUE_HANDLER("tchp_req")
+  GLUE_FIELD(int, node_id)
+  GLUE_FIELD(str, assistant_text)
+  GLUE_FIELD(int, generation_time_ms)
+};
+
+struct glue_msg_tree_chat_checkpoint_res
+{
+  GLUE_HANDLER("tchp_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+};
+
 /////////
 // Application-level tree chat transaction API (OpenAI-style workflow)
 
@@ -1077,6 +1123,40 @@ struct glue_msg_tree_chat_start_res
   GLUE_FIELD(bool, success)
   GLUE_FIELD(str, message)
   GLUE_FIELD(int, node_id)
+  GLUE_FIELD(int, restore_cache_ms)
+  GLUE_FIELD(int, rebuild_prompt_ms)
+  GLUE_FIELD(int, parent_recover_ms)
+  GLUE_FIELD(int, start_overhead_ms)
+  GLUE_FIELD(bool, restore_attempted)
+  GLUE_FIELD(bool, restore_hit)
+  GLUE_FIELD(bool, rebuild_used)
+  GLUE_FIELD(arr_str, roles)
+  GLUE_FIELD(arr_str, contents)
+  GLUE_FIELD(str, formatted_chat)
+};
+
+// Start a chat transaction by resolving parent from full history in native side.
+struct glue_msg_tree_chat_start_hist_req
+{
+  GLUE_HANDLER("tchh_req")
+  GLUE_FIELD(arr_str, roles)
+  GLUE_FIELD(arr_str, contents)
+  GLUE_FIELD(str, user_text)
+};
+
+struct glue_msg_tree_chat_start_hist_res
+{
+  GLUE_HANDLER("tchh_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(int, node_id)
+  GLUE_FIELD(int, restore_cache_ms)
+  GLUE_FIELD(int, rebuild_prompt_ms)
+  GLUE_FIELD(int, parent_recover_ms)
+  GLUE_FIELD(int, start_overhead_ms)
+  GLUE_FIELD(bool, restore_attempted)
+  GLUE_FIELD(bool, restore_hit)
+  GLUE_FIELD(bool, rebuild_used)
   GLUE_FIELD(arr_str, roles)
   GLUE_FIELD(arr_str, contents)
   GLUE_FIELD(str, formatted_chat)
