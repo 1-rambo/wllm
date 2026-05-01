@@ -120,19 +120,19 @@ const DEFAULT_CONFIG: BenchConfig = {
   modelUrl: `${window.location.origin}/@fs${encodeURI(`${MODEL_BASE_DIR}/${MODEL_FILE}`)}`,
   nCtx: 16384,
   nBatch: 512,
-  requestCount: 10,
+  requestCount: 12,
   outputTokens: 16,
-  uiInstanceCount: 90000,
-  sharedPrefixRepeats: 48,
+  uiInstanceCount: 85000,
+  sharedPrefixRepeats: 24,
   fullTechQueueMaxPending: 64,
-  fullTechSliceTokenBudget: 32,
-  fullTechPrefillSliceMaxMs: 100,
+  fullTechSliceTokenBudget: 1536,
+  fullTechPrefillSliceMaxMs: 1200,
   fullTechWarmupRequests: 4,
   fullTechSampleWindow: 64,
   treeMemoryCapMB: 2048,
   scanPointCount: 5,
   scanMinMultiplier: 1,
-  scanMaxMultiplier: 1.6,
+  scanMaxMultiplier: 1.5,
 };
 
 function avg(values: number[]): number {
@@ -538,9 +538,10 @@ function buildPressurePoints(baseConfig: BenchConfig): PressurePoint[] {
       ...baseConfig,
       requestCount: Math.max(1, Math.round(baseConfig.requestCount * multiplier)),
       outputTokens: Math.max(12, Math.round(baseConfig.outputTokens + (multiplier - 1) * 4)),
-      uiInstanceCount: Math.max(1000, Math.round(baseConfig.uiInstanceCount * (1 + (multiplier - 1) * 0.55))),
-      sharedPrefixRepeats: Math.max(8, Math.round(baseConfig.sharedPrefixRepeats * (1 + (multiplier - 1) * 0.2))),
-      fullTechPrefillSliceMaxMs: Math.max(60, Math.round(baseConfig.fullTechPrefillSliceMaxMs * (1 - (multiplier - 1) * 0.2))),
+      uiInstanceCount: Math.max(1000, Math.round(baseConfig.uiInstanceCount * (1 + (multiplier - 1) * 0.6))),
+      sharedPrefixRepeats: Math.max(8, Math.round(baseConfig.sharedPrefixRepeats * (1 + (multiplier - 1) * 0.18))),
+      fullTechSliceTokenBudget: Math.max(512, Math.round(baseConfig.fullTechSliceTokenBudget * (1 + (multiplier - 1) * 0.08))),
+      fullTechPrefillSliceMaxMs: Math.max(700, Math.round(baseConfig.fullTechPrefillSliceMaxMs * (1 + (multiplier - 1) * 0.06))),
     };
     const requestRatio = nextConfig.requestCount / Math.max(1, baseConfig.requestCount);
     const tokenRatio = nextConfig.outputTokens / Math.max(1, baseConfig.outputTokens);

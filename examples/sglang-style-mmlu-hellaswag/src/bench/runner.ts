@@ -8,13 +8,20 @@ import type {
   BenchLogEvent,
   BenchProgressEvent,
   BenchReport,
+  BenchSampleMetric,
   BenchSummary,
   CacheProfile,
+  CdfPoint,
   HellaSwagItem,
   MmluExperimentMode,
   MMLUItem,
   QueueVsDirectSummary,
   QAResult,
+  SchedulingStressArm,
+  SchedulingStressArmSummary,
+  SchedulingStressClassSummary,
+  SchedulingStressRequestMetric,
+  SchedulingStressSummary,
 } from './types';
 
 const WLLAMA_CONFIG_PATHS = {
@@ -45,6 +52,91 @@ function assertNotAborted(signal?: AbortSignal): void {
 function avg(values: number[]): number {
   if (!values.length) return 0;
   return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+function buildCdf(values: number[]): CdfPoint[] {
+  if (!values.length) return [];
+  const sorted = values
+    .filter((value) => Number.isFinite(value))
+    .slice()
+    .sort((a, b) => a - b);
+  return sorted.map((value, index) => ({
+    value,
+    cdf: (index + 1) / sorted.length,
+  }));
+}
+
+function logSampleMetric(
+  onLog: ((e: BenchLogEvent) => void) | undefined,
+  metric: BenchSampleMetric
+): void {
+  const subjectPart = metric.subject ? ` subject=${metric.subject}` : '';
+  const visitPart = typeof metric.visitOrdinal === 'number' ? ` visit=${metric.visitOrdinal}` : '';
+  const repeatPart = typeof metric.isRepeatVisit === 'boolean' ? ` repeat=${metric.isRepeatVisit ? 1 : 0}` : '';
+  const restorePart = metric.restoreSource ? ` restore=${metric.restoreSource}` : '';
+  const parentRecoverPart = typeof metric.hadParentRecover === 'boolean'
+    ? ` parentRecover=${metric.hadParentRecover ? 1 : 0}`
+    : '';
+  const tierTokensPart = metric.tierTokensAfter
+    ? ` tierTokensAfter=${metric.tierTokensAfter.l1}/${metric.tierTokensAfter.l2}/${metric.tierTokensAfter.l3}`
+    : '';
+  const tierSlotsPart = metric.tierSlotsAfter
+    ? ` tierSlotsAfter=${metric.tierSlotsAfter.l1}/${metric.tierSlotsAfter.l2}/${metric.tierSlotsAfter.l3}`
+    : '';
+  onLog?.({
+    text: [
+      `[Metric/${metric.benchmark}/${metric.mode}]`,
+      `id=${metric.id}${subjectPart}${visitPart}${repeatPart}${restorePart}${parentRecoverPart}${tierTokensPart}${tierSlotsPart}`,
+      `correct=${metric.correct ? 1 : 0}`,
+      `latencyMs=${metric.latencyMs.toFixed(2)}`,
+      `ttftMs=${metric.ttftMs.toFixed(2)}`,
+      `tokens=${metric.tokenCount}`,
+      `tps=${metric.tokensPerSecond.toFixed(3)}`,
+    ].join(' '),
+  });
+}
+
+type TierSnapshot = {
+  l1Tokens: number;
+  l2Tokens: number;
+  l3Tokens: number;
+  l1Slots: number;
+  l2Slots: number;
+  l3Slots: number;
+  restoreHitsL1: number;
+  restoreHitsL2: number;
+  restoreHitsL3: number;
+  restoreMisses: number;
+  restoreRebuilds: number;
+  parentRecoverAttempts: number;
+  parentRecoverSuccesses: number;
+};
+
+function extractTierSnapshot(state: Awaited<ReturnType<Wllama['chatGetState']>>): TierSnapshot {
+  return {
+    l1Tokens: state.tierStats?.l1Tokens ?? 0,
+    l2Tokens: state.tierStats?.l2Tokens ?? 0,
+    l3Tokens: state.tierStats?.l3Tokens ?? 0,
+    l1Slots: state.tierStats?.l1Slots ?? 0,
+    l2Slots: state.tierStats?.l2Slots ?? 0,
+    l3Slots: state.tierStats?.l3Slots ?? 0,
+    restoreHitsL1: state.tierStats?.restoreHitsL1 ?? 0,
+    restoreHitsL2: state.tierStats?.restoreHitsL2 ?? 0,
+    restoreHitsL3: state.tierStats?.restoreHitsL3 ?? 0,
+    restoreMisses: state.tierStats?.restoreMisses ?? 0,
+    restoreRebuilds: state.tierStats?.restoreRebuilds ?? 0,
+    parentRecoverAttempts: state.tierStats?.parentRecoverAttempts ?? 0,
+    parentRecoverSuccesses: state.tierStats?.parentRecoverSuccesses ?? 0,
+  };
+}
+
+function inferRestoreSource(before: TierSnapshot, after: TierSnapshot): BenchSampleMetric['restoreSource'] {
+  if (after.restoreHitsL1 > before.restoreHitsL1) return 'L1';
+  if (after.restoreHitsL2 > before.restoreHitsL2) return 'L2';
+  if (after.restoreHitsL3 > before.restoreHitsL3) return 'L3';
+  if (after.restoreRebuilds > before.restoreRebuilds) return 'REBUILD';
+  if (after.restoreMisses > before.restoreMisses) return 'MISS';
+  return 'UNKNOWN';
 }
 
 function makeSeededRng(seed: number): () => number {
@@ -582,7 +674,8 @@ async function safeExitWllama(
 
 async function createLoadedWllama(
   config: BenchConfig,
-  onLog?: (e: BenchLogEvent) => void
+  onLog?: (e: BenchLogEvent) => void,
+  engineOverrides: Record<string, unknown> = {}
 ): Promise<Wllama> {
   const wllama = new Wllama(WLLAMA_CONFIG_PATHS, {
     preferWebGPU: true,
@@ -595,6 +688,7 @@ async function createLoadedWllama(
     engineChatCostWarmupRequests: config.engineChatCostWarmupRequests,
     engineChatCostSampleWindow: config.engineChatCostSampleWindow,
     engineChatTraceEnabled: config.engineChatTraceEnabled,
+    ...engineOverrides,
     logger: createBenchWllamaLogger(onLog),
   });
   onLog?.({ text: '[Wllama] loading model...' });
@@ -894,6 +988,65 @@ function buildMmluSharedPrefix(shots: MMLUItem[]): string {
   return parts.join('\n');
 }
 
+function repeatMmluExamples(seedShots: MMLUItem[], targetCount: number): MMLUItem[] {
+  if (seedShots.length === 0 || targetCount <= 0) {
+    return [];
+  }
+  const repeated: MMLUItem[] = [];
+  for (let i = 0; i < targetCount; i += 1) {
+    repeated.push(seedShots[i % seedShots.length]);
+  }
+  return repeated;
+}
+
+async function countFormattedPromptTokens(runtime: Wllama, userText: string): Promise<number> {
+  const formatted = await runtime.formatChat([{ role: 'user', content: userText }], true);
+  const tokens = await runtime.tokenize(formatted, true);
+  return tokens.length;
+}
+
+async function fitRepeatedMmluPrefixToRuntimeBudget(
+  runtime: Wllama,
+  seedShots: MMLUItem[],
+  desiredExampleCount: number,
+  questionPrompt: string,
+  maxPromptTokens: number
+): Promise<{
+  prefix: string;
+  repeatedExamples: MMLUItem[];
+  estimatedPromptTokens: number;
+}> {
+  const emptyPrefix = buildMmluSharedPrefix([]);
+  const emptyPromptTokens = await countFormattedPromptTokens(runtime, [emptyPrefix, questionPrompt].join('\n\n'));
+  if (seedShots.length === 0 || desiredExampleCount <= 0 || maxPromptTokens <= 0) {
+    return {
+      prefix: emptyPrefix,
+      repeatedExamples: [],
+      estimatedPromptTokens: emptyPromptTokens,
+    };
+  }
+
+  let bestExamples: MMLUItem[] = [];
+  let bestPromptTokens = emptyPromptTokens;
+  for (let count = 1; count <= desiredExampleCount; count += 1) {
+    const repeatedExamples = repeatMmluExamples(seedShots, count);
+    const prefix = buildMmluSharedPrefix(repeatedExamples);
+    const estimatedPromptTokens = await countFormattedPromptTokens(runtime, [prefix, questionPrompt].join('\n\n'));
+    if (estimatedPromptTokens > maxPromptTokens) {
+      break;
+    }
+    bestExamples = repeatedExamples;
+    bestPromptTokens = estimatedPromptTokens;
+  }
+
+  const prefix = buildMmluSharedPrefix(bestExamples);
+  return {
+    prefix,
+    repeatedExamples: bestExamples,
+    estimatedPromptTokens: bestPromptTokens,
+  };
+}
+
 function buildHellaSharedPrefix(shots: HellaSwagItem[]): string {
   const parts = [
     'Select the most likely continuation among options A/B/C/D.',
@@ -1102,12 +1255,13 @@ async function runMmlu(
   recoverWllama?: (oldRuntime: Wllama, reason: string) => Promise<Wllama>,
   onQuestionDone?: () => void,
   onQuestionFailure?: (kind: 'timeout' | 'abort' | 'disposed' | 'other', details: string) => void,
-  onCacheMaintenanceMs?: (ms: number) => void
+  onCacheMaintenanceMs?: (category: CacheMaintenanceCategory, ms: number, state?: Awaited<ReturnType<Wllama['chatGetState']>> | null) => void
 ): Promise<{
   results: QAResult[];
   latencyMs: number[];
   ttftMs: number[];
   tokensPerSecond: number[];
+  sampleMetrics: BenchSampleMetric[];
   wllama: Wllama;
   exp2NodeCacheStats?: {
     attempts: number;
@@ -1129,10 +1283,16 @@ async function runMmlu(
   const latencyMs: number[] = [];
   const ttftMs: number[] = [];
   const tokensPerSecond: number[] = [];
-  const trackCacheOp = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const sampleMetrics: BenchSampleMetric[] = [];
+  const trackCacheOp = async <T>(
+    category: CacheMaintenanceCategory,
+    fn: () => Promise<T>,
+    options?: { stateResult?: boolean }
+  ): Promise<T> => {
     const t0 = performance.now();
     const out = await fn();
-    onCacheMaintenanceMs?.(Math.max(0, performance.now() - t0));
+    const maybeState = options?.stateResult ? (out as Awaited<ReturnType<Wllama['chatGetState']>>) : null;
+    onCacheMaintenanceMs?.(category, Math.max(0, performance.now() - t0), maybeState);
     return out;
   };
   let timeoutDiagCount = 0;
@@ -1163,7 +1323,7 @@ async function runMmlu(
 
     if (!plans.length) {
       onLog?.({ text: `[MMLU/${mode}] no eval items for Exp2 random-twice, skipping.` });
-      return { results: rows, latencyMs, ttftMs, tokensPerSecond, wllama: runtime };
+      return { results: rows, latencyMs, ttftMs, tokensPerSecond, sampleMetrics, wllama: runtime };
     }
 
     if (plans.length <= 1) {
@@ -1228,15 +1388,15 @@ async function runMmlu(
     );
 
     const rebuildExp2Session = async () => {
-      await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+      await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
         treeMemoryCapBytes,
         tieredCacheOpts
       ), `MMLU/${mode}/exp2/chatSessionInit`));
       await probeTreeState(runtime, `MMLU/${mode}/exp2/afterChatSessionInit`, onLog);
-      const state = await trackCacheOp(() => withBenchTimeout(
+      const state = await trackCacheOp('stateRead', () => withBenchTimeout(
         runtime.chatGetState(),
         `MMLU/${mode}/exp2/chatGetState`
-      ));
+      ), { stateResult: true });
       const rootNodeId = state.rootId;
       onLog?.({ text: `[MMLU/${mode}] Exp2 shared session ready root=${rootNodeId} (lazy subject prefix warmup)` });
       return rootNodeId;
@@ -1252,20 +1412,20 @@ async function runMmlu(
       }
 
       const sharedPrefix = sharedPrefixBySubject.get(subject) ?? '';
-      const setup = await chatFromNodeWithBenchTimeout(runtime, rootNodeId, sharedPrefix, {
+      const setup = await trackCacheOp('prefixSetup', () => chatFromNodeWithBenchTimeout(runtime, rootNodeId, sharedPrefix, {
         nPredict: 0,
         abortSignal: signal,
-      }, `MMLU/${mode}/exp2/subject=${subject}/sharedPrefixChatFromNode`);
+      }, `MMLU/${mode}/exp2/subject=${subject}/sharedPrefixChatFromNode`));
       sharedNodeBySubject.set(subject, setup.nodeId);
       onLog?.({ text: `[MMLU/${mode}] subject=${subject} lazy shared node prepared node=${setup.nodeId}` });
       return setup.nodeId;
     };
 
     const maybeRotateExp2Session = async () => {
-      const state = await trackCacheOp(() => withBenchTimeout(
+      const state = await trackCacheOp('stateRead', () => withBenchTimeout(
         runtime.chatGetState(),
         `MMLU/${mode}/exp2/seqBudget/chatGetState`
-      ));
+      ), { stateResult: true });
       const nodeCount = state.nodes?.size ?? 0;
       if (nodeCount < TREE_SEQ_REBUILD_WATERMARK) {
         return;
@@ -1287,6 +1447,7 @@ async function runMmlu(
     });
     const evalItems = shuffleWithSeed(evalQueue, randomSeed);
     const questionNodeById = new Map<string, number>();
+    const questionVisitCounts = new Map<string, number>();
     let nodeCacheAttempts = 0;
     let sharedNodeCacheHits = 0;
     let questionNodeCacheHits = 0;
@@ -1304,10 +1465,10 @@ async function runMmlu(
       await maybeRotateExp2Session();
       const { subject, q } = evalItems[i];
 
-      const cacheProbeState = await trackCacheOp(() => withBenchTimeout(
+      const cacheProbeState = await trackCacheOp('stateRead', () => withBenchTimeout(
         runtime.chatGetState(),
         `MMLU/${mode}/exp2/cacheProbe/chatGetState`
-      ));
+      ), { stateResult: true });
       nodeCacheAttempts += 1;
       const sharedNodeIdForProbe = sharedNodeBySubject.get(subject);
       const questionNodeIdForProbe = questionNodeById.get(q.id);
@@ -1320,17 +1481,60 @@ async function runMmlu(
       let solved = false;
       for (let attempt = 0; attempt < 2 && !solved; attempt += 1) {
         try {
+          const metricsBeforeState = attempt === 0
+            ? cacheProbeState
+            : await trackCacheOp('stateRead', () => withBenchTimeout(
+              runtime.chatGetState(),
+              `MMLU/${mode}/exp2/cacheProbeRetry/chatGetState`
+            ), { stateResult: true });
+          const tierBefore = extractTierSnapshot(metricsBeforeState);
           const t0 = performance.now();
           const sharedNodeId = await ensureSubjectSharedNode(subject);
           const out = await runQuestionFromNode(sharedNodeId, questionPrompt, t0);
+          const metricsAfterState = await trackCacheOp('stateRead', () => withBenchTimeout(
+            runtime.chatGetState(),
+            `MMLU/${mode}/exp2/cacheProbeAfter/chatGetState`
+          ), { stateResult: true });
+          const tierAfter = extractTierSnapshot(metricsAfterState);
+          const visitOrdinal = (questionVisitCounts.get(q.id) ?? 0) + 1;
+          questionVisitCounts.set(q.id, visitOrdinal);
 
           latencyMs.push(out.latencyMs);
           ttftMs.push(out.ttftMs);
           tokensPerSecond.push(out.tokensPerSecond);
 
           const bestIdx = out.predIndex;
+          const metric: BenchSampleMetric = {
+            benchmark: 'MMLU',
+            id: q.id,
+            subject,
+            mode,
+            latencyMs: out.latencyMs,
+            ttftMs: out.ttftMs,
+            tokensPerSecond: out.tokensPerSecond,
+            tokenCount: Math.max(1, (await runtime.tokenize(out.answerText, true)).length),
+            correct: bestIdx === q.answerIndex,
+            visitOrdinal,
+            isRepeatVisit: visitOrdinal > 1,
+            restoreSource: inferRestoreSource(tierBefore, tierAfter),
+            hadParentRecover:
+              tierAfter.parentRecoverAttempts > tierBefore.parentRecoverAttempts
+              || tierAfter.parentRecoverSuccesses > tierBefore.parentRecoverSuccesses,
+            tierTokensAfter: {
+              l1: tierAfter.l1Tokens,
+              l2: tierAfter.l2Tokens,
+              l3: tierAfter.l3Tokens,
+            },
+            tierSlotsAfter: {
+              l1: tierAfter.l1Slots,
+              l2: tierAfter.l2Slots,
+              l3: tierAfter.l3Slots,
+            },
+          };
+          sampleMetrics.push(metric);
+          logSampleMetric(onLog, metric);
           onLog?.({
-            text: `[MMLU/${mode}] ${q.id} subject=${subject} pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'} gt=${CHOICE_LABELS[q.answerIndex]} parse=${out.parseSource} raw="${safeText(out.answerText)}"`,
+            text: `[MMLU/${mode}] ${q.id} subject=${subject} parse=${out.parseSource} correct=${metric.correct ? 1 : 0}`,
           });
 
           rows.push({
@@ -1413,6 +1617,7 @@ async function runMmlu(
       latencyMs,
       ttftMs,
       tokensPerSecond,
+      sampleMetrics,
       wllama: runtime,
       exp2NodeCacheStats: {
         attempts: nodeCacheAttempts,
@@ -1500,23 +1705,23 @@ async function runMmlu(
     };
 
     if (mode === 'tree') {
-      await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+      await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
         treeMemoryCapBytes,
         tieredCacheOpts
       ), `MMLU/${mode}/subject=${subject}/chatSessionInit`));
       await probeTreeState(runtime, `MMLU/${mode}/subject=${subject}/afterChatSessionInit`, onLog);
-      const state = await trackCacheOp(() => withBenchTimeout(
+      const state = await trackCacheOp('stateRead', () => withBenchTimeout(
         runtime.chatGetState(),
         `MMLU/${mode}/subject=${subject}/chatGetState`
-      ));
+      ), { stateResult: true });
       const rootNodeId = state.rootId;
       onLog?.({ text: `[MMLU/${mode}] subject=${subject} chat session ready root=${rootNodeId}` });
 
       const setupPrompt = sharedPrefix;
-      const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, setupPrompt, {
+      const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(rootNodeId, setupPrompt, {
         nPredict: 0,
         abortSignal: signal,
-      }), `MMLU/${mode}/subject=${subject}/sharedPrefixChatFromNode`);
+      }), `MMLU/${mode}/subject=${subject}/sharedPrefixChatFromNode`));
       sharedNodeId = setup.nodeId;
       onLog?.({ text: `[MMLU/${mode}] subject=${subject} shared node prepared node=${sharedNodeId}` });
     }
@@ -1525,10 +1730,10 @@ async function runMmlu(
       if (mode !== 'tree') {
         return;
       }
-      const state = await trackCacheOp(() => withBenchTimeout(
+      const state = await trackCacheOp('stateRead', () => withBenchTimeout(
         runtime.chatGetState(),
         `MMLU/${mode}/subject=${subject}/seqBudget/chatGetState`
-      ));
+      ), { stateResult: true });
       const nodeCount = state.nodes?.size ?? 0;
       if (nodeCount < TREE_SEQ_REBUILD_WATERMARK) {
         return;
@@ -1537,18 +1742,18 @@ async function runMmlu(
       onLog?.({
         text: `[MMLU/${mode}] subject=${subject} nodeCount=${nodeCount} approaching seq limit=${TREE_SEQ_HARD_LIMIT}; proactively rotating session`,
       });
-      await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+      await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
         treeMemoryCapBytes,
         tieredCacheOpts
       ), `MMLU/${mode}/subject=${subject}/seqBudget/chatSessionInit`));
-      const refreshed = await trackCacheOp(() => withBenchTimeout(
+      const refreshed = await trackCacheOp('stateRead', () => withBenchTimeout(
         runtime.chatGetState(),
         `MMLU/${mode}/subject=${subject}/seqBudget/refreshedChatGetState`
-      ));
-      const setup = await withBenchTimeout(runtime.chatFromNode(refreshed.rootId, sharedPrefix, {
+      ), { stateResult: true });
+      const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(refreshed.rootId, sharedPrefix, {
         nPredict: 0,
         abortSignal: signal,
-      }), `MMLU/${mode}/subject=${subject}/seqBudget/sharedPrefixChatFromNode`);
+      }), `MMLU/${mode}/subject=${subject}/seqBudget/sharedPrefixChatFromNode`));
       sharedNodeId = setup.nodeId;
       onLog?.({ text: `[MMLU/${mode}] subject=${subject} shared node rebuilt for seq budget node=${sharedNodeId}` });
     };
@@ -1575,19 +1780,19 @@ async function runMmlu(
 
           if (mode === 'flat') {
             // Flat baseline: from zero, run two rounds per item.
-            await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+            await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
               treeMemoryCapBytes,
               tieredCacheOpts
             ), `MMLU/${mode}/${q.id}/chatSessionInit`));
             await probeTreeState(runtime, `MMLU/${mode}/${q.id}/afterChatSessionInit`, onLog);
-            const state = await trackCacheOp(() => withBenchTimeout(
+            const state = await trackCacheOp('stateRead', () => withBenchTimeout(
               runtime.chatGetState(),
               `MMLU/${mode}/${q.id}/chatGetState`
-            ));
-            const setup = await withBenchTimeout(runtime.chatFromNode(state.rootId, sharedPrefix, {
+            ), { stateResult: true });
+            const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(state.rootId, sharedPrefix, {
               nPredict: 0,
               abortSignal: signal,
-            }), `MMLU/${mode}/${q.id}/sharedPrefixChatFromNode`);
+            }), `MMLU/${mode}/${q.id}/sharedPrefixChatFromNode`));
             out = await runQuestionFromNode(setup.nodeId, questionPrompt, t0);
           } else {
             // Tree mode: shared prefix is computed once per subject; each item branches from that node.
@@ -1599,8 +1804,21 @@ async function runMmlu(
           tokensPerSecond.push(out.tokensPerSecond);
 
           const bestIdx = out.predIndex;
+          const metric: BenchSampleMetric = {
+            benchmark: 'MMLU',
+            id: q.id,
+            subject,
+            mode,
+            latencyMs: out.latencyMs,
+            ttftMs: out.ttftMs,
+            tokensPerSecond: out.tokensPerSecond,
+            tokenCount: Math.max(1, (await runtime.tokenize(out.answerText, true)).length),
+            correct: bestIdx === q.answerIndex,
+          };
+          sampleMetrics.push(metric);
+          logSampleMetric(onLog, metric);
           onLog?.({
-            text: `[MMLU/${mode}] ${q.id} pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'} gt=${CHOICE_LABELS[q.answerIndex]} parse=${out.parseSource} raw="${safeText(out.answerText)}"`,
+            text: `[MMLU/${mode}] ${q.id} subject=${subject} parse=${out.parseSource} correct=${metric.correct ? 1 : 0}`,
           });
 
           rows.push({
@@ -1636,20 +1854,20 @@ async function runMmlu(
             onLog?.({ text: `[MMLU/${mode}] ${q.id} recovering runtime after timeout/disposed...` });
             runtime = await recoverWllama(runtime, `MMLU/${mode} ${q.id} timeout/disposed`);
             if (mode === 'tree') {
-              await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+              await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
                 treeMemoryCapBytes,
                 tieredCacheOpts
               ), `MMLU/${mode}/${q.id}/recover/chatSessionInit`));
               await probeTreeState(runtime, `MMLU/${mode}/${q.id}/recover/afterChatSessionInit`, onLog);
-              const state = await trackCacheOp(() => withBenchTimeout(
+              const state = await trackCacheOp('stateRead', () => withBenchTimeout(
                 runtime.chatGetState(),
                 `MMLU/${mode}/${q.id}/recover/chatGetState`
-              ));
+              ), { stateResult: true });
               const rootNodeId = state.rootId;
-              const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+              const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
                 nPredict: 0,
                 abortSignal: signal,
-              }), `MMLU/${mode}/${q.id}/recover/sharedPrefixChatFromNode`);
+              }), `MMLU/${mode}/${q.id}/recover/sharedPrefixChatFromNode`));
               sharedNodeId = setup.nodeId;
               onLog?.({ text: `[MMLU/${mode}] ${q.id} shared node rebuilt after recovery node=${sharedNodeId}` });
             }
@@ -1660,20 +1878,20 @@ async function runMmlu(
           if (!retryable) {
             runtime = await recoverWllama(runtime, `MMLU/${mode} ${q.id} failed`);
             if (mode === 'tree') {
-              await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+              await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
                 treeMemoryCapBytes,
                 tieredCacheOpts
               ), `MMLU/${mode}/${q.id}/recover-nonretry/chatSessionInit`));
               await probeTreeState(runtime, `MMLU/${mode}/${q.id}/recover-nonretry/afterChatSessionInit`, onLog);
-              const state = await trackCacheOp(() => withBenchTimeout(
+              const state = await trackCacheOp('stateRead', () => withBenchTimeout(
                 runtime.chatGetState(),
                 `MMLU/${mode}/${q.id}/recover-nonretry/chatGetState`
-              ));
+              ), { stateResult: true });
               const rootNodeId = state.rootId;
-              const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+              const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
                 nPredict: 0,
                 abortSignal: signal,
-              }), `MMLU/${mode}/${q.id}/recover-nonretry/sharedPrefixChatFromNode`);
+              }), `MMLU/${mode}/${q.id}/recover-nonretry/sharedPrefixChatFromNode`));
               sharedNodeId = setup.nodeId;
               onLog?.({ text: `[MMLU/${mode}] ${q.id} shared node rebuilt after nonretry recovery node=${sharedNodeId}` });
             }
@@ -1696,7 +1914,7 @@ async function runMmlu(
     }
   }
 
-  return { results: rows, latencyMs, ttftMs, tokensPerSecond, wllama: runtime };
+  return { results: rows, latencyMs, ttftMs, tokensPerSecond, sampleMetrics, wllama: runtime };
 }
 
 async function runHella(
@@ -1712,8 +1930,8 @@ async function runHella(
   recoverWllama?: (oldRuntime: Wllama, reason: string) => Promise<Wllama>,
   onQuestionDone?: () => void,
   onQuestionFailure?: (kind: 'timeout' | 'abort' | 'disposed' | 'other', details: string) => void,
-  onCacheMaintenanceMs?: (ms: number) => void
-): Promise<{ results: QAResult[]; latencyMs: number[]; ttftMs: number[]; tokensPerSecond: number[]; wllama: Wllama }> {
+  onCacheMaintenanceMs?: (category: CacheMaintenanceCategory, ms: number, state?: Awaited<ReturnType<Wllama['chatGetState']>> | null) => void
+): Promise<{ results: QAResult[]; latencyMs: number[]; ttftMs: number[]; tokensPerSecond: number[]; sampleMetrics: BenchSampleMetric[]; wllama: Wllama }> {
   let runtime = wllama;
   const treeMemoryCapBytes = getTreeMemoryCapBytes(config.trueTreeMemoryCapMB, onLog, `Hella/${mode}`);
   const tieredCacheOpts = buildTieredCacheOptions(config, onLog);
@@ -1721,10 +1939,15 @@ async function runHella(
     text: `[Exp3Cfg/Hella/${mode}] chatSessionInit capBytes=${treeMemoryCapBytes} tierEnabled=${tieredCacheOpts.enabled} tierCaps(L1/L2/L3)=${tieredCacheOpts.l1TokenCap ?? 0}/${tieredCacheOpts.l2TokenCap ?? 0}/${tieredCacheOpts.l3TokenCap ?? 0} thresholds(L1L2/L2L3)=${tieredCacheOpts.pruneL1L2TokenThreshold ?? 0}/${tieredCacheOpts.pruneL2L3TokenThreshold ?? 0} replacementPolicy=${tieredCacheOpts.replacementPolicy ?? 'hybrid'} fallbackApplied=${tieredCacheOpts.fallbackApplied}`,
   });
   void slotBase;
-  const trackCacheOp = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const trackCacheOp = async <T>(
+    category: CacheMaintenanceCategory,
+    fn: () => Promise<T>,
+    options?: { stateResult?: boolean }
+  ): Promise<T> => {
     const t0 = performance.now();
     const out = await fn();
-    onCacheMaintenanceMs?.(Math.max(0, performance.now() - t0));
+    const maybeState = options?.stateResult ? (out as Awaited<ReturnType<Wllama['chatGetState']>>) : null;
+    onCacheMaintenanceMs?.(category, Math.max(0, performance.now() - t0), maybeState);
     return out;
   };
   const shotItems = data.slice(0, shots);
@@ -1733,21 +1956,21 @@ async function runHella(
   let rootNodeId = 0;
   let sharedNodeId = 0;
   if (mode === 'tree') {
-    await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+    await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
       treeMemoryCapBytes,
       tieredCacheOpts
     ), `Hella/${mode}/chatSessionInit`));
     await probeTreeState(runtime, `Hella/${mode}/afterChatSessionInit`, onLog);
-    const state = await trackCacheOp(() => withBenchTimeout(
+    const state = await trackCacheOp('stateRead', () => withBenchTimeout(
       runtime.chatGetState(),
       `Hella/${mode}/chatGetState`
-    ));
+    ), { stateResult: true });
     rootNodeId = state.rootId;
     onLog?.({ text: `[Hella/${mode}] chat session ready root=${rootNodeId}` });
-    const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+    const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
       nPredict: 0,
       abortSignal: signal,
-    }), `Hella/${mode}/sharedPrefixChatFromNode`);
+    }), `Hella/${mode}/sharedPrefixChatFromNode`));
     sharedNodeId = setup.nodeId;
     onLog?.({ text: `[Hella/${mode}] shared node prepared node=${sharedNodeId}` });
   }
@@ -1756,6 +1979,7 @@ async function runHella(
   const latencyMs: number[] = [];
   const ttftMs: number[] = [];
   const tokensPerSecond: number[] = [];
+  const sampleMetrics: BenchSampleMetric[] = [];
   let timeoutDiagCount = 0;
 
   for (let i = 0; i < evalItems.length; i += 1) {
@@ -1768,18 +1992,18 @@ async function runHella(
       try {
         let out: { predIndex: number; answerText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number };
         if (mode === 'flat') {
-          await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+          await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
             treeMemoryCapBytes,
             tieredCacheOpts
           ), `Hella/${mode}/${q.id}/chatSessionInit`));
-          const state = await trackCacheOp(() => withBenchTimeout(
+          const state = await trackCacheOp('stateRead', () => withBenchTimeout(
             runtime.chatGetState(),
             `Hella/${mode}/${q.id}/chatGetState`
-          ));
-          const setup = await withBenchTimeout(runtime.chatFromNode(state.rootId, sharedPrefix, {
+          ), { stateResult: true });
+          const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(state.rootId, sharedPrefix, {
             nPredict: 0,
             abortSignal: signal,
-          }), `Hella/${mode}/${q.id}/sharedPrefixChatFromNode`);
+          }), `Hella/${mode}/${q.id}/sharedPrefixChatFromNode`));
           out = await runChoicePrompt(runtime, mode, questionPrompt, signal, setup.nodeId, t0);
         } else {
           out = await runChoicePrompt(runtime, mode, questionPrompt, signal, sharedNodeId, t0);
@@ -1789,8 +2013,20 @@ async function runHella(
         tokensPerSecond.push(out.tokensPerSecond);
 
         const bestIdx = out.predIndex;
+        const metric: BenchSampleMetric = {
+          benchmark: 'HellaSwag',
+          id: q.id,
+          mode,
+          latencyMs: out.latencyMs,
+          ttftMs: out.ttftMs,
+          tokensPerSecond: out.tokensPerSecond,
+          tokenCount: Math.max(1, (await runtime.tokenize(out.answerText, true)).length),
+          correct: bestIdx === q.label,
+        };
+        sampleMetrics.push(metric);
+        logSampleMetric(onLog, metric);
         onLog?.({
-          text: `[Hella/${mode}] ${q.id} pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'} gt=${CHOICE_LABELS[q.label]} raw="${safeText(out.answerText)}"`,
+          text: `[Hella/${mode}] ${q.id} correct=${metric.correct ? 1 : 0}`,
         });
 
         rows.push({
@@ -1825,20 +2061,20 @@ async function runHella(
           onLog?.({ text: `[Hella/${mode}] ${q.id} recovering runtime after timeout/disposed...` });
           runtime = await recoverWllama(runtime, `Hella/${mode} ${q.id} timeout/disposed`);
           if (mode === 'tree') {
-            await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+            await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
               treeMemoryCapBytes,
               tieredCacheOpts
             ), `Hella/${mode}/${q.id}/recover/chatSessionInit`));
             await probeTreeState(runtime, `Hella/${mode}/${q.id}/recover/afterChatSessionInit`, onLog);
-            const state = await trackCacheOp(() => withBenchTimeout(
+            const state = await trackCacheOp('stateRead', () => withBenchTimeout(
               runtime.chatGetState(),
               `Hella/${mode}/${q.id}/recover/chatGetState`
-            ));
+            ), { stateResult: true });
             rootNodeId = state.rootId;
-            const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+            const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
               nPredict: 0,
               abortSignal: signal,
-            }), `Hella/${mode}/${q.id}/recover/sharedPrefixChatFromNode`);
+            }), `Hella/${mode}/${q.id}/recover/sharedPrefixChatFromNode`));
             sharedNodeId = setup.nodeId;
           }
           onLog?.({ text: `[Hella/${mode}] ${q.id} retrying on recreated runtime` });
@@ -1848,20 +2084,20 @@ async function runHella(
         if (!retryable) {
           runtime = await recoverWllama(runtime, `Hella/${mode} ${q.id} failed`);
           if (mode === 'tree') {
-            await trackCacheOp(() => withBenchTimeout(runtime.chatSessionInit(
+            await trackCacheOp('sessionInit', () => withBenchTimeout(runtime.chatSessionInit(
               treeMemoryCapBytes,
               tieredCacheOpts
             ), `Hella/${mode}/${q.id}/recover-nonretry/chatSessionInit`));
             await probeTreeState(runtime, `Hella/${mode}/${q.id}/recover-nonretry/afterChatSessionInit`, onLog);
-            const state = await trackCacheOp(() => withBenchTimeout(
+            const state = await trackCacheOp('stateRead', () => withBenchTimeout(
               runtime.chatGetState(),
               `Hella/${mode}/${q.id}/recover-nonretry/chatGetState`
-            ));
+            ), { stateResult: true });
             rootNodeId = state.rootId;
-            const setup = await withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
+            const setup = await trackCacheOp('prefixSetup', () => withBenchTimeout(runtime.chatFromNode(rootNodeId, sharedPrefix, {
               nPredict: 0,
               abortSignal: signal,
-            }), `Hella/${mode}/${q.id}/recover-nonretry/sharedPrefixChatFromNode`);
+            }), `Hella/${mode}/${q.id}/recover-nonretry/sharedPrefixChatFromNode`));
             sharedNodeId = setup.nodeId;
           }
         }
@@ -1882,7 +2118,7 @@ async function runHella(
     }
   }
 
-  return { results: rows, latencyMs, ttftMs, tokensPerSecond, wllama: runtime };
+  return { results: rows, latencyMs, ttftMs, tokensPerSecond, sampleMetrics, wllama: runtime };
 }
 
 function mergeRows(flatRows: QAResult[], treeRows: QAResult[]): QAResult[] {
@@ -1913,7 +2149,9 @@ function summarize(
   ttftFlat: number[],
   ttftTree: number[],
   tpsFlat: number[],
-  tpsTree: number[]
+  tpsTree: number[],
+  sampleMetricsFlat: BenchSampleMetric[],
+  sampleMetricsTree: BenchSampleMetric[]
 ): BenchSummary {
   const accFlat = rows.filter((r) => r.correctFlat).length / Math.max(rows.length, 1);
   const accTree = rows.filter((r) => r.correctTree).length / Math.max(rows.length, 1);
@@ -1942,6 +2180,12 @@ function summarize(
     avgLatencyMsTree: avgTree,
     speedupPct,
     results: rows,
+    sampleMetricsFlat,
+    sampleMetricsTree,
+    latencyCdfFlat: buildCdf(latencyFlat),
+    latencyCdfTree: buildCdf(latencyTree),
+    ttftCdfFlat: buildCdf(ttftFlat),
+    ttftCdfTree: buildCdf(ttftTree),
   };
 }
 
@@ -1962,11 +2206,105 @@ function emptySummary(benchmark: 'MMLU' | 'HellaSwag', shots: number, evalCount:
     avgLatencyMsTree: 0,
     speedupPct: 0,
     results: [],
+    sampleMetricsFlat: [],
+    sampleMetricsTree: [],
+    latencyCdfFlat: [],
+    latencyCdfTree: [],
+    ttftCdfFlat: [],
+    ttftCdfTree: [],
   };
 }
 
+type CacheMaintenanceCategory = 'sessionInit' | 'stateRead' | 'prefixSetup' | 'other';
+
+type CacheMaintenanceRecorder = {
+  totalMs: number;
+  breakdownMs: Record<CacheMaintenanceCategory, number>;
+  occupancySampleCount: number;
+  snapshotTokenBytesSum: number;
+  snapshotTokenBytesPeak: number;
+  tierL1TokensSum: number;
+  tierL2TokensSum: number;
+  tierL3TokensSum: number;
+  tierL1TokensPeak: number;
+  tierL2TokensPeak: number;
+  tierL3TokensPeak: number;
+  tierL1SlotsSum: number;
+  tierL2SlotsSum: number;
+  tierL3SlotsSum: number;
+  tierL1SlotsPeak: number;
+  tierL2SlotsPeak: number;
+  tierL3SlotsPeak: number;
+};
+
+function createCacheMaintenanceRecorder(): CacheMaintenanceRecorder {
+  return {
+    totalMs: 0,
+    breakdownMs: {
+      sessionInit: 0,
+      stateRead: 0,
+      prefixSetup: 0,
+      other: 0,
+    },
+    occupancySampleCount: 0,
+    snapshotTokenBytesSum: 0,
+    snapshotTokenBytesPeak: 0,
+    tierL1TokensSum: 0,
+    tierL2TokensSum: 0,
+    tierL3TokensSum: 0,
+    tierL1TokensPeak: 0,
+    tierL2TokensPeak: 0,
+    tierL3TokensPeak: 0,
+    tierL1SlotsSum: 0,
+    tierL2SlotsSum: 0,
+    tierL3SlotsSum: 0,
+    tierL1SlotsPeak: 0,
+    tierL2SlotsPeak: 0,
+    tierL3SlotsPeak: 0,
+  };
+}
+
+function observeCacheOccupancy(
+  recorder: CacheMaintenanceRecorder,
+  state?: {
+    totalSnapshotTokenBytes?: number;
+    tierStats?: {
+      l1Tokens?: number;
+      l2Tokens?: number;
+      l3Tokens?: number;
+      l1Slots?: number;
+      l2Slots?: number;
+      l3Slots?: number;
+    };
+  } | null
+): void {
+  if (!state) return;
+  const snapshotTokenBytes = state.totalSnapshotTokenBytes ?? 0;
+  const l1Tokens = state.tierStats?.l1Tokens ?? 0;
+  const l2Tokens = state.tierStats?.l2Tokens ?? 0;
+  const l3Tokens = state.tierStats?.l3Tokens ?? 0;
+  const l1Slots = state.tierStats?.l1Slots ?? 0;
+  const l2Slots = state.tierStats?.l2Slots ?? 0;
+  const l3Slots = state.tierStats?.l3Slots ?? 0;
+  recorder.occupancySampleCount += 1;
+  recorder.snapshotTokenBytesSum += snapshotTokenBytes;
+  recorder.snapshotTokenBytesPeak = Math.max(recorder.snapshotTokenBytesPeak, snapshotTokenBytes);
+  recorder.tierL1TokensSum += l1Tokens;
+  recorder.tierL2TokensSum += l2Tokens;
+  recorder.tierL3TokensSum += l3Tokens;
+  recorder.tierL1TokensPeak = Math.max(recorder.tierL1TokensPeak, l1Tokens);
+  recorder.tierL2TokensPeak = Math.max(recorder.tierL2TokensPeak, l2Tokens);
+  recorder.tierL3TokensPeak = Math.max(recorder.tierL3TokensPeak, l3Tokens);
+  recorder.tierL1SlotsSum += l1Slots;
+  recorder.tierL2SlotsSum += l2Slots;
+  recorder.tierL3SlotsSum += l3Slots;
+  recorder.tierL1SlotsPeak = Math.max(recorder.tierL1SlotsPeak, l1Slots);
+  recorder.tierL2SlotsPeak = Math.max(recorder.tierL2SlotsPeak, l2Slots);
+  recorder.tierL3SlotsPeak = Math.max(recorder.tierL3SlotsPeak, l3Slots);
+}
+
 function buildCacheProfile(
-  maintenanceMs: number,
+  recorder: CacheMaintenanceRecorder,
   runStartedAt: number,
   state?: {
     totalSnapshotTokenBytes?: number;
@@ -1974,19 +2312,48 @@ function buildCacheProfile(
       l1Tokens?: number;
       l2Tokens?: number;
       l3Tokens?: number;
+      l1Slots?: number;
+      l2Slots?: number;
+      l3Slots?: number;
     };
   } | null
 ): CacheProfile {
+  observeCacheOccupancy(recorder, state);
   const runTotalMs = Math.max(0, performance.now() - runStartedAt);
   const tier = state?.tierStats;
+  const sampleCount = recorder.occupancySampleCount;
+  const avgOf = (sum: number) => (sampleCount > 0 ? sum / sampleCount : 0);
   return {
-    maintenanceMs,
+    maintenanceMs: recorder.totalMs,
     runTotalMs,
-    maintenancePct: runTotalMs > 0 ? (maintenanceMs / runTotalMs) * 100 : 0,
+    maintenancePct: runTotalMs > 0 ? (recorder.totalMs / runTotalMs) * 100 : 0,
+    maintenanceBreakdownMs: {
+      sessionInitMs: recorder.breakdownMs.sessionInit,
+      stateReadMs: recorder.breakdownMs.stateRead,
+      prefixSetupMs: recorder.breakdownMs.prefixSetup,
+      otherMs: recorder.breakdownMs.other,
+    },
     snapshotTokenBytes: state?.totalSnapshotTokenBytes ?? 0,
     tierL1Tokens: tier?.l1Tokens ?? 0,
     tierL2Tokens: tier?.l2Tokens ?? 0,
     tierL3Tokens: tier?.l3Tokens ?? 0,
+    occupancyStats: {
+      sampleCount,
+      avgSnapshotTokenBytes: avgOf(recorder.snapshotTokenBytesSum),
+      peakSnapshotTokenBytes: recorder.snapshotTokenBytesPeak,
+      avgTierL1Tokens: avgOf(recorder.tierL1TokensSum),
+      avgTierL2Tokens: avgOf(recorder.tierL2TokensSum),
+      avgTierL3Tokens: avgOf(recorder.tierL3TokensSum),
+      peakTierL1Tokens: recorder.tierL1TokensPeak,
+      peakTierL2Tokens: recorder.tierL2TokensPeak,
+      peakTierL3Tokens: recorder.tierL3TokensPeak,
+      avgTierL1Slots: avgOf(recorder.tierL1SlotsSum),
+      avgTierL2Slots: avgOf(recorder.tierL2SlotsSum),
+      avgTierL3Slots: avgOf(recorder.tierL3SlotsSum),
+      peakTierL1Slots: recorder.tierL1SlotsPeak,
+      peakTierL2Slots: recorder.tierL2SlotsPeak,
+      peakTierL3Slots: recorder.tierL3SlotsPeak,
+    },
   };
 }
 
@@ -1996,6 +2363,9 @@ async function tryGetTreeState(runtime: Wllama): Promise<{
     l1Tokens: number;
     l2Tokens: number;
     l3Tokens: number;
+    l1Slots: number;
+    l2Slots: number;
+    l3Slots: number;
     promotions: number;
     demotions: number;
     diskReads: number;
@@ -2020,6 +2390,9 @@ async function tryGetTreeState(runtime: Wllama): Promise<{
           l1Tokens: number;
           l2Tokens: number;
           l3Tokens: number;
+          l1Slots: number;
+          l2Slots: number;
+          l3Slots: number;
           promotions: number;
           demotions: number;
           diskReads: number;
@@ -2063,6 +2436,220 @@ function summarizePerf(rows: RequestPerf[], failed: number): {
     avgTokensPerSecond: avg(rows.map((x) => x.tokensPerSecond)),
     totalTokens: rows.reduce((sum, x) => sum + Math.max(0, x.tokenCount), 0),
     failed,
+  };
+}
+
+function percentile(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const pos = Math.min(sorted.length - 1, Math.max(0, (sorted.length - 1) * q));
+  const lower = Math.floor(pos);
+  const upper = Math.ceil(pos);
+  if (lower === upper) return sorted[lower];
+  const weight = pos - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+
+type SchedulingRequestPlan = {
+  workloadClass: 'short' | 'medium' | 'long';
+  benchmark: 'MMLU' | 'HellaSwag';
+  itemId: string;
+  subject?: string;
+  prompt: string;
+  questionPrompt?: string;
+  prefixKey?: 'medium' | 'long';
+  outputTokenBudget: number;
+  arrivalOffsetMs: number;
+};
+
+function buildSchedulingStressPlans(
+  mmluData: MMLUItem[],
+  hellaData: HellaSwagItem[],
+  config: BenchConfig
+): {
+  plans: SchedulingRequestPlan[];
+  scenarioConfig: SchedulingStressSummary['scenarioConfig'];
+} {
+  const mmluPool = shuffleWithSeed(mmluData.slice(config.mmluShots), config.randomSeed + 701);
+  const hellaPool = shuffleWithSeed(hellaData.slice(config.hellaShots), config.randomSeed + 702);
+  const total = Math.max(6, Number(config.exp4SampleCount) || 12);
+  const longHeadCount = Math.min(1, Math.max(1, mmluPool.length));
+  const tailCount = Math.max(4, total - longHeadCount);
+  const shortTailCount = Math.min(hellaPool.length, Math.max(2, Math.floor(tailCount * 0.62)));
+  const maxPrefixShots = Math.max(0, mmluPool.length - longHeadCount - 2);
+  const mediumPrefixSeedShots = Math.min(3, maxPrefixShots);
+  const longPrefixSeedShots = Math.min(6, maxPrefixShots);
+  const desiredMediumPrefixExampleCount = 24;
+  const desiredLongPrefixExampleCount = 128;
+  const targetStartIndex = Math.max(mediumPrefixSeedShots, longPrefixSeedShots);
+  const mediumTailCount = Math.min(
+    Math.max(0, mmluPool.length - targetStartIndex - longHeadCount),
+    Math.max(2, tailCount - shortTailCount)
+  );
+  if (longHeadCount <= 0 || shortTailCount <= 0 || mediumTailCount <= 0 || longPrefixSeedShots <= 0) {
+    throw new Error(
+      `[Exp4] insufficient mixed-workload data: need MMLU support shots + targets for long/medium workload (mmlu=${mmluPool.length}, hella=${hellaPool.length})`
+    );
+  }
+
+  const longArrivalGapMs = 0;
+  const mediumBurstDelayMs = 100;
+  const shortStreamStartMs = 1500;
+  const shortInterArrivalMs = 150;
+  const dualQueueWaitBudgetScale = 0.5;
+  const dualQueueWaitBudgetCapMs = 30000;
+  const plans: SchedulingRequestPlan[] = [];
+  const longPromptTokenBudget = Math.max(2048, Math.floor(config.nCtx * 0.78));
+  const mediumPromptTokenBudget = Math.max(1024, Math.floor(config.nCtx * 0.42));
+  const fixedOutputBudget = 1;
+  const mediumPrefixExampleCount = desiredMediumPrefixExampleCount;
+  const longPrefixExampleCount = desiredLongPrefixExampleCount;
+  const estimatedMediumPromptTokens = 0;
+  const estimatedLongPromptTokens = 0;
+
+  for (let i = 0; i < longHeadCount; i += 1) {
+    const q = mmluPool[targetStartIndex + i];
+    const questionPrompt = buildMmluQuestionOnlyPrompt(q);
+    plans.push({
+      workloadClass: 'long',
+      benchmark: 'MMLU',
+      itemId: q.id,
+      subject: q.subject,
+      prompt: '',
+      questionPrompt,
+      prefixKey: 'long',
+      outputTokenBudget: fixedOutputBudget,
+      arrivalOffsetMs: i * longArrivalGapMs,
+    });
+  }
+
+  for (let i = 0; i < shortTailCount; i += 1) {
+    const q = hellaPool[i];
+    plans.push({
+      workloadClass: 'short',
+      benchmark: 'HellaSwag',
+      itemId: q.id,
+      prompt: [
+        'Answer with exactly one letter: A, B, C, or D.',
+        buildHellaQuestionOnlyPrompt(q),
+      ].join('\n\n'),
+      outputTokenBudget: fixedOutputBudget,
+      arrivalOffsetMs: shortStreamStartMs + i * shortInterArrivalMs,
+    });
+  }
+
+  for (let i = 0; i < mediumTailCount; i += 1) {
+    const q = mmluPool[targetStartIndex + longHeadCount + i];
+    const questionPrompt = buildMmluQuestionOnlyPrompt(q);
+    plans.push({
+      workloadClass: 'medium',
+      benchmark: 'MMLU',
+      itemId: q.id,
+      subject: q.subject,
+      prompt: '',
+      questionPrompt,
+      prefixKey: 'medium',
+      outputTokenBudget: fixedOutputBudget,
+      arrivalOffsetMs: mediumBurstDelayMs,
+    });
+  }
+
+  return {
+    plans,
+    scenarioConfig: {
+      longHeadCount,
+      shortTailCount,
+      mediumTailCount,
+      longArrivalGapMs,
+      mediumBurstDelayMs,
+      shortStreamStartMs,
+      shortInterArrivalMs,
+      mediumPrefixSeedShots,
+      longPrefixSeedShots,
+      mediumPrefixExampleCount,
+      longPrefixExampleCount,
+      mediumPromptTokenBudget,
+      longPromptTokenBudget,
+      estimatedMediumPromptTokens,
+      estimatedLongPromptTokens,
+      dualQueueWaitBudgetScale,
+      dualQueueWaitBudgetCapMs,
+    },
+  };
+}
+
+function summarizeSchedulingClass(
+  workloadClass: 'short' | 'medium' | 'long',
+  rows: SchedulingStressRequestMetric[]
+): SchedulingStressClassSummary {
+  const wait = rows.filter((row) => row.completed).map((row) => row.waitMs);
+  const ttft = rows.filter((row) => row.completed).map((row) => row.ttftMs);
+  const sojourn = rows.filter((row) => row.completed).map((row) => row.sojournMs);
+  const timeoutCount = rows.filter((row) => row.timedOut).length;
+  const completedCount = rows.filter((row) => row.completed).length;
+  const waitSlaMs = workloadClass === 'short' ? 60_000 : workloadClass === 'medium' ? 180_000 : 60_000;
+  const waitSlaViolationCount = wait.filter((value) => value > waitSlaMs).length;
+  return {
+    workloadClass,
+    requestCount: rows.length,
+    completedCount,
+    timeoutCount,
+    completionRate: rows.length > 0 ? completedCount / rows.length : 0,
+    timeoutRate: rows.length > 0 ? timeoutCount / rows.length : 0,
+    waitSlaMs,
+    waitSlaViolationCount,
+    waitSlaViolationRate: completedCount > 0 ? waitSlaViolationCount / completedCount : 0,
+    avgWaitMs: avg(wait),
+    p95WaitMs: percentile(wait, 0.95),
+    p99WaitMs: percentile(wait, 0.99),
+    maxWaitMs: wait.length > 0 ? Math.max(...wait) : 0,
+    avgTtftMs: avg(ttft),
+    p95TtftMs: percentile(ttft, 0.95),
+    p99TtftMs: percentile(ttft, 0.99),
+    avgSojournMs: avg(sojourn),
+    p95SojournMs: percentile(sojourn, 0.95),
+    p99SojournMs: percentile(sojourn, 0.99),
+  };
+}
+
+function summarizeSchedulingArm(
+  arm: SchedulingStressArm,
+  rows: SchedulingStressRequestMetric[],
+  batchWallClockMs: number,
+  engineChat?: EngineChatBatchDiagnostics
+): SchedulingStressArmSummary {
+  const completed = rows.filter((row) => row.completed);
+  const waits = completed.map((row) => row.waitMs);
+  const ttfts = completed.map((row) => row.ttftMs);
+  const sojourns = completed.map((row) => row.sojournMs);
+  const totalTokens = completed.reduce((sum, row) => sum + row.tokenCount, 0);
+  const timeoutCount = rows.filter((row) => row.timedOut).length;
+  const completedCount = completed.length;
+  return {
+    arm,
+    requestCount: rows.length,
+    completedCount,
+    timeoutCount,
+    completionRate: rows.length > 0 ? completedCount / rows.length : 0,
+    timeoutRate: rows.length > 0 ? timeoutCount / rows.length : 0,
+    batchWallClockMs,
+    throughputReqPerSec: batchWallClockMs > 0 ? (completedCount * 1000) / batchWallClockMs : 0,
+    throughputTokensPerSec: batchWallClockMs > 0 ? (totalTokens * 1000) / batchWallClockMs : 0,
+    avgWaitMs: avg(waits),
+    p50WaitMs: percentile(waits, 0.5),
+    p95WaitMs: percentile(waits, 0.95),
+    p99WaitMs: percentile(waits, 0.99),
+    avgTtftMs: avg(ttfts),
+    p50TtftMs: percentile(ttfts, 0.5),
+    p95TtftMs: percentile(ttfts, 0.95),
+    p99TtftMs: percentile(ttfts, 0.99),
+    avgSojournMs: avg(sojourns),
+    p50SojournMs: percentile(sojourns, 0.5),
+    p95SojournMs: percentile(sojourns, 0.95),
+    p99SojournMs: percentile(sojourns, 0.99),
+    byClass: (['short', 'medium', 'long'] as const).map((workloadClass) =>
+      summarizeSchedulingClass(workloadClass, rows.filter((row) => row.workloadClass === workloadClass))),
+    engineChat,
   };
 }
 
@@ -2307,6 +2894,228 @@ async function runQueueVsDirectMmlu(
   };
 }
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+async function runSchedulingStressMixed(
+  baseConfig: BenchConfig,
+  mmluData: MMLUItem[],
+  hellaData: HellaSwagItem[],
+  onLog?: (e: BenchLogEvent) => void
+): Promise<SchedulingStressSummary> {
+  const { plans, scenarioConfig } = buildSchedulingStressPlans(mmluData, hellaData, baseConfig);
+  onLog?.({
+    text: `[Exp4] mixed workload built total=${plans.length} long=${scenarioConfig.longHeadCount} short=${scenarioConfig.shortTailCount} medium=${scenarioConfig.mediumTailCount}`,
+  });
+
+  const arms: SchedulingStressArm[] = ['fcfs-no-slice', 'single-size-aware', 'dual-queue'];
+  const allMetrics: SchedulingStressRequestMetric[] = [];
+  const armSummaries: SchedulingStressArmSummary[] = [];
+  let materializedPlans: SchedulingRequestPlan[] | null = null;
+  const resolvedScenarioConfig = { ...scenarioConfig };
+
+  for (const arm of arms) {
+    onLog?.({ text: `[Exp4/${arm}] loading dedicated runtime...` });
+    const armRuntime = await createLoadedWllama(
+      { ...baseConfig, engineChatCostWarmupRequests: Math.min(baseConfig.engineChatCostWarmupRequests, 3) },
+      onLog,
+      {
+        engineChatSchedulingPolicy: arm,
+        engineChatWaitBudgetScale: arm === 'dual-queue' ? scenarioConfig.dualQueueWaitBudgetScale : 1,
+        engineChatWaitBudgetCapMs: arm === 'dual-queue' ? scenarioConfig.dualQueueWaitBudgetCapMs : undefined,
+        engineChatYieldEnabled: false,
+      }
+    );
+    try {
+      if (!materializedPlans) {
+        const mediumLongest = plans
+          .filter((plan) => plan.prefixKey === 'medium')
+          .map((plan) => plan.questionPrompt ?? '')
+          .sort((a, b) => b.length - a.length)[0] ?? '';
+        const longLongest = plans
+          .filter((plan) => plan.prefixKey === 'long')
+          .map((plan) => plan.questionPrompt ?? '')
+          .sort((a, b) => b.length - a.length)[0] ?? '';
+        const mediumPrefixFit = await fitRepeatedMmluPrefixToRuntimeBudget(
+          armRuntime,
+          mmluData.slice(baseConfig.mmluShots, baseConfig.mmluShots + resolvedScenarioConfig.mediumPrefixSeedShots),
+          resolvedScenarioConfig.mediumPrefixExampleCount,
+          mediumLongest,
+          resolvedScenarioConfig.mediumPromptTokenBudget
+        );
+        const longPrefixFit = await fitRepeatedMmluPrefixToRuntimeBudget(
+          armRuntime,
+          mmluData.slice(baseConfig.mmluShots, baseConfig.mmluShots + resolvedScenarioConfig.longPrefixSeedShots),
+          resolvedScenarioConfig.longPrefixExampleCount,
+          longLongest,
+          resolvedScenarioConfig.longPromptTokenBudget
+        );
+        resolvedScenarioConfig.mediumPrefixExampleCount = mediumPrefixFit.repeatedExamples.length;
+        resolvedScenarioConfig.longPrefixExampleCount = longPrefixFit.repeatedExamples.length;
+        resolvedScenarioConfig.estimatedMediumPromptTokens = mediumPrefixFit.estimatedPromptTokens;
+        resolvedScenarioConfig.estimatedLongPromptTokens = longPrefixFit.estimatedPromptTokens;
+        materializedPlans = plans.map((plan) => {
+          if (plan.prefixKey === 'medium') {
+            return {
+              ...plan,
+              prompt: [mediumPrefixFit.prefix, plan.questionPrompt ?? ''].join('\n\n'),
+            };
+          }
+          if (plan.prefixKey === 'long') {
+            return {
+              ...plan,
+              prompt: [longPrefixFit.prefix, plan.questionPrompt ?? ''].join('\n\n'),
+            };
+          }
+          return plan;
+        });
+        onLog?.({
+          text: `[Exp4] fitted prompts mediumExamples=${resolvedScenarioConfig.mediumPrefixExampleCount} longExamples=${resolvedScenarioConfig.longPrefixExampleCount} estPromptTok(medium/long)=${resolvedScenarioConfig.estimatedMediumPromptTokens}/${resolvedScenarioConfig.estimatedLongPromptTokens}`,
+        });
+      }
+
+      const activePlans = materializedPlans ?? plans;
+      const warmupPlans = [
+        activePlans.find((plan) => plan.workloadClass === 'long'),
+        activePlans.find((plan) => plan.workloadClass === 'medium'),
+        activePlans.find((plan) => plan.workloadClass === 'short'),
+      ].filter((plan): plan is SchedulingRequestPlan => Boolean(plan));
+      for (const warmup of warmupPlans) {
+        await armRuntime.chatFromNode(0, warmup.prompt, {
+          nPredict: warmup.outputTokenBudget,
+          sampling: { temp: 0, top_p: 1, top_k: 1 },
+        });
+      }
+      await armRuntime.chatReset();
+      onLog?.({ text: `[Exp4/${arm}] warmup done count=${warmupPlans.length}` });
+
+      const runOne = async (plan: SchedulingRequestPlan, batchStartedAt: number): Promise<SchedulingStressRequestMetric> => {
+        const now = performance.now();
+        const remainingDelay = plan.arrivalOffsetMs - Math.max(0, now - batchStartedAt);
+        if (remainingDelay > 0) {
+          await sleepMs(remainingDelay);
+        }
+        const arrivedAt = performance.now();
+        let tokenCount = 0;
+        let tokensPerSecond = 0;
+        let debug: Record<string, unknown> | undefined;
+        try {
+          const result = await armRuntime.chatFromNode(0, plan.prompt, {
+            nPredict: plan.outputTokenBudget,
+            sampling: { temp: 0, top_p: 1, top_k: 1 },
+          }) as unknown as {
+            assistantText: string;
+            debug?: Record<string, unknown>;
+          };
+          debug = result.debug;
+          tokenCount = Math.max(0, Number(debug?.generatedTokens ?? 0));
+          const sojournMs = Number(debug?.totalWallMs ?? 0);
+          const waitMs = Number(debug?.lastQueueWaitMs ?? 0);
+          const ttftMs = Number(debug?.ttftMs ?? 0);
+          const serviceToFirstTokenMs = Math.max(0, ttftMs - waitMs);
+          tokensPerSecond = sojournMs > 0 ? (tokenCount * 1000) / sojournMs : 0;
+          const metric: SchedulingStressRequestMetric = {
+            arm,
+            workloadClass: plan.workloadClass,
+            benchmark: plan.benchmark,
+            itemId: plan.itemId,
+            subject: plan.subject,
+            arrivalOffsetMs: plan.arrivalOffsetMs,
+            estimatedServiceMs: Number(debug?.estimatedServiceMs ?? 0),
+            estimatedPromptTokens: Number(debug?.estimatedPromptTokens ?? 0),
+            waitBudgetMs: Number(debug?.waitBudgetMs ?? 0),
+            promptChars: plan.prompt.length,
+            outputTokenBudget: plan.outputTokenBudget,
+            completed: true,
+            timedOut: false,
+            waitMs,
+            ttftMs,
+            serviceToFirstTokenMs,
+            serviceMs: Number(debug?.serviceMs ?? 0),
+            sojournMs,
+            tokenCount,
+            generatedTokens: tokenCount,
+            tokensPerSecond,
+            sliceCount: Number(debug?.sliceCount ?? 0),
+            promotedToOverdueCount: Number(debug?.promotedToOverdueCount ?? 0),
+            hadPendingDependency: Boolean(debug?.hadPendingDependency),
+            finalQueueType:
+              debug?.finalQueueType === 'overdue' || debug?.finalQueueType === 'normal'
+                ? debug.finalQueueType
+                : undefined,
+          };
+          onLog?.({
+            text: `[Exp4Metric/${arm}] class=${metric.workloadClass} item=${metric.itemId} promptTok=${metric.estimatedPromptTokens} budgetMs=${metric.waitBudgetMs.toFixed(2)} waitMs=${metric.waitMs.toFixed(2)} serviceToFirstMs=${metric.serviceToFirstTokenMs.toFixed(2)} ttftMs=${metric.ttftMs.toFixed(2)} sojournMs=${metric.sojournMs.toFixed(2)} overdue=${metric.promotedToOverdueCount}`,
+          });
+          return metric;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const timedOut = /timed out|timeout/i.test(msg);
+          onLog?.({ text: `[Exp4/${arm}] class=${plan.workloadClass} item=${plan.itemId} failed: ${msg}` });
+          return {
+            arm,
+            workloadClass: plan.workloadClass,
+            benchmark: plan.benchmark,
+            itemId: plan.itemId,
+            subject: plan.subject,
+            arrivalOffsetMs: plan.arrivalOffsetMs,
+            estimatedServiceMs: Number(debug?.estimatedServiceMs ?? 0),
+            estimatedPromptTokens: Number(debug?.estimatedPromptTokens ?? 0),
+            waitBudgetMs: Number(debug?.waitBudgetMs ?? 0),
+            promptChars: plan.prompt.length,
+            outputTokenBudget: plan.outputTokenBudget,
+            completed: false,
+            timedOut,
+            waitMs: Number(debug?.lastQueueWaitMs ?? 0),
+            ttftMs: Number(debug?.ttftMs ?? 0),
+            serviceToFirstTokenMs: Math.max(
+              0,
+              Number(debug?.ttftMs ?? 0) - Number(debug?.lastQueueWaitMs ?? 0)
+            ),
+            serviceMs: Number(debug?.serviceMs ?? 0),
+            sojournMs: Math.max(0, performance.now() - arrivedAt),
+            tokenCount,
+            generatedTokens: tokenCount,
+            tokensPerSecond,
+            sliceCount: Number(debug?.sliceCount ?? 0),
+            promotedToOverdueCount: Number(debug?.promotedToOverdueCount ?? 0),
+            hadPendingDependency: Boolean(debug?.hadPendingDependency),
+            finalQueueType:
+              debug?.finalQueueType === 'overdue' || debug?.finalQueueType === 'normal'
+                ? debug.finalQueueType
+                : undefined,
+          };
+        }
+      };
+
+      const batchStartedAt = performance.now();
+      let armRows: SchedulingStressRequestMetric[] = [];
+      const observed = await observeEngineChatBatch(
+        () => armRuntime,
+        `exp4-${arm}`,
+        async () => {
+          armRows = await Promise.all(activePlans.map((plan) => runOne(plan, batchStartedAt)));
+        },
+        onLog
+      );
+      allMetrics.push(...armRows);
+      const wallClockMs = Math.max(0, performance.now() - batchStartedAt);
+      armSummaries.push(summarizeSchedulingArm(arm, armRows, wallClockMs, observed.diagnostics));
+      await armRuntime.chatReset();
+    } finally {
+      await safeExitWllama(armRuntime, onLog, `Exp4/${arm}`);
+    }
+  }
+
+  return {
+    scenario: 'head-of-line-mixed',
+    scenarioConfig: resolvedScenarioConfig,
+    requestMetrics: allMetrics,
+    arms: armSummaries,
+  };
+}
+
 function summarizeSinglePath(
   benchmark: 'MMLU' | 'HellaSwag',
   shots: number,
@@ -2314,7 +3123,8 @@ function summarizeSinglePath(
   rows: QAResult[],
   latency: number[],
   ttft: number[],
-  tps: number[]
+  tps: number[],
+  sampleMetrics: BenchSampleMetric[]
 ): BenchSummary {
   const acc = rows.filter((r) => r.correctTree).length / Math.max(1, rows.length);
   const avgLatency = avg(latency);
@@ -2336,6 +3146,12 @@ function summarizeSinglePath(
     avgLatencyMsTree: avgLatency,
     speedupPct: 0,
     results: rows,
+    sampleMetricsFlat: [],
+    sampleMetricsTree: sampleMetrics,
+    latencyCdfFlat: [],
+    latencyCdfTree: buildCdf(latency),
+    ttftCdfFlat: [],
+    ttftCdfTree: buildCdf(ttft),
   };
 }
 
@@ -2348,7 +3164,7 @@ async function runWebllmNoCacheChoice(
     topP: number;
     hardConstraintABCD?: boolean;
   }
-): Promise<{ predIndex: number; answerText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number }> {
+): Promise<{ predIndex: number; answerText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number; tokenCount: number }> {
   const t0 = performance.now();
   let firstTokenAt = 0;
   let answerText = '';
@@ -2401,7 +3217,7 @@ async function runWebllmNoCacheChoice(
   const tokensPerSecond = (completionTokens * 1000) / Math.max(1e-6, latencyMs);
 
   const predIndex = parseChoiceIndex(answerText);
-  return { predIndex, answerText, latencyMs, ttftMs, tokensPerSecond };
+  return { predIndex, answerText, latencyMs, ttftMs, tokensPerSecond, tokenCount: completionTokens };
 }
 
 async function runWebllmNoCacheBench(
@@ -2458,6 +3274,7 @@ async function runWebllmNoCacheBench(
       const latencyMs: number[] = [];
       const ttftMs: number[] = [];
       const tokensPerSecond: number[] = [];
+      const sampleMetrics: BenchSampleMetric[] = [];
 
       for (const [subject, items] of grouped.entries()) {
         const shotItems = items.slice(0, config.mmluShots);
@@ -2488,13 +3305,26 @@ async function runWebllmNoCacheBench(
           latencyMs.push(out.latencyMs);
           ttftMs.push(out.ttftMs);
           tokensPerSecond.push(out.tokensPerSecond);
+          const metric: BenchSampleMetric = {
+            benchmark: 'MMLU',
+            id: q.id,
+            subject,
+            mode: 'web-llm',
+            latencyMs: out.latencyMs,
+            ttftMs: out.ttftMs,
+            tokensPerSecond: out.tokensPerSecond,
+            tokenCount: out.tokenCount,
+            correct: bestIdx === q.answerIndex,
+          };
+          sampleMetrics.push(metric);
+          logSampleMetric(onLog, metric);
           onLog?.({
-            text: `[MMLU/web-llm] ${q.id} subject=${subject} pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'} gt=${CHOICE_LABELS[q.answerIndex]} raw="${safeText(out.answerText)}"`,
+            text: `[MMLU/web-llm] ${q.id} subject=${subject} correct=${metric.correct ? 1 : 0}`,
           });
           reportQuestionDone('MMLU web-llm');
         }
       }
-      mmluSummary = summarizeSinglePath('MMLU', config.mmluShots, rows.length, rows, latencyMs, ttftMs, tokensPerSecond);
+      mmluSummary = summarizeSinglePath('MMLU', config.mmluShots, rows.length, rows, latencyMs, ttftMs, tokensPerSecond, sampleMetrics);
     }
 
     let hellaSummary: BenchSummary | undefined;
@@ -2506,6 +3336,7 @@ async function runWebllmNoCacheBench(
       const latencyMs: number[] = [];
       const ttftMs: number[] = [];
       const tokensPerSecond: number[] = [];
+      const sampleMetrics: BenchSampleMetric[] = [];
 
       for (const q of evalItems) {
         assertNotAborted(signal);
@@ -2530,12 +3361,24 @@ async function runWebllmNoCacheBench(
         latencyMs.push(out.latencyMs);
         ttftMs.push(out.ttftMs);
         tokensPerSecond.push(out.tokensPerSecond);
+        const metric: BenchSampleMetric = {
+          benchmark: 'HellaSwag',
+          id: q.id,
+          mode: 'web-llm',
+          latencyMs: out.latencyMs,
+          ttftMs: out.ttftMs,
+          tokensPerSecond: out.tokensPerSecond,
+          tokenCount: out.tokenCount,
+          correct: bestIdx === q.label,
+        };
+        sampleMetrics.push(metric);
+        logSampleMetric(onLog, metric);
         onLog?.({
-          text: `[Hella/web-llm] ${q.id} pred=${bestIdx >= 0 ? CHOICE_LABELS[bestIdx] : '?'} gt=${CHOICE_LABELS[q.label]} raw="${safeText(out.answerText)}"`,
+          text: `[Hella/web-llm] ${q.id} correct=${metric.correct ? 1 : 0}`,
         });
         reportQuestionDone('Hella web-llm');
       }
-      hellaSummary = summarizeSinglePath('HellaSwag', config.hellaShots, rows.length, rows, latencyMs, ttftMs, tokensPerSecond);
+      hellaSummary = summarizeSinglePath('HellaSwag', config.hellaShots, rows.length, rows, latencyMs, ttftMs, tokensPerSecond, sampleMetrics);
     }
 
     onProgress?.({ current: doneQuestions, total: totalQuestions, label: 'Done' });
@@ -2549,10 +3392,33 @@ async function runWebllmNoCacheBench(
         maintenanceMs: 0,
         runTotalMs: 0,
         maintenancePct: 0,
+        maintenanceBreakdownMs: {
+          sessionInitMs: 0,
+          stateReadMs: 0,
+          prefixSetupMs: 0,
+          otherMs: 0,
+        },
         snapshotTokenBytes: 0,
         tierL1Tokens: 0,
         tierL2Tokens: 0,
         tierL3Tokens: 0,
+        occupancyStats: {
+          sampleCount: 0,
+          avgSnapshotTokenBytes: 0,
+          peakSnapshotTokenBytes: 0,
+          avgTierL1Tokens: 0,
+          avgTierL2Tokens: 0,
+          avgTierL3Tokens: 0,
+          peakTierL1Tokens: 0,
+          peakTierL2Tokens: 0,
+          peakTierL3Tokens: 0,
+          avgTierL1Slots: 0,
+          avgTierL2Slots: 0,
+          avgTierL3Slots: 0,
+          peakTierL1Slots: 0,
+          peakTierL2Slots: 0,
+          peakTierL3Slots: 0,
+        },
       },
       diagnostics: {
         runtimeRestartCount: 0,
@@ -2587,9 +3453,16 @@ export async function runSglangStyleBench(
 
   let wllama: Wllama | null = await createLoadedWllama(config, onLog);
   const runStartedAt = performance.now();
-  let cacheMaintenanceMs = 0;
-  const onCacheMaintenanceMs = (ms: number) => {
-    cacheMaintenanceMs += Math.max(0, ms);
+  const cacheMaintenanceRecorder = createCacheMaintenanceRecorder();
+  const onCacheMaintenanceMs = (
+    category: CacheMaintenanceCategory,
+    ms: number,
+    state?: Awaited<ReturnType<Wllama['chatGetState']>> | null
+  ) => {
+    const safeMs = Math.max(0, ms);
+    cacheMaintenanceRecorder.totalMs += safeMs;
+    cacheMaintenanceRecorder.breakdownMs[category] += safeMs;
+    observeCacheOccupancy(cacheMaintenanceRecorder, state);
   };
 
   let totalQuestions = 0;
@@ -2697,7 +3570,9 @@ export async function runSglangStyleBench(
           [],
           mmluTree.ttftMs,
           [],
-          mmluTree.tokensPerSecond
+          mmluTree.tokensPerSecond,
+          [],
+          mmluTree.sampleMetrics
         );
       } else {
         onLog?.({ text: 'Running MMLU (flat)...' });
@@ -2760,7 +3635,9 @@ export async function runSglangStyleBench(
             mmluFlat.ttftMs,
             mmluTree.ttftMs,
             mmluFlat.tokensPerSecond,
-            mmluTree.tokensPerSecond
+            mmluTree.tokensPerSecond,
+            mmluFlat.sampleMetrics,
+            mmluTree.sampleMetrics
           );
         }
       }
@@ -2826,7 +3703,9 @@ export async function runSglangStyleBench(
         hellaFlat.ttftMs,
         hellaTree.ttftMs,
         hellaFlat.tokensPerSecond,
-        hellaTree.tokensPerSecond
+        hellaTree.tokensPerSecond,
+        hellaFlat.sampleMetrics,
+        hellaTree.sampleMetrics
       );
     } else if (!runExp4Only && runHellaTarget) {
       onLog?.({ text: 'Skipping HellaSwag (hellaEvalCount=0).' });
@@ -2834,33 +3713,42 @@ export async function runSglangStyleBench(
     }
 
     let queueVsDirect: QueueVsDirectSummary | undefined;
-    const exp4AvailableEvalItems = Math.max(0, mmluData.length - config.mmluShots);
-    if (runExp4Only && runMmluTarget && exp4AvailableEvalItems > 0) {
-      onLog?.({ text: `[Exp4] queue vs direct, concurrency=${config.exp4Concurrency}, sampleCount=${config.exp4SampleCount}` });
-      const exp4 = await runQueueVsDirectMmlu(
-        wllama,
-        mmluData,
-        config,
-        signal,
-        onLog,
-        async (oldRuntime, reason) => {
-          diagnostics.runtimeRestartCount += 1;
-          onLog?.({ text: `[Diag] runtime restart #${diagnostics.runtimeRestartCount}, reason=${reason}` });
-          wllama = await replaceLoadedWllama(oldRuntime, config, onLog, reason);
-          return wllama;
-        }
-      );
-      queueVsDirect = exp4.summary;
-      wllama = exp4.wllama;
-    } else if (runExp4Only && runMmluTarget) {
-      onLog?.({ text: '[Exp4] skipped because there are no evaluable MMLU rows after shots.' });
-    } else if (runExp4Only && !runMmluTarget) {
-      onLog?.({ text: '[Exp4] skipped because target has no MMLU.' });
+    let schedulingStress: SchedulingStressSummary | undefined;
+    const exp4AvailableMmlu = Math.max(0, mmluData.length - config.mmluShots);
+    const exp4AvailableHella = Math.max(0, hellaData.length - config.hellaShots);
+    if (runExp4Only && exp4AvailableMmlu > 0 && exp4AvailableHella > 0) {
+      if (wllama) {
+        await safeExitWllama(wllama, onLog, 'Exp4/pre-arm-dispose');
+        wllama = null;
+      }
+      onLog?.({ text: `[Exp4] head-of-line mixed stress sampleCount=${config.exp4SampleCount}` });
+      schedulingStress = await runSchedulingStressMixed(config, mmluData, hellaData, onLog);
+    } else if (runExp4Only) {
+      onLog?.({
+        text: `[Exp4] skipped because mixed workload requires both MMLU and Hella eval rows (mmlu=${exp4AvailableMmlu}, hella=${exp4AvailableHella}).`,
+      });
     } else if (!runExp4Only) {
       onLog?.({ text: '[Exp4] skipped because runMode is not exp4.' });
     }
 
     onProgress?.({ current: Math.min(doneQuestions, totalQuestions), total: totalQuestions, label: 'Done' });
+
+    if (runExp4Only) {
+      return {
+        modelUrl: config.modelUrl,
+        config,
+        mmlu: undefined,
+        hella: undefined,
+        cacheProfile: buildCacheProfile(cacheMaintenanceRecorder, runStartedAt, null),
+        queueVsDirect,
+        schedulingStress,
+        diagnostics,
+      };
+    }
+
+    if (!wllama) {
+      throw new Error('[Bench] runtime unexpectedly unavailable before final summary.');
+    }
 
     await probeTreeState(wllama, 'bench-final-before-summary', onLog);
     await logTreeContentPreview(wllama, 'bench-final-before-summary', onLog);
@@ -2951,8 +3839,9 @@ export async function runSglangStyleBench(
       config,
       mmlu: mmluSummary,
       hella: hellaSummary,
-      cacheProfile: buildCacheProfile(cacheMaintenanceMs, runStartedAt, treeState),
+      cacheProfile: buildCacheProfile(cacheMaintenanceRecorder, runStartedAt, treeState),
       queueVsDirect,
+      schedulingStress,
       diagnostics,
     };
   } finally {

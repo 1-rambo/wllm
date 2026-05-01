@@ -66,6 +66,7 @@ const DEFAULT_ENGINE_CHAT_COST_REBUILD_PER_TOKEN_MS = 4;
 const DEFAULT_ENGINE_CHAT_COST_PARENT_RECOVER_MS = 1;
 const DEFAULT_ENGINE_CHAT_COST_WARMUP_REQUESTS = 20;
 const DEFAULT_ENGINE_CHAT_COST_SAMPLE_WINDOW = 256;
+const DEFAULT_ENGINE_CHAT_SCHEDULING_POLICY = 'dual-queue';
 
 export interface WllamaLogger {
   debug: typeof console.debug;
@@ -212,11 +213,43 @@ export interface WllamaConfig {
    */
   engineChatCostSampleWindow?: number;
   /**
+   * Multiplicative factor applied to the predicted wait budget before a request
+   * becomes overdue. Values below 1.0 make overdue promotion more aggressive.
+   *
+   * Default: 1
+   */
+  engineChatWaitBudgetScale?: number;
+  /**
+   * Optional hard cap for the overdue promotion wait budget (ms).
+   * Useful for fairness-oriented stress tests where queue depth would otherwise
+   * inflate budgets enough that no request ever becomes overdue.
+   *
+   * Default: unlimited
+   */
+  engineChatWaitBudgetCapMs?: number;
+  /**
+   * Whether long requests may checkpoint and yield back to the queue between
+   * prefill/decode stages.
+   *
+   * Default: true
+   */
+  engineChatYieldEnabled?: boolean;
+  /**
    * Enable detailed engine-chat tracing logs for diagnosing random stalls/timeouts.
    *
    * Default: false
    */
   engineChatTraceEnabled?: boolean;
+  /**
+   * Scheduling policy used by engine-chat request queue.
+   *
+   * - `fcfs-no-slice`: FIFO, no overdue promotion, no yield/requeue slicing.
+   * - `single-size-aware`: one queue ordered by estimated service time.
+   * - `dual-queue`: normal + overdue queues with wait-budget promotion.
+   *
+   * Default: `dual-queue`
+   */
+  engineChatSchedulingPolicy?: 'fcfs-no-slice' | 'single-size-aware' | 'dual-queue';
 }
 
 export interface WllamaChatMessage {
@@ -469,6 +502,35 @@ export interface WllamaChatFromNodeOptions extends ChatCompletionOptions {
 
 export interface WllamaChatSessionOptions extends WllamaChatFromNodeOptions {}
 
+export interface WllamaEngineChatDebugMeta {
+  requestId: number;
+  schedulingPolicy: 'fcfs-no-slice' | 'single-size-aware' | 'dual-queue';
+  createdAt: number;
+  firstPickedAt?: number;
+  completedAt: number;
+  totalWallMs: number;
+  serviceMs: number;
+  ttftMs: number;
+  lastQueueWaitMs: number;
+  sliceCount: number;
+  promotedToOverdueCount: number;
+  hadPendingDependency: boolean;
+  finalQueueType: 'normal' | 'overdue';
+  estimatedServiceMs: number;
+  estimatedPromptTokens: number;
+  estimatedPromptTailTokens: number;
+  estimatedRestoreSource: EngineChatRestoreSource;
+  waitBudgetMs: number;
+  generatedTokens: number;
+}
+
+export interface WllamaChatFromNodeResult {
+  nodeId: number;
+  assistantText: string;
+  state: WllamaTreeState;
+  debug?: WllamaEngineChatDebugMeta;
+}
+
 type EngineChatRestoreSource = 'none' | 'l1' | 'l2' | 'l3' | 'rebuild';
 
 interface EngineChatPreparedPrompt {
@@ -518,6 +580,7 @@ interface EngineChatRequest {
   userText: string;
   options: WllamaChatFromNodeOptions;
   queueType: 'normal' | 'overdue';
+  createdAt: number;
   enqueuedAt: number;
   nAheadAtEnqueue: number;
   estimatedServiceMs: number;
@@ -538,9 +601,12 @@ interface EngineChatRequest {
   baselineWorkMs: number;
   waitBudgetMs: number;
   processingStartedAt?: number | undefined;
+  firstPickedAt?: number | undefined;
+  promotedToOverdueCount: number;
+  hadPendingDependency: boolean;
   preparedPrompt?: EngineChatPreparedPrompt | undefined;
   runtime?: EngineChatRuntime | undefined;
-  resolve: (value: { nodeId: number; assistantText: string; state: WllamaTreeState }) => void;
+  resolve: (value: WllamaChatFromNodeResult) => void;
   reject: (reason?: unknown) => void;
   cleanupAbort?: (() => void) | undefined;
 }
@@ -1852,7 +1918,7 @@ export class Wllama {
     history: WllamaChatMessage[],
     userText: string,
     options: WllamaChatSessionOptions = {}
-  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+  ): Promise<WllamaChatFromNodeResult> {
     await this.chatEnsureReady();
     return this.enqueueEngineChatByHistory(history, userText, options);
   }
@@ -1865,7 +1931,7 @@ export class Wllama {
     parentId: number,
     userText: string,
     options: WllamaChatFromNodeOptions = {}
-  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+  ): Promise<WllamaChatFromNodeResult> {
     // await this.chatEnsureReady();
     return this.enqueueEngineChat(parentId, userText, options);
   }
@@ -1874,7 +1940,7 @@ export class Wllama {
     parentId: number,
     userText: string,
     options: WllamaChatFromNodeOptions
-  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+  ): Promise<WllamaChatFromNodeResult> {
     return this.enqueueEngineChatInternal(parentId, undefined, userText, options);
   }
 
@@ -1882,7 +1948,7 @@ export class Wllama {
     history: WllamaChatMessage[],
     userText: string,
     options: WllamaChatFromNodeOptions
-  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+  ): Promise<WllamaChatFromNodeResult> {
     return this.enqueueEngineChatInternal(undefined, history, userText, options);
   }
 
@@ -1891,7 +1957,7 @@ export class Wllama {
     baseHistory: WllamaChatMessage[] | undefined,
     userText: string,
     options: WllamaChatFromNodeOptions
-  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+  ): Promise<WllamaChatFromNodeResult> {
     await this.chatEnsureReady();
     if (options.abortSignal?.aborted) {
       throw new WllamaAbortError();
@@ -1915,6 +1981,7 @@ export class Wllama {
 
     return new Promise((resolve, reject) => {
       const nAheadAtEnqueue = this.getEngineChatPendingCount();
+      const createdAt = Date.now();
       const req: EngineChatRequest = {
         id: this.nextEngineChatRequestId++,
         parentId,
@@ -1922,7 +1989,8 @@ export class Wllama {
         userText,
         options,
         queueType: 'normal',
-        enqueuedAt: Date.now(),
+        createdAt,
+        enqueuedAt: createdAt,
         nAheadAtEnqueue,
         estimatedServiceMs: 0,
         estimatedPrefillMs: 0,
@@ -1941,6 +2009,8 @@ export class Wllama {
         sliceCount: 0,
         baselineWorkMs: 0,
         waitBudgetMs: 0,
+        promotedToOverdueCount: 0,
+        hadPendingDependency: false,
         preparedPrompt,
         resolve,
         reject,
@@ -1995,6 +2065,7 @@ export class Wllama {
           if (!req.processingStartedAt) {
             req.processingStartedAt = Date.now();
           }
+          req.firstPickedAt ??= req.processingStartedAt;
           this.traceEngineChat(
             `start req=${req.id} q=${req.queueType} waitMs=${Date.now() - req.enqueuedAt} pendingAfterPick=${this.getEngineChatPendingCount()} slices=${req.sliceCount}`
           );
@@ -2007,7 +2078,36 @@ export class Wllama {
               `finish req=${req.id} serviceMs=${serviceMs} totalMs=${doneAt - req.enqueuedAt} slices=${req.sliceCount} generatedTokens=${req.generatedTokens}`
             );
             req.cleanupAbort?.();
-            req.resolve(slice.result);
+            const ttftMs = req.runtime?.firstTokenAt
+              ? Math.max(0, req.runtime.firstTokenAt - req.createdAt)
+              : Math.max(0, doneAt - req.createdAt);
+            const lastQueueWaitMs = req.firstPickedAt
+              ? Math.max(0, req.firstPickedAt - req.createdAt)
+              : Math.max(0, doneAt - req.createdAt);
+            req.resolve({
+              ...slice.result,
+              debug: {
+                requestId: req.id,
+                schedulingPolicy: this.getEngineChatSchedulingPolicy(),
+                createdAt: req.createdAt,
+                firstPickedAt: req.firstPickedAt,
+                completedAt: doneAt,
+                totalWallMs: Math.max(0, doneAt - req.createdAt),
+                serviceMs,
+                ttftMs,
+                lastQueueWaitMs,
+                sliceCount: req.sliceCount,
+                promotedToOverdueCount: req.promotedToOverdueCount,
+                hadPendingDependency: req.hadPendingDependency,
+                finalQueueType: req.queueType,
+                estimatedServiceMs: req.estimatedServiceMs,
+                estimatedPromptTokens: req.estimatedPromptTokens,
+                estimatedPromptTailTokens: req.estimatedPromptTailTokens,
+                estimatedRestoreSource: req.estimatedRestoreSource,
+                waitBudgetMs: req.waitBudgetMs,
+                generatedTokens: req.generatedTokens,
+              },
+            });
           } else {
             this.requeueEngineChatRequest(req);
             this.traceEngineChat(
@@ -2038,6 +2138,18 @@ export class Wllama {
     return this.engineChatNormalQueue.length + this.engineChatOverdueQueue.length;
   }
 
+  private getEngineChatSchedulingPolicy(): 'fcfs-no-slice' | 'single-size-aware' | 'dual-queue' {
+    const configured = this.config.engineChatSchedulingPolicy;
+    if (
+      configured === 'fcfs-no-slice'
+      || configured === 'single-size-aware'
+      || configured === 'dual-queue'
+    ) {
+      return configured;
+    }
+    return DEFAULT_ENGINE_CHAT_SCHEDULING_POLICY;
+  }
+
   private removeRequestFromQueues(reqId: number): boolean {
     let idx = this.engineChatNormalQueue.findIndex((x) => x.id === reqId);
     if (idx >= 0) {
@@ -2053,6 +2165,9 @@ export class Wllama {
   }
 
   private promoteOverdueEngineChatRequests(): void {
+    if (this.getEngineChatSchedulingPolicy() !== 'dual-queue') {
+      return;
+    }
     if (this.engineChatNormalQueue.length === 0) {
       return;
     }
@@ -2066,6 +2181,7 @@ export class Wllama {
       }
       this.engineChatNormalQueue.splice(i, 1);
       req.queueType = 'overdue';
+      req.promotedToOverdueCount += 1;
       this.engineChatOverdueQueue.push(req);
       this.traceEngineChat(
         `promote-overdue req=${req.id} waitMs=${waitMs} budgetMs=${req.waitBudgetMs} overdueSize=${this.engineChatOverdueQueue.length}`
@@ -2119,6 +2235,14 @@ export class Wllama {
     const pending = this.getEngineChatPendingCount();
     if (pending === 0) {
       return undefined;
+    }
+    const policy = this.getEngineChatSchedulingPolicy();
+    if (policy === 'fcfs-no-slice') {
+      const picked = this.engineChatNormalQueue.shift() ?? this.engineChatOverdueQueue.shift();
+      if (picked) {
+        picked.queueType = 'normal';
+      }
+      return picked;
     }
 
     let state: WllamaTreeState | null = null;
@@ -2179,8 +2303,29 @@ export class Wllama {
       return best;
     };
 
-    const overdueCandidates = buildCandidates(this.engineChatOverdueQueue, 'overdue');
     const normalCandidates = buildCandidates(this.engineChatNormalQueue, 'normal');
+    if (policy === 'single-size-aware') {
+      const runnableNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
+      const blockedNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId !== undefined);
+      const best = pickBest(runnableNormal, false) ?? pickBest(blockedNormal, false);
+      if (!best) {
+        return undefined;
+      }
+      if (best.blockedByPendingNodeId !== undefined) {
+        best.req.hadPendingDependency = true;
+        this.traceEngineChat(
+          `pick blocked req=${best.req.id} q=${best.queueType} blockedByPending=${best.blockedByPendingNodeId} depth=${best.pendingDependencyDepth}`,
+          'warn'
+        );
+      }
+      const [picked] = this.engineChatNormalQueue.splice(best.idx, 1);
+      if (picked) {
+        picked.queueType = 'normal';
+      }
+      return picked;
+    }
+
+    const overdueCandidates = buildCandidates(this.engineChatOverdueQueue, 'overdue');
     const runnableOverdue = overdueCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
     const runnableNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
     const blockedOverdue = overdueCandidates.filter((candidate) => candidate.blockedByPendingNodeId !== undefined);
@@ -2197,6 +2342,7 @@ export class Wllama {
     }
 
     if (best.blockedByPendingNodeId !== undefined) {
+      best.req.hadPendingDependency = true;
       this.traceEngineChat(
         `pick blocked req=${best.req.id} q=${best.queueType} blockedByPending=${best.blockedByPendingNodeId} depth=${best.pendingDependencyDepth}`,
         'warn'
@@ -2418,7 +2564,10 @@ export class Wllama {
     const nAhead = nAheadAtEnqueue ?? req.nAheadAtEnqueue;
     const pMaxMs = Math.max(this.getEngineChatServiceUpperBoundMs(), Math.ceil(est.totalMs));
     req.baselineWorkMs = nAhead * pMaxMs;
-    req.waitBudgetMs = req.baselineWorkMs + pMaxMs;
+    const rawBudgetMs = req.baselineWorkMs + pMaxMs;
+    const scaledBudgetMs = Math.ceil(rawBudgetMs * this.getEngineChatWaitBudgetScale());
+    const cappedBudgetMs = Math.min(scaledBudgetMs, this.getEngineChatWaitBudgetCapMs());
+    req.waitBudgetMs = Math.max(1, cappedBudgetMs);
   }
 
   private estimateEngineChatServiceCost(
@@ -2730,7 +2879,7 @@ export class Wllama {
   ): Promise<
     | {
       done: true;
-      result: { nodeId: number; assistantText: string; state: WllamaTreeState };
+      result: WllamaChatFromNodeResult;
       phases: {
         prefillMs: number;
         decodeMs: number;
@@ -2747,42 +2896,89 @@ export class Wllama {
       if (!req.runtime) {
         throw new WllamaError(`engine chat runtime missing for req=${req.id}`);
       }
+      const allowYield = this.isEngineChatYieldEnabled()
+        && this.getEngineChatSchedulingPolicy() !== 'fcfs-no-slice';
 
-      if (req.runtime.stage === 'prefill') {
-        const prefillMs = await this.executeEngineChatPrefillSlice(req);
-        req.runtime.accumulatedPrefillMs += prefillMs;
+      while (true) {
+        if (req.runtime.stage === 'prefill') {
+          const prefillMs = await this.executeEngineChatPrefillSlice(req);
+          req.runtime.accumulatedPrefillMs += prefillMs;
+          req.sliceCount += 1;
+          req.runtime.resumedPrefixTokenCount = this.getEngineChatRuntimeLiveTokenCount(req.runtime);
+          if (req.runtime.remainingPromptTokens.length > 0) {
+            if (allowYield) {
+              await this.treeChatCheckpoint(
+                req.runtime.nodeId,
+                req.runtime.assistantText,
+                Date.now() - req.runtime.startedAt
+              );
+              return { done: false };
+            }
+            continue;
+          }
+          req.runtime.stage = 'decode';
+          if (allowYield) {
+            await this.treeChatCheckpoint(
+              req.runtime.nodeId,
+              req.runtime.assistantText,
+              Date.now() - req.runtime.startedAt
+            );
+            return { done: false };
+          }
+          continue;
+        }
+
+        const detail = await this.executeEngineChatDecodeSlice(req);
+        req.runtime.accumulatedDecodeMs += detail.decodeMs;
+        req.generatedTokens = req.runtime.generatedTokensSoFar;
         req.sliceCount += 1;
         req.runtime.resumedPrefixTokenCount = this.getEngineChatRuntimeLiveTokenCount(req.runtime);
-        if (req.runtime.remainingPromptTokens.length > 0) {
-          await this.treeChatCheckpoint(
+
+        if (detail.aborted) {
+          const state = await this.treeChatFinish(
             req.runtime.nodeId,
             req.runtime.assistantText,
-            Date.now() - req.runtime.startedAt
+            Date.now() - req.runtime.startedAt,
+            true
           );
-          return { done: false };
+          return {
+            done: true,
+            result: {
+              nodeId: req.runtime.nodeId,
+              assistantText: req.runtime.assistantText,
+              state,
+            },
+            phases: {
+              prefillMs: req.runtime.accumulatedPrefillMs,
+              decodeMs: req.runtime.accumulatedDecodeMs,
+              postMs: 0,
+              cacheLoadMs: req.runtime.cacheLoadMs,
+              rebuildMs: req.runtime.rebuildMs,
+              parentRecoverMs: req.runtime.parentRecoverMs,
+            },
+          };
         }
-        req.runtime.stage = 'decode';
-        await this.treeChatCheckpoint(
-          req.runtime.nodeId,
-          req.runtime.assistantText,
-          Date.now() - req.runtime.startedAt
-        );
-        return { done: false };
-      }
 
-      const detail = await this.executeEngineChatDecodeSlice(req);
-      req.runtime.accumulatedDecodeMs += detail.decodeMs;
-      req.generatedTokens = req.runtime.generatedTokensSoFar;
-      req.sliceCount += 1;
-      req.runtime.resumedPrefixTokenCount = this.getEngineChatRuntimeLiveTokenCount(req.runtime);
+        if (!detail.finished) {
+          if (allowYield) {
+            await this.treeChatCheckpoint(
+              req.runtime.nodeId,
+              req.runtime.assistantText,
+              Date.now() - req.runtime.startedAt
+            );
+            return { done: false };
+          }
+          continue;
+        }
 
-      if (detail.aborted) {
+        const postStartedAt = Date.now();
         const state = await this.treeChatFinish(
           req.runtime.nodeId,
           req.runtime.assistantText,
           Date.now() - req.runtime.startedAt,
-          true
+          false
         );
+        const postMs = Math.max(0, Date.now() - postStartedAt);
         return {
           done: true,
           result: {
@@ -2793,47 +2989,13 @@ export class Wllama {
           phases: {
             prefillMs: req.runtime.accumulatedPrefillMs,
             decodeMs: req.runtime.accumulatedDecodeMs,
-            postMs: 0,
+            postMs,
             cacheLoadMs: req.runtime.cacheLoadMs,
             rebuildMs: req.runtime.rebuildMs,
             parentRecoverMs: req.runtime.parentRecoverMs,
           },
         };
       }
-
-      if (!detail.finished) {
-        await this.treeChatCheckpoint(
-          req.runtime.nodeId,
-          req.runtime.assistantText,
-          Date.now() - req.runtime.startedAt
-        );
-        return { done: false };
-      }
-
-      const postStartedAt = Date.now();
-      const state = await this.treeChatFinish(
-        req.runtime.nodeId,
-        req.runtime.assistantText,
-        Date.now() - req.runtime.startedAt,
-        false
-      );
-      const postMs = Math.max(0, Date.now() - postStartedAt);
-      return {
-        done: true,
-        result: {
-          nodeId: req.runtime.nodeId,
-          assistantText: req.runtime.assistantText,
-          state,
-        },
-        phases: {
-          prefillMs: req.runtime.accumulatedPrefillMs,
-          decodeMs: req.runtime.accumulatedDecodeMs,
-          postMs,
-          cacheLoadMs: req.runtime.cacheLoadMs,
-          rebuildMs: req.runtime.rebuildMs,
-          parentRecoverMs: req.runtime.parentRecoverMs,
-        },
-      };
     } catch (err) {
       await this.rollbackEngineChatRuntime(req);
       throw err;
@@ -2966,6 +3128,30 @@ export class Wllama {
       return DEFAULT_ENGINE_CHAT_COST_SAMPLE_WINDOW;
     }
     return Math.max(16, Math.floor(configured));
+  }
+
+  private getEngineChatWaitBudgetScale(): number {
+    const configured = this.config.engineChatWaitBudgetScale;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return 1;
+    }
+    return configured;
+  }
+
+  private getEngineChatWaitBudgetCapMs(): number {
+    const configured = this.config.engineChatWaitBudgetCapMs;
+    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      return Number.POSITIVE_INFINITY;
+    }
+    return configured;
+  }
+
+  private isEngineChatYieldEnabled(): boolean {
+    const configured = this.config.engineChatYieldEnabled;
+    if (typeof configured !== 'boolean') {
+      return true;
+    }
+    return configured;
   }
 
   private recordEngineChatCostObservation(

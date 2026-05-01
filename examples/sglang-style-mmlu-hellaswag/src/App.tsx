@@ -90,6 +90,269 @@ function rowsMismatched(rows: QAResult[]): QAResult[] {
   return rows.filter((r) => r.correctFlat !== r.correctTree);
 }
 
+function escapeCsv(value: string | number | boolean | null | undefined): string {
+  const text = value == null ? '' : String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function collectAllSampleMetrics(report: BenchReport) {
+  return [report.mmlu, report.hella]
+    .filter((summary): summary is NonNullable<typeof summary> => Boolean(summary))
+    .flatMap((summary) => [...summary.sampleMetricsFlat, ...summary.sampleMetricsTree]);
+}
+
+function buildSampleMetricsCsv(report: BenchReport): string {
+  const header = [
+    'benchmark',
+    'mode',
+    'id',
+    'subject',
+    'correct',
+    'visitOrdinal',
+    'isRepeatVisit',
+    'restoreSource',
+    'hadParentRecover',
+    'tierL1TokensAfter',
+    'tierL2TokensAfter',
+    'tierL3TokensAfter',
+    'tierL1SlotsAfter',
+    'tierL2SlotsAfter',
+    'tierL3SlotsAfter',
+    'latencyMs',
+    'ttftMs',
+    'tokensPerSecond',
+    'tokenCount',
+  ];
+  const rows = collectAllSampleMetrics(report).map((metric) => ([
+    metric.benchmark,
+    metric.mode,
+    metric.id,
+    metric.subject ?? '',
+    metric.correct ? 1 : 0,
+    metric.visitOrdinal ?? '',
+    typeof metric.isRepeatVisit === 'boolean' ? (metric.isRepeatVisit ? 1 : 0) : '',
+    metric.restoreSource ?? '',
+    typeof metric.hadParentRecover === 'boolean' ? (metric.hadParentRecover ? 1 : 0) : '',
+    metric.tierTokensAfter?.l1 ?? '',
+    metric.tierTokensAfter?.l2 ?? '',
+    metric.tierTokensAfter?.l3 ?? '',
+    metric.tierSlotsAfter?.l1 ?? '',
+    metric.tierSlotsAfter?.l2 ?? '',
+    metric.tierSlotsAfter?.l3 ?? '',
+    metric.latencyMs.toFixed(4),
+    metric.ttftMs.toFixed(4),
+    metric.tokensPerSecond.toFixed(6),
+    metric.tokenCount,
+  ].map(escapeCsv).join(',')));
+  return [header.join(','), ...rows].join('\n');
+}
+
+function buildCdfCsv(report: BenchReport): string {
+  const rows: string[] = [['benchmark', 'metric', 'mode', 'value', 'cdf'].join(',')];
+  const append = (
+    benchmark: 'MMLU' | 'HellaSwag',
+    metric: 'latencyMs' | 'ttftMs',
+    mode: 'flat' | 'tree',
+    points: Array<{ value: number; cdf: number }>
+  ) => {
+    for (const point of points) {
+      rows.push([
+        benchmark,
+        metric,
+        mode,
+        point.value.toFixed(4),
+        point.cdf.toFixed(6),
+      ].map(escapeCsv).join(','));
+    }
+  };
+
+  if (report.mmlu) {
+    append('MMLU', 'latencyMs', 'flat', report.mmlu.latencyCdfFlat);
+    append('MMLU', 'latencyMs', 'tree', report.mmlu.latencyCdfTree);
+    append('MMLU', 'ttftMs', 'flat', report.mmlu.ttftCdfFlat);
+    append('MMLU', 'ttftMs', 'tree', report.mmlu.ttftCdfTree);
+  }
+  if (report.hella) {
+    append('HellaSwag', 'latencyMs', 'flat', report.hella.latencyCdfFlat);
+    append('HellaSwag', 'latencyMs', 'tree', report.hella.latencyCdfTree);
+    append('HellaSwag', 'ttftMs', 'flat', report.hella.ttftCdfFlat);
+    append('HellaSwag', 'ttftMs', 'tree', report.hella.ttftCdfTree);
+  }
+  return rows.join('\n');
+}
+
+function quantile(values: number[], q: number): number {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const pos = Math.min(sorted.length - 1, Math.max(0, (sorted.length - 1) * q));
+  const lower = Math.floor(pos);
+  const upper = Math.ceil(pos);
+  if (lower === upper) return sorted[lower];
+  const weight = pos - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+
+function buildSeriesStats(metrics: ReturnType<typeof collectAllSampleMetrics>) {
+  const latency = metrics.map((metric) => metric.latencyMs);
+  const ttft = metrics.map((metric) => metric.ttftMs);
+  const tps = metrics.map((metric) => metric.tokensPerSecond);
+  const correctCount = metrics.filter((metric) => metric.correct).length;
+  return {
+    sampleCount: metrics.length,
+    accuracy: metrics.length > 0 ? correctCount / metrics.length : 0,
+    avgLatencyMs: latency.length ? latency.reduce((sum, value) => sum + value, 0) / latency.length : 0,
+    p50LatencyMs: quantile(latency, 0.5),
+    p95LatencyMs: quantile(latency, 0.95),
+    p99LatencyMs: quantile(latency, 0.99),
+    avgTtftMs: ttft.length ? ttft.reduce((sum, value) => sum + value, 0) / ttft.length : 0,
+    p50TtftMs: quantile(ttft, 0.5),
+    p95TtftMs: quantile(ttft, 0.95),
+    p99TtftMs: quantile(ttft, 0.99),
+    avgTokensPerSecond: tps.length ? tps.reduce((sum, value) => sum + value, 0) / tps.length : 0,
+  };
+}
+
+function stripPerQuestionAnswers(report: BenchReport): BenchReport {
+  const stripSummary = (summary: BenchReport['mmlu']) => {
+    if (!summary) return summary;
+    return {
+      ...summary,
+      results: [],
+    };
+  };
+  return {
+    ...report,
+    mmlu: stripSummary(report.mmlu),
+    hella: stripSummary(report.hella),
+  };
+}
+
+function buildAnalysisExport(
+  report: BenchReport,
+  context: {
+    timestamp: string;
+    requestedConfig: BenchConfig;
+    effectiveConfig: BenchConfig;
+    runtimeInputs: {
+      runFullDataset: boolean;
+      mmluSubject: string;
+      hellaDataUrl: string;
+      loadedMmluItems: number;
+      loadedHellaItems: number;
+    };
+    summaryLines: string[];
+    sampleMetricLines: string[];
+    logs: string[];
+  }
+) {
+  const sampleMetrics = collectAllSampleMetrics(report);
+  const groupedEntries = Array.from(
+    sampleMetrics.reduce((map, metric) => {
+      const key = `${metric.benchmark}/${metric.mode}`;
+      const bucket = map.get(key) ?? [];
+      bucket.push(metric);
+      map.set(key, bucket);
+      return map;
+    }, new Map<string, typeof sampleMetrics>())
+  );
+
+  return {
+    timestamp: context.timestamp,
+    requestedConfig: context.requestedConfig,
+    effectiveConfig: context.effectiveConfig,
+    runtimeInputs: context.runtimeInputs,
+    summaryLines: context.summaryLines,
+    sampleMetricLineCount: context.sampleMetricLines.length,
+    sampleMetricLines: context.sampleMetricLines,
+    sampleMetrics,
+    sampleMetricSeries: groupedEntries.map(([seriesKey, metrics]) => ({
+      seriesKey,
+      benchmark: metrics[0]?.benchmark ?? '',
+      mode: metrics[0]?.mode ?? '',
+      stats: buildSeriesStats(metrics),
+      samples: metrics,
+    })),
+    cdf: {
+      mmlu: report.mmlu
+        ? {
+          latencyFlat: report.mmlu.latencyCdfFlat,
+          latencyTree: report.mmlu.latencyCdfTree,
+          ttftFlat: report.mmlu.ttftCdfFlat,
+          ttftTree: report.mmlu.ttftCdfTree,
+        }
+        : null,
+      hella: report.hella
+        ? {
+          latencyFlat: report.hella.latencyCdfFlat,
+          latencyTree: report.hella.latencyCdfTree,
+          ttftFlat: report.hella.ttftCdfFlat,
+          ttftTree: report.hella.ttftCdfTree,
+        }
+        : null,
+    },
+    report: stripPerQuestionAnswers(report),
+    logs: context.logs,
+  };
+}
+
+function buildCdfPath(points: Array<{ value: number; cdf: number }>, width: number, height: number, padding: number): string {
+  if (!points.length) return '';
+  const minX = points[0]?.value ?? 0;
+  const maxX = points[points.length - 1]?.value ?? minX + 1;
+  const usableWidth = Math.max(1, width - padding * 2);
+  const usableHeight = Math.max(1, height - padding * 2);
+  return points.map((point, index) => {
+    const ratioX = maxX > minX ? (point.value - minX) / (maxX - minX) : 0;
+    const x = padding + ratioX * usableWidth;
+    const y = height - padding - point.cdf * usableHeight;
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(' ');
+}
+
+function CdfChart({
+  title,
+  flatPoints,
+  treePoints,
+  flatLabel,
+  treeLabel,
+}: {
+  title: string;
+  flatPoints: Array<{ value: number; cdf: number }>;
+  treePoints: Array<{ value: number; cdf: number }>;
+  flatLabel: string;
+  treeLabel: string;
+}) {
+  const width = 420;
+  const height = 240;
+  const padding = 28;
+  const flatPath = buildCdfPath(flatPoints, width, height, padding);
+  const treePath = buildCdfPath(treePoints, width, height, padding);
+
+  if (!flatPath && !treePath) {
+    return null;
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 8, fontWeight: 600 }}>{title}</div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', maxWidth: 420, height: 'auto', border: '1px solid #d0d7de', background: '#fff' }}>
+        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#9aa4b2" strokeWidth="1" />
+        <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#9aa4b2" strokeWidth="1" />
+        {flatPath ? <path d={flatPath} fill="none" stroke="#2563eb" strokeWidth="2" /> : null}
+        {treePath ? <path d={treePath} fill="none" stroke="#dc2626" strokeWidth="2" /> : null}
+      </svg>
+      <div className="hint" style={{ marginTop: 8 }}>
+        <span style={{ color: '#2563eb' }}>{flatLabel}</span>
+        {' / '}
+        <span style={{ color: '#dc2626' }}>{treeLabel}</span>
+      </div>
+    </div>
+  );
+}
+
 function reportSummaryLines(report: BenchReport): string[] {
   const lines: string[] = [];
   const INT32_MAX = 2147483647;
@@ -128,8 +391,20 @@ function reportSummaryLines(report: BenchReport): string[] {
   }
   if (report.cacheProfile) {
     lines.push(`[Exp3] maintenance=${report.cacheProfile.maintenanceMs.toFixed(2)}ms total=${report.cacheProfile.runTotalMs.toFixed(2)}ms ratio=${report.cacheProfile.maintenancePct.toFixed(4)}%`);
+    lines.push(
+      `[Exp3] breakdown(sessionInit/stateRead/prefixSetup/other)=${report.cacheProfile.maintenanceBreakdownMs.sessionInitMs.toFixed(2)}/${report.cacheProfile.maintenanceBreakdownMs.stateReadMs.toFixed(2)}/${report.cacheProfile.maintenanceBreakdownMs.prefixSetupMs.toFixed(2)}/${report.cacheProfile.maintenanceBreakdownMs.otherMs.toFixed(2)}ms`
+    );
     const snapshotSuffix = report.cacheProfile.snapshotTokenBytes >= INT32_MAX ? ' (clamped-int32)' : '';
     lines.push(`[Exp3] snapshotBytes=${report.cacheProfile.snapshotTokenBytes}${snapshotSuffix} tier(L1/L2/L3)=${report.cacheProfile.tierL1Tokens}/${report.cacheProfile.tierL2Tokens}/${report.cacheProfile.tierL3Tokens}`);
+    lines.push(
+      `[Exp3] occupancy samples=${report.cacheProfile.occupancyStats.sampleCount} avgSnapshotBytes=${report.cacheProfile.occupancyStats.avgSnapshotTokenBytes.toFixed(2)} peakSnapshotBytes=${report.cacheProfile.occupancyStats.peakSnapshotTokenBytes}`
+    );
+    lines.push(
+      `[Exp3] occupancy avgTokens(L1/L2/L3)=${report.cacheProfile.occupancyStats.avgTierL1Tokens.toFixed(2)}/${report.cacheProfile.occupancyStats.avgTierL2Tokens.toFixed(2)}/${report.cacheProfile.occupancyStats.avgTierL3Tokens.toFixed(2)} peakTokens=${report.cacheProfile.occupancyStats.peakTierL1Tokens}/${report.cacheProfile.occupancyStats.peakTierL2Tokens}/${report.cacheProfile.occupancyStats.peakTierL3Tokens}`
+    );
+    lines.push(
+      `[Exp3] occupancy avgSlots(L1/L2/L3)=${report.cacheProfile.occupancyStats.avgTierL1Slots.toFixed(2)}/${report.cacheProfile.occupancyStats.avgTierL2Slots.toFixed(2)}/${report.cacheProfile.occupancyStats.avgTierL3Slots.toFixed(2)} peakSlots=${report.cacheProfile.occupancyStats.peakTierL1Slots}/${report.cacheProfile.occupancyStats.peakTierL2Slots}/${report.cacheProfile.occupancyStats.peakTierL3Slots}`
+    );
   }
   if (report.queueVsDirect) {
     lines.push(`[Exp4] requestCount=${report.queueVsDirect.requestCount} failed(queue/direct)=${report.queueVsDirect.failedCountQueue}/${report.queueVsDirect.failedCountDirect}`);
@@ -146,6 +421,28 @@ function reportSummaryLines(report: BenchReport): string[] {
       const d = report.queueVsDirect.directEngineChat;
       lines.push(`[Exp4/DirectDiag] pendingMax=${d.maxPendingCount} overdueMax=${d.maxOverduePendingCount} sliceMax=${d.maxSliceCount} promptTokMax=${d.maxEstimatedPromptTokens}`);
       lines.push(`[Exp4/DirectDiag] learned(prefill/decode/rebuild)=${d.learnedPrefillCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${d.learnedDecodeCostPerTokenMs?.toFixed(2) ?? 'n/a'}/${d.learnedRebuildCostPerTokenMs?.toFixed(2) ?? 'n/a'} observed=${d.costModelObservedCount}`);
+    }
+  }
+  if (report.schedulingStress) {
+    lines.push(
+      `[Exp4] scenario=${report.schedulingStress.scenario} long/short/medium=${report.schedulingStress.scenarioConfig.longHeadCount}/${report.schedulingStress.scenarioConfig.shortTailCount}/${report.schedulingStress.scenarioConfig.mediumTailCount} prefix(seed/examples medium/long)=${report.schedulingStress.scenarioConfig.mediumPrefixSeedShots}/${report.schedulingStress.scenarioConfig.mediumPrefixExampleCount}|${report.schedulingStress.scenarioConfig.longPrefixSeedShots}/${report.schedulingStress.scenarioConfig.longPrefixExampleCount} promptBudget(medium/long)=${report.schedulingStress.scenarioConfig.mediumPromptTokenBudget}/${report.schedulingStress.scenarioConfig.longPromptTokenBudget} promptEst(medium/long)=${report.schedulingStress.scenarioConfig.estimatedMediumPromptTokens}/${report.schedulingStress.scenarioConfig.estimatedLongPromptTokens} shortStream(start/intervalMs)=${report.schedulingStress.scenarioConfig.shortStreamStartMs}/${report.schedulingStress.scenarioConfig.shortInterArrivalMs} dualBudget(scale/capMs)=${report.schedulingStress.scenarioConfig.dualQueueWaitBudgetScale}/${report.schedulingStress.scenarioConfig.dualQueueWaitBudgetCapMs}`
+    );
+    for (const arm of report.schedulingStress.arms) {
+      const short = arm.byClass.find((row) => row.workloadClass === 'short');
+      const medium = arm.byClass.find((row) => row.workloadClass === 'medium');
+      lines.push(
+        `[Exp4/${arm.arm}] completion=${(arm.completionRate * 100).toFixed(1)}% timeout=${(arm.timeoutRate * 100).toFixed(1)}% wait(p95)=${arm.p95WaitMs.toFixed(2)}ms ttft(p95)=${arm.p95TtftMs.toFixed(2)}ms sojourn(p95)=${arm.p95SojournMs.toFixed(2)}ms throughputReq/s=${arm.throughputReqPerSec.toFixed(3)}`
+      );
+      if (short) {
+        lines.push(
+          `[Exp4/${arm.arm}/short] wait(p95/p99)=${short.p95WaitMs.toFixed(2)}/${short.p99WaitMs.toFixed(2)}ms ttft(p95)=${short.p95TtftMs.toFixed(2)}ms sla>${short.waitSlaMs}ms=${(short.waitSlaViolationRate * 100).toFixed(1)}%`
+        );
+      }
+      if (medium) {
+        lines.push(
+          `[Exp4/${arm.arm}/medium] wait(p95/p99/max)=${medium.p95WaitMs.toFixed(2)}/${medium.p99WaitMs.toFixed(2)}/${medium.maxWaitMs.toFixed(2)}ms sla>${medium.waitSlaMs}ms=${(medium.waitSlaViolationRate * 100).toFixed(1)}%`
+        );
+      }
     }
   }
   if (report.diagnostics) {
@@ -197,7 +494,11 @@ export default function App() {
   const [progress, setProgress] = useState<BenchProgressEvent>({ current: 0, total: 0, label: 'Idle' });
   const logsRef = useRef<string[]>([]);
   const metricLinesRef = useRef<string[]>([]);
-  const effectiveTarget = cfg.experimentRunMode === 'exp1' ? cfg.target : 'mmlu';
+  const effectiveTarget = cfg.experimentRunMode === 'exp1'
+    ? cfg.target
+    : cfg.experimentRunMode === 'exp4'
+      ? 'both'
+      : 'mmlu';
   const isHellaOnlyMode = effectiveTarget === 'hella';
   const isExp4Mode = cfg.experimentRunMode === 'exp4';
   const progressPct = progress.total > 0
@@ -217,7 +518,7 @@ export default function App() {
   const appendLog = (text: string) => {
     const line = `[${new Date().toISOString()}] ${text}`;
     logsRef.current = [...logsRef.current, line];
-    if (/\[(MMLU|Hella)\/.+\] .+ pred=/.test(text)) {
+    if (/^\[Metric\/(MMLU|HellaSwag)\/.+\]/.test(text)) {
       metricLinesRef.current = [...metricLinesRef.current, line];
     }
     setLogs(logsRef.current.slice(-300));
@@ -248,10 +549,10 @@ export default function App() {
         effectiveCfg.target = 'mmlu';
         effectiveCfg.mmluExperimentMode = 'exp2-random-twice';
       } else if (effectiveCfg.experimentRunMode === 'exp4') {
-        if (effectiveCfg.target !== 'mmlu') {
-          appendLog('[Mode] Exp4 runs MMLU only; target forced to mmlu.');
+        if (effectiveCfg.target !== 'both') {
+          appendLog('[Mode] Exp4 uses mixed MMLU + HellaSwag workload; target forced to both.');
         }
-        effectiveCfg.target = 'mmlu';
+        effectiveCfg.target = 'both';
         effectiveCfg.mmluExperimentMode = 'exp1-sequential-once';
       } else {
         effectiveCfg.mmluExperimentMode = 'exp1-sequential-once';
@@ -316,17 +617,18 @@ export default function App() {
       } else if (effectiveCfg.experimentRunMode === 'exp4' && !runFullDataset) {
         const counts = await getLocalMmluSubjectCounts(mmluSubject);
         const desiredSamples = Math.max(1, effectiveCfg.exp4SampleCount);
-        const autoEvalCount = Math.max(1, Math.min(desiredSamples, counts.testCount));
-        effectiveCfg.mmluEvalCount = autoEvalCount;
-        if (autoEvalCount < desiredSamples) {
+        const autoMmluEvalCount = Math.max(4, Math.min(desiredSamples, counts.testCount));
+        effectiveCfg.mmluEvalCount = autoMmluEvalCount;
+        if (autoMmluEvalCount < desiredSamples) {
           appendLog(
-            `[Exp4] sampleCount=${desiredSamples} exceeds available test rows=${counts.testCount} for subject=${mmluSubject}; clamped to ${autoEvalCount}.`
+            `[Exp4] MMLU sampleCount=${desiredSamples} exceeds available test rows=${counts.testCount} for subject=${mmluSubject}; clamped to ${autoMmluEvalCount}.`
           );
         } else {
           appendLog(
-            `[Exp4] auto-set mmluEvalCount=${autoEvalCount} from exp4SampleCount=${desiredSamples}.`
+            `[Exp4] auto-set mmluEvalCount=${autoMmluEvalCount} from exp4SampleCount=${desiredSamples}.`
           );
         }
+        effectiveCfg.hellaEvalCount = Math.max(4, desiredSamples);
       }
 
       let mmlu: Awaited<ReturnType<typeof loadRealMmluFromLocal>> = [];
@@ -377,27 +679,31 @@ export default function App() {
         (e) => setProgress(e)
       );
       setReport(out);
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      saveJson(`sglang-style-report-${Date.now()}.json`, out);
-      saveJson(`sglang-style-run-detail-${stamp}.json`, {
-        timestamp: new Date().toISOString(),
+      const nowIso = new Date().toISOString();
+      const stamp = nowIso.replace(/[:.]/g, '-');
+      const runtimeInputs = {
+        runFullDataset,
+        mmluSubject,
+        hellaDataUrl,
+        loadedMmluItems: mmlu.length,
+        loadedHellaItems: hella.length,
+      };
+      const summaryLines = reportSummaryLines(out);
+      const analysisExport = buildAnalysisExport(out, {
+        timestamp: nowIso,
         requestedConfig: cfg,
         effectiveConfig: effectiveCfg,
-        runtimeInputs: {
-          runFullDataset,
-          mmluSubject,
-          hellaDataUrl,
-          loadedMmluItems: mmlu.length,
-          loadedHellaItems: hella.length,
-        },
-        summaryLines: reportSummaryLines(out),
-        metricLineCount: metricLinesRef.current.length,
-        metricLines: metricLinesRef.current,
-        report: out,
+        runtimeInputs,
+        summaryLines,
+        sampleMetricLines: metricLinesRef.current,
         logs: logsRef.current,
       });
+      saveJson(`sglang-style-report-${Date.now()}.json`, stripPerQuestionAnswers(out));
+      saveText(`sglang-style-latency-samples-${stamp}.csv`, buildSampleMetricsCsv(out));
+      saveText(`sglang-style-cdf-points-${stamp}.csv`, buildCdfCsv(out));
+      saveJson(`sglang-style-run-detail-${stamp}.json`, analysisExport);
       const successHeader = [
-        `timestamp: ${new Date().toISOString()}`,
+        `timestamp: ${nowIso}`,
         'status: success',
         '',
         '==== REQUESTED CONFIG ==== ',
@@ -407,24 +713,20 @@ export default function App() {
         JSON.stringify(effectiveCfg, null, 2),
         '',
         '==== RUNTIME INPUTS ==== ',
-        JSON.stringify({
-          runFullDataset,
-          mmluSubject,
-          hellaDataUrl,
-          loadedMmluItems: mmlu.length,
-          loadedHellaItems: hella.length,
-        }, null, 2),
+        JSON.stringify(runtimeInputs, null, 2),
         '',
         '==== SUMMARY ==== ',
-        ...reportSummaryLines(out),
+        ...summaryLines,
         '',
-        '==== METRIC LINES ==== ',
+        '==== SAMPLE METRIC LINES ==== ',
         ...metricLinesRef.current,
         '',
         '==== LOGS ==== ',
       ].join('\n');
       saveText(`sglang-style-run-logs-${stamp}.log`, `${successHeader}\n${logsRef.current.join('\n')}\n`);
       appendLog(`Run detail exported: sglang-style-run-detail-${stamp}.json`);
+      appendLog(`Sample latency CSV exported: sglang-style-latency-samples-${stamp}.csv`);
+      appendLog(`CDF point CSV exported: sglang-style-cdf-points-${stamp}.csv`);
       appendLog(`Run logs exported: sglang-style-run-logs-${stamp}.log`);
       appendLog('Benchmark finished and report exported.');
       setProgress((prev) => ({
@@ -595,7 +897,7 @@ export default function App() {
           >
             <option value="exp1">Exp1: Flat vs Tree</option>
             <option value="exp2">Exp2: Random x2 (Tree-only)</option>
-            <option value="exp4">Exp4: Queue vs Direct</option>
+            <option value="exp4">Exp4: Head-of-Line Mixed Stress</option>
           </select>
         </label>
         <label>
@@ -979,6 +1281,15 @@ export default function App() {
                   </>
                 )}
               </div>
+              <div style={{ marginTop: 20 }}>
+                <CdfChart
+                  title="MMLU Latency CDF"
+                  flatPoints={report.mmlu.latencyCdfFlat}
+                  treePoints={report.mmlu.latencyCdfTree}
+                  flatLabel="Flat"
+                  treeLabel={isWebllmNoCache ? 'web-llm(no-cache)' : 'Tree'}
+                />
+              </div>
             </section>
           ) : null}
 
@@ -1010,6 +1321,15 @@ export default function App() {
                 )}
                 <div>Eval count: {report.hella.evalCount}</div>
               </div>
+              <div style={{ marginTop: 20 }}>
+                <CdfChart
+                  title="HellaSwag Latency CDF"
+                  flatPoints={report.hella.latencyCdfFlat}
+                  treePoints={report.hella.latencyCdfTree}
+                  flatLabel="Flat"
+                  treeLabel={isWebllmNoCache ? 'web-llm(no-cache)' : 'Tree'}
+                />
+              </div>
             </section>
           ) : null}
 
@@ -1020,10 +1340,20 @@ export default function App() {
                 <div>Maintenance time: {ms(report.cacheProfile.maintenanceMs)}</div>
                 <div>Total run time: {ms(report.cacheProfile.runTotalMs)}</div>
                 <div>Maintenance ratio: {report.cacheProfile.maintenancePct.toFixed(2)}%</div>
+                <div>Session-init time: {ms(report.cacheProfile.maintenanceBreakdownMs.sessionInitMs)}</div>
+                <div>State-read time: {ms(report.cacheProfile.maintenanceBreakdownMs.stateReadMs)}</div>
+                <div>Prefix-setup time: {ms(report.cacheProfile.maintenanceBreakdownMs.prefixSetupMs)}</div>
                 <div>Snapshot bytes: {report.cacheProfile.snapshotTokenBytes}</div>
                 <div>L1 tokens: {report.cacheProfile.tierL1Tokens}</div>
                 <div>L2 tokens: {report.cacheProfile.tierL2Tokens}</div>
                 <div>L3 tokens: {report.cacheProfile.tierL3Tokens}</div>
+                <div>Occupancy samples: {report.cacheProfile.occupancyStats.sampleCount}</div>
+                <div>Avg snapshot bytes: {report.cacheProfile.occupancyStats.avgSnapshotTokenBytes.toFixed(2)}</div>
+                <div>Peak snapshot bytes: {report.cacheProfile.occupancyStats.peakSnapshotTokenBytes}</div>
+                <div>Avg L1/L2/L3 tokens: {report.cacheProfile.occupancyStats.avgTierL1Tokens.toFixed(1)} / {report.cacheProfile.occupancyStats.avgTierL2Tokens.toFixed(1)} / {report.cacheProfile.occupancyStats.avgTierL3Tokens.toFixed(1)}</div>
+                <div>Peak L1/L2/L3 tokens: {report.cacheProfile.occupancyStats.peakTierL1Tokens} / {report.cacheProfile.occupancyStats.peakTierL2Tokens} / {report.cacheProfile.occupancyStats.peakTierL3Tokens}</div>
+                <div>Avg L1/L2/L3 slots: {report.cacheProfile.occupancyStats.avgTierL1Slots.toFixed(1)} / {report.cacheProfile.occupancyStats.avgTierL2Slots.toFixed(1)} / {report.cacheProfile.occupancyStats.avgTierL3Slots.toFixed(1)}</div>
+                <div>Peak L1/L2/L3 slots: {report.cacheProfile.occupancyStats.peakTierL1Slots} / {report.cacheProfile.occupancyStats.peakTierL2Slots} / {report.cacheProfile.occupancyStats.peakTierL3Slots}</div>
               </div>
             </section>
           ) : null}
@@ -1066,6 +1396,90 @@ export default function App() {
                   </>
                 ) : null}
               </div>
+            </section>
+          ) : null}
+
+          {report.schedulingStress ? (
+            <section className="panel">
+              <h2>Exp4 Head-of-Line Mixed Stress</h2>
+              <div className="grid3">
+                <div>Scenario: {report.schedulingStress.scenario}</div>
+                <div>Long head count: {report.schedulingStress.scenarioConfig.longHeadCount}</div>
+                <div>Short tail count: {report.schedulingStress.scenarioConfig.shortTailCount}</div>
+                <div>Medium tail count: {report.schedulingStress.scenarioConfig.mediumTailCount}</div>
+                <div>Long arrival gap: {ms(report.schedulingStress.scenarioConfig.longArrivalGapMs)}</div>
+                <div>Medium burst delay: {ms(report.schedulingStress.scenarioConfig.mediumBurstDelayMs)}</div>
+                <div>Short stream start: {ms(report.schedulingStress.scenarioConfig.shortStreamStartMs)}</div>
+                <div>Short inter-arrival: {ms(report.schedulingStress.scenarioConfig.shortInterArrivalMs)}</div>
+                <div>Medium prefix seed shots: {report.schedulingStress.scenarioConfig.mediumPrefixSeedShots}</div>
+                <div>Medium prefix repeated examples: {report.schedulingStress.scenarioConfig.mediumPrefixExampleCount}</div>
+                <div>Long prefix seed shots: {report.schedulingStress.scenarioConfig.longPrefixSeedShots}</div>
+                <div>Long prefix repeated examples: {report.schedulingStress.scenarioConfig.longPrefixExampleCount}</div>
+                <div>Medium prompt token budget: {report.schedulingStress.scenarioConfig.mediumPromptTokenBudget}</div>
+                <div>Medium estimated prompt tokens: {report.schedulingStress.scenarioConfig.estimatedMediumPromptTokens}</div>
+                <div>Long prompt token budget: {report.schedulingStress.scenarioConfig.longPromptTokenBudget}</div>
+                <div>Long estimated prompt tokens: {report.schedulingStress.scenarioConfig.estimatedLongPromptTokens}</div>
+                <div>Dual wait budget scale: {report.schedulingStress.scenarioConfig.dualQueueWaitBudgetScale}</div>
+                <div>Dual wait budget cap: {ms(report.schedulingStress.scenarioConfig.dualQueueWaitBudgetCapMs)}</div>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Arm</th>
+                    <th>Completion</th>
+                    <th>Timeout</th>
+                    <th>Wait p95</th>
+                    <th>TTFT p95</th>
+                    <th>Sojourn p95</th>
+                    <th>Req/s</th>
+                    <th>Tok/s</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.schedulingStress.arms.map((arm) => (
+                    <tr key={arm.arm}>
+                      <td>{arm.arm}</td>
+                      <td>{pct01(arm.completionRate)}</td>
+                      <td>{pct01(arm.timeoutRate)}</td>
+                      <td>{ms(arm.p95WaitMs)}</td>
+                      <td>{ms(arm.p95TtftMs)}</td>
+                      <td>{ms(arm.p95SojournMs)}</td>
+                      <td>{arm.throughputReqPerSec.toFixed(3)}</td>
+                      <td>{arm.throughputTokensPerSec.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ marginTop: 18, fontWeight: 600 }}>Class-Focused View</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Arm</th>
+                    <th>Class</th>
+                    <th>Wait p95</th>
+                    <th>Wait p99</th>
+                    <th>Max Wait</th>
+                    <th>TTFT p95</th>
+                    <th>Wait SLA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.schedulingStress.arms.flatMap((arm) =>
+                    arm.byClass
+                      .filter((row) => row.workloadClass === 'short' || row.workloadClass === 'medium')
+                      .map((row) => (
+                        <tr key={`${arm.arm}-${row.workloadClass}`}>
+                          <td>{arm.arm}</td>
+                          <td>{row.workloadClass}</td>
+                          <td>{ms(row.p95WaitMs)}</td>
+                          <td>{ms(row.p99WaitMs)}</td>
+                          <td>{ms(row.maxWaitMs)}</td>
+                          <td>{ms(row.p95TtftMs)}</td>
+                          <td>{`${(row.waitSlaViolationRate * 100).toFixed(1)}% > ${ms(row.waitSlaMs)}`}</td>
+                        </tr>
+                      )))}
+                </tbody>
+              </table>
             </section>
           ) : null}
 

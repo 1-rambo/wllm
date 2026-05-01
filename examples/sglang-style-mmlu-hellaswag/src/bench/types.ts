@@ -77,6 +77,37 @@ export interface QAResult {
   explainTree: string;
 }
 
+export interface BenchSampleMetric {
+  benchmark: 'MMLU' | 'HellaSwag';
+  id: string;
+  subject?: string;
+  mode: 'flat' | 'tree' | 'web-llm';
+  latencyMs: number;
+  ttftMs: number;
+  tokensPerSecond: number;
+  tokenCount: number;
+  correct: boolean;
+  visitOrdinal?: number;
+  isRepeatVisit?: boolean;
+  restoreSource?: 'L1' | 'L2' | 'L3' | 'MISS' | 'REBUILD' | 'UNKNOWN';
+  hadParentRecover?: boolean;
+  tierTokensAfter?: {
+    l1: number;
+    l2: number;
+    l3: number;
+  };
+  tierSlotsAfter?: {
+    l1: number;
+    l2: number;
+    l3: number;
+  };
+}
+
+export interface CdfPoint {
+  value: number;
+  cdf: number;
+}
+
 export interface BenchSummary {
   benchmark: 'MMLU' | 'HellaSwag';
   shots: number;
@@ -93,16 +124,45 @@ export interface BenchSummary {
   avgLatencyMsTree: number;
   speedupPct: number;
   results: QAResult[];
+  sampleMetricsFlat: BenchSampleMetric[];
+  sampleMetricsTree: BenchSampleMetric[];
+  latencyCdfFlat: CdfPoint[];
+  latencyCdfTree: CdfPoint[];
+  ttftCdfFlat: CdfPoint[];
+  ttftCdfTree: CdfPoint[];
 }
 
 export interface CacheProfile {
   maintenanceMs: number;
   runTotalMs: number;
   maintenancePct: number;
+  maintenanceBreakdownMs: {
+    sessionInitMs: number;
+    stateReadMs: number;
+    prefixSetupMs: number;
+    otherMs: number;
+  };
   snapshotTokenBytes: number;
   tierL1Tokens: number;
   tierL2Tokens: number;
   tierL3Tokens: number;
+  occupancyStats: {
+    sampleCount: number;
+    avgSnapshotTokenBytes: number;
+    peakSnapshotTokenBytes: number;
+    avgTierL1Tokens: number;
+    avgTierL2Tokens: number;
+    avgTierL3Tokens: number;
+    peakTierL1Tokens: number;
+    peakTierL2Tokens: number;
+    peakTierL3Tokens: number;
+    avgTierL1Slots: number;
+    avgTierL2Slots: number;
+    avgTierL3Slots: number;
+    peakTierL1Slots: number;
+    peakTierL2Slots: number;
+    peakTierL3Slots: number;
+  };
 }
 
 export interface QueueVsDirectSummary {
@@ -121,6 +181,110 @@ export interface QueueVsDirectSummary {
   batchTokensPerSecondDirect: number;
   queueEngineChat?: EngineChatBatchDiagnostics;
   directEngineChat?: EngineChatBatchDiagnostics;
+}
+
+export type SchedulingStressArm = 'fcfs-no-slice' | 'single-size-aware' | 'dual-queue';
+export type SchedulingWorkloadClass = 'short' | 'medium' | 'long';
+
+export interface SchedulingStressRequestMetric {
+  arm: SchedulingStressArm;
+  workloadClass: SchedulingWorkloadClass;
+  benchmark: 'MMLU' | 'HellaSwag';
+  itemId: string;
+  subject?: string;
+  arrivalOffsetMs: number;
+  estimatedServiceMs: number;
+  estimatedPromptTokens: number;
+  waitBudgetMs: number;
+  promptChars: number;
+  outputTokenBudget: number;
+  completed: boolean;
+  timedOut: boolean;
+  waitMs: number;
+  ttftMs: number;
+  serviceToFirstTokenMs: number;
+  serviceMs: number;
+  sojournMs: number;
+  tokenCount: number;
+  generatedTokens: number;
+  tokensPerSecond: number;
+  sliceCount: number;
+  promotedToOverdueCount: number;
+  hadPendingDependency: boolean;
+  finalQueueType?: 'normal' | 'overdue';
+}
+
+export interface SchedulingStressClassSummary {
+  workloadClass: SchedulingWorkloadClass;
+  requestCount: number;
+  completedCount: number;
+  timeoutCount: number;
+  completionRate: number;
+  timeoutRate: number;
+  waitSlaMs: number;
+  waitSlaViolationCount: number;
+  waitSlaViolationRate: number;
+  avgWaitMs: number;
+  p95WaitMs: number;
+  p99WaitMs: number;
+  maxWaitMs: number;
+  avgTtftMs: number;
+  p95TtftMs: number;
+  p99TtftMs: number;
+  avgSojournMs: number;
+  p95SojournMs: number;
+  p99SojournMs: number;
+}
+
+export interface SchedulingStressArmSummary {
+  arm: SchedulingStressArm;
+  requestCount: number;
+  completedCount: number;
+  timeoutCount: number;
+  completionRate: number;
+  timeoutRate: number;
+  batchWallClockMs: number;
+  throughputReqPerSec: number;
+  throughputTokensPerSec: number;
+  avgWaitMs: number;
+  p50WaitMs: number;
+  p95WaitMs: number;
+  p99WaitMs: number;
+  avgTtftMs: number;
+  p50TtftMs: number;
+  p95TtftMs: number;
+  p99TtftMs: number;
+  avgSojournMs: number;
+  p50SojournMs: number;
+  p95SojournMs: number;
+  p99SojournMs: number;
+  byClass: SchedulingStressClassSummary[];
+  engineChat?: EngineChatBatchDiagnostics;
+}
+
+export interface SchedulingStressSummary {
+  scenario: 'head-of-line-mixed';
+  scenarioConfig: {
+    longHeadCount: number;
+    shortTailCount: number;
+    mediumTailCount: number;
+    longArrivalGapMs: number;
+    mediumBurstDelayMs: number;
+    shortStreamStartMs: number;
+    shortInterArrivalMs: number;
+    mediumPrefixSeedShots: number;
+    longPrefixSeedShots: number;
+    mediumPrefixExampleCount: number;
+    longPrefixExampleCount: number;
+    mediumPromptTokenBudget: number;
+    longPromptTokenBudget: number;
+    estimatedMediumPromptTokens: number;
+    estimatedLongPromptTokens: number;
+    dualQueueWaitBudgetScale: number;
+    dualQueueWaitBudgetCapMs: number;
+  };
+  requestMetrics: SchedulingStressRequestMetric[];
+  arms: SchedulingStressArmSummary[];
 }
 
 export interface EngineChatBatchDiagnostics {
@@ -193,5 +357,6 @@ export interface BenchReport {
   hella?: BenchSummary;
   cacheProfile?: CacheProfile;
   queueVsDirect?: QueueVsDirectSummary;
+  schedulingStress?: SchedulingStressSummary;
   diagnostics?: BenchDiagnostics;
 }
