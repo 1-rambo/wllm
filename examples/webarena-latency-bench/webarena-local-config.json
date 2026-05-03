@@ -1,0 +1,23 @@
+{
+  "environments": {
+    "gitlab": {
+      "urls": ["http://localhost:8023"],
+      "active_url_idx": 0,
+      "credentials": {"username": "root", "password": "demopass"}
+    },
+    "reddit": {
+      "urls": ["http://localhost:9999"],
+      "active_url_idx": 0
+    },
+    "shopping": {
+      "urls": ["http://localhost:7770"],
+      "active_url_idx": 0
+    },
+    "shopping_admin": {
+      "urls": ["http://localhost:7780/admin"],
+      "active_url_idx": 0,
+      "use_header_login": false,
+      "credentials": {"username": "codexadmin", "password": "Codex123!"}
+    }
+  }
+}
