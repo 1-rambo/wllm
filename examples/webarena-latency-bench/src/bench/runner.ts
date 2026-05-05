@@ -4,12 +4,14 @@ import wllamaMulti from '@wllama/wllama/src/multi-thread/wllama.wasm?url';
 import type {
   BenchConfig,
   BenchDiagnostics,
+  BenchFailureRecord,
   BenchLogEvent,
   BenchProgressEvent,
   BenchReport,
   BenchSampleMetric,
   BenchSeriesStats,
   BenchSummary,
+  CacheOccupancySample,
   CacheProfile,
   CdfPoint,
   WebArenaTask,
@@ -131,7 +133,13 @@ function getSharedContextKey(task: WebArenaTask): string {
     ?? task.site;
 }
 
-function classifyFailure(err: unknown): keyof BenchDiagnostics {
+type FailureCounterKey =
+  | 'timeoutFailureCount'
+  | 'abortFailureCount'
+  | 'disposedFailureCount'
+  | 'otherFailureCount';
+
+function classifyFailure(err: unknown): FailureCounterKey {
   const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
   if (msg.includes('abort')) return 'abortFailureCount';
   if (msg.includes('timeout')) return 'timeoutFailureCount';
@@ -299,6 +307,10 @@ function summarizeDualPath(tasks: WebArenaTask[], flatMetrics: BenchSampleMetric
   return {
     benchmark: 'WebArena',
     evalCount: tasks.length,
+    successCountFlat: flatMetrics.length,
+    successCountTree: treeMetrics.length,
+    failureCountFlat: Math.max(0, tasks.length - flatMetrics.length),
+    failureCountTree: Math.max(0, tasks.length - treeMetrics.length),
     siteBreakdown,
     avgTtftMsFlat: flatStats.avgTtftMs,
     avgTtftMsTree: treeStats.avgTtftMs,
@@ -327,6 +339,10 @@ function summarizeSinglePath(tasks: WebArenaTask[], metrics: BenchSampleMetric[]
   return {
     benchmark: 'WebArena',
     evalCount: tasks.length,
+    successCountFlat: 0,
+    successCountTree: metrics.length,
+    failureCountFlat: 0,
+    failureCountTree: Math.max(0, tasks.length - metrics.length),
     siteBreakdown,
     avgTtftMsFlat: 0,
     avgTtftMsTree: stats.avgTtftMs,
@@ -357,6 +373,28 @@ function emptyCacheProfile(): CacheProfile {
       prefixSetupMs: 0,
       otherMs: 0,
     },
+    snapshotTokenBytes: 0,
+    tierL1Tokens: 0,
+    tierL2Tokens: 0,
+    tierL3Tokens: 0,
+    occupancyStats: {
+      sampleCount: 0,
+      avgSnapshotTokenBytes: 0,
+      peakSnapshotTokenBytes: 0,
+      avgTierL1Tokens: 0,
+      avgTierL2Tokens: 0,
+      avgTierL3Tokens: 0,
+      peakTierL1Tokens: 0,
+      peakTierL2Tokens: 0,
+      peakTierL3Tokens: 0,
+      avgTierL1Slots: 0,
+      avgTierL2Slots: 0,
+      avgTierL3Slots: 0,
+      peakTierL1Slots: 0,
+      peakTierL2Slots: 0,
+      peakTierL3Slots: 0,
+    },
+    occupancySamples: [],
   };
 }
 
@@ -367,6 +405,172 @@ function emptyDiagnostics(): BenchDiagnostics {
     abortFailureCount: 0,
     disposedFailureCount: 0,
     otherFailureCount: 0,
+    failureRecords: [],
+  };
+}
+
+type CacheMaintenanceCategory = 'sessionInit' | 'stateRead' | 'prefixSetup' | 'other';
+
+type CacheMaintenanceRecorder = {
+  totalMs: number;
+  breakdownMs: Record<CacheMaintenanceCategory, number>;
+  occupancySampleCount: number;
+  snapshotTokenBytesSum: number;
+  snapshotTokenBytesPeak: number;
+  tierL1TokensSum: number;
+  tierL2TokensSum: number;
+  tierL3TokensSum: number;
+  tierL1TokensPeak: number;
+  tierL2TokensPeak: number;
+  tierL3TokensPeak: number;
+  tierL1SlotsSum: number;
+  tierL2SlotsSum: number;
+  tierL3SlotsSum: number;
+  tierL1SlotsPeak: number;
+  tierL2SlotsPeak: number;
+  tierL3SlotsPeak: number;
+  samples: CacheOccupancySample[];
+};
+
+type MinimalTreeState = {
+  totalSnapshotTokenBytes?: number;
+  tierStats?: {
+    l1Tokens?: number;
+    l2Tokens?: number;
+    l3Tokens?: number;
+    l1Slots?: number;
+    l2Slots?: number;
+    l3Slots?: number;
+  };
+};
+
+function createCacheMaintenanceRecorder(): CacheMaintenanceRecorder {
+  return {
+    totalMs: 0,
+    breakdownMs: {
+      sessionInit: 0,
+      stateRead: 0,
+      prefixSetup: 0,
+      other: 0,
+    },
+    occupancySampleCount: 0,
+    snapshotTokenBytesSum: 0,
+    snapshotTokenBytesPeak: 0,
+    tierL1TokensSum: 0,
+    tierL2TokensSum: 0,
+    tierL3TokensSum: 0,
+    tierL1TokensPeak: 0,
+    tierL2TokensPeak: 0,
+    tierL3TokensPeak: 0,
+    tierL1SlotsSum: 0,
+    tierL2SlotsSum: 0,
+    tierL3SlotsSum: 0,
+    tierL1SlotsPeak: 0,
+    tierL2SlotsPeak: 0,
+    tierL3SlotsPeak: 0,
+    samples: [],
+  };
+}
+
+function observeCacheOccupancy(
+  recorder: CacheMaintenanceRecorder,
+  state: MinimalTreeState | null | undefined,
+  meta: {
+    label: string;
+    mode: 'flat' | 'tree' | 'web-llm' | 'runtime';
+    site: string;
+    groupKey: string;
+    taskId?: string;
+  }
+): void {
+  if (!state) return;
+  const snapshotTokenBytes = state.totalSnapshotTokenBytes ?? 0;
+  const l1Tokens = state.tierStats?.l1Tokens ?? 0;
+  const l2Tokens = state.tierStats?.l2Tokens ?? 0;
+  const l3Tokens = state.tierStats?.l3Tokens ?? 0;
+  const l1Slots = state.tierStats?.l1Slots ?? 0;
+  const l2Slots = state.tierStats?.l2Slots ?? 0;
+  const l3Slots = state.tierStats?.l3Slots ?? 0;
+  recorder.occupancySampleCount += 1;
+  recorder.snapshotTokenBytesSum += snapshotTokenBytes;
+  recorder.snapshotTokenBytesPeak = Math.max(recorder.snapshotTokenBytesPeak, snapshotTokenBytes);
+  recorder.tierL1TokensSum += l1Tokens;
+  recorder.tierL2TokensSum += l2Tokens;
+  recorder.tierL3TokensSum += l3Tokens;
+  recorder.tierL1TokensPeak = Math.max(recorder.tierL1TokensPeak, l1Tokens);
+  recorder.tierL2TokensPeak = Math.max(recorder.tierL2TokensPeak, l2Tokens);
+  recorder.tierL3TokensPeak = Math.max(recorder.tierL3TokensPeak, l3Tokens);
+  recorder.tierL1SlotsSum += l1Slots;
+  recorder.tierL2SlotsSum += l2Slots;
+  recorder.tierL3SlotsSum += l3Slots;
+  recorder.tierL1SlotsPeak = Math.max(recorder.tierL1SlotsPeak, l1Slots);
+  recorder.tierL2SlotsPeak = Math.max(recorder.tierL2SlotsPeak, l2Slots);
+  recorder.tierL3SlotsPeak = Math.max(recorder.tierL3SlotsPeak, l3Slots);
+  recorder.samples.push({
+    label: meta.label,
+    mode: meta.mode,
+    site: meta.site,
+    groupKey: meta.groupKey,
+    taskId: meta.taskId,
+    snapshotTokenBytes,
+    tierL1Tokens: l1Tokens,
+    tierL2Tokens: l2Tokens,
+    tierL3Tokens: l3Tokens,
+    tierL1Slots: l1Slots,
+    tierL2Slots: l2Slots,
+    tierL3Slots: l3Slots,
+  });
+}
+
+function buildCacheProfile(
+  recorder: CacheMaintenanceRecorder,
+  runStartedAt: number,
+  state?: MinimalTreeState | null
+): CacheProfile {
+  if (state) {
+    observeCacheOccupancy(recorder, state, {
+      label: 'final-state',
+      mode: 'runtime',
+      site: 'all',
+      groupKey: 'final',
+    });
+  }
+  const runTotalMs = Math.max(0, performance.now() - runStartedAt);
+  const tier = state?.tierStats;
+  const sampleCount = recorder.occupancySampleCount;
+  const avgOf = (sum: number) => (sampleCount > 0 ? sum / sampleCount : 0);
+  return {
+    maintenanceMs: recorder.totalMs,
+    runTotalMs,
+    maintenancePct: runTotalMs > 0 ? (recorder.totalMs / runTotalMs) * 100 : 0,
+    maintenanceBreakdownMs: {
+      sessionInitMs: recorder.breakdownMs.sessionInit,
+      stateReadMs: recorder.breakdownMs.stateRead,
+      prefixSetupMs: recorder.breakdownMs.prefixSetup,
+      otherMs: recorder.breakdownMs.other,
+    },
+    snapshotTokenBytes: state?.totalSnapshotTokenBytes ?? 0,
+    tierL1Tokens: tier?.l1Tokens ?? 0,
+    tierL2Tokens: tier?.l2Tokens ?? 0,
+    tierL3Tokens: tier?.l3Tokens ?? 0,
+    occupancyStats: {
+      sampleCount,
+      avgSnapshotTokenBytes: avgOf(recorder.snapshotTokenBytesSum),
+      peakSnapshotTokenBytes: recorder.snapshotTokenBytesPeak,
+      avgTierL1Tokens: avgOf(recorder.tierL1TokensSum),
+      avgTierL2Tokens: avgOf(recorder.tierL2TokensSum),
+      avgTierL3Tokens: avgOf(recorder.tierL3TokensSum),
+      peakTierL1Tokens: recorder.tierL1TokensPeak,
+      peakTierL2Tokens: recorder.tierL2TokensPeak,
+      peakTierL3Tokens: recorder.tierL3TokensPeak,
+      avgTierL1Slots: avgOf(recorder.tierL1SlotsSum),
+      avgTierL2Slots: avgOf(recorder.tierL2SlotsSum),
+      avgTierL3Slots: avgOf(recorder.tierL3SlotsSum),
+      peakTierL1Slots: recorder.tierL1SlotsPeak,
+      peakTierL2Slots: recorder.tierL2SlotsPeak,
+      peakTierL3Slots: recorder.tierL3SlotsPeak,
+    },
+    occupancySamples: recorder.samples,
   };
 }
 
@@ -421,6 +625,14 @@ export async function runWebArenaBench(
           logSampleMetric(onLog, metric);
         } catch (err) {
           diagnostics[classifyFailure(err)] += 1;
+          diagnostics.failureRecords.push({
+            mode: 'web-llm',
+            taskId: task.id,
+            site: task.site,
+            groupKey: getSharedContextKey(task),
+            stage: 'taskRun',
+            message: err instanceof Error ? err.message : String(err),
+          });
           onLog?.({ text: `[WebArena/web-llm] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
         }
         onProgress?.({ current: i + 1, total: selectedTasks.length, label: 'WebArena web-llm' });
@@ -443,7 +655,7 @@ export async function runWebArenaBench(
   }
 
   const runtime = await createLoadedWllama(config, onLog);
-  const cacheProfile = emptyCacheProfile();
+  const cacheRecorder = createCacheMaintenanceRecorder();
   const flatMetrics: BenchSampleMetric[] = [];
   const treeMetrics: BenchSampleMetric[] = [];
   const grouped = new Map<string, WebArenaTask[]>();
@@ -457,6 +669,7 @@ export async function runWebArenaBench(
 
   let progressCurrent = 0;
   onProgress?.({ current: 0, total: selectedTasks.length * 2, label: 'WebArena flat' });
+  let finalState: MinimalTreeState | null = null;
 
   try {
     for (const [groupKey, siteTasks] of orderedGroups) {
@@ -470,22 +683,64 @@ export async function runWebArenaBench(
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         const taskPrompt = buildTaskPrompt(task);
         const requestStart = performance.now();
-        const startSession = performance.now();
+        let stage = 'sessionInit';
         try {
+          const startSession = performance.now();
           await runtime.chatSessionInit(capToBytes(config.trueTreeMemoryCapMB), tieredCacheOptions(config));
-          cacheProfile.maintenanceBreakdownMs.sessionInitMs += performance.now() - startSession;
+          const sessionMs = performance.now() - startSession;
+          cacheRecorder.totalMs += sessionMs;
+          cacheRecorder.breakdownMs.sessionInit += sessionMs;
+
+          stage = 'stateRead-before-setup';
           const stateReadStart = performance.now();
           const state = await runtime.chatGetState();
-          cacheProfile.maintenanceBreakdownMs.stateReadMs += performance.now() - stateReadStart;
+          const stateMs = performance.now() - stateReadStart;
+          cacheRecorder.totalMs += stateMs;
+          cacheRecorder.breakdownMs.stateRead += stateMs;
+          observeCacheOccupancy(cacheRecorder, state, {
+            label: 'flat-before-setup',
+            mode: 'flat',
+            site,
+            groupKey,
+            taskId: task.id,
+          });
+
+          stage = 'prefixSetup';
           const setupStart = performance.now();
           const setup = await runtime.chatFromNode(state.rootId, sharedPrefix, { nPredict: 0 });
-          cacheProfile.maintenanceBreakdownMs.prefixSetupMs += performance.now() - setupStart;
+          const setupMs = performance.now() - setupStart;
+          cacheRecorder.totalMs += setupMs;
+          cacheRecorder.breakdownMs.prefixSetup += setupMs;
+
+          stage = 'taskRun';
           const result = await runWllamaPrompt(runtime, setup.nodeId, taskPrompt, config.maxOutputTokens, requestStart);
           const metric = buildMetric(task, 'flat', sharedPrefix, taskPrompt, result);
           flatMetrics.push(metric);
           logSampleMetric(onLog, metric);
+
+          stage = 'stateRead-after-task';
+          const afterTaskStateReadStart = performance.now();
+          const afterTaskState = await runtime.chatGetState();
+          const afterTaskStateMs = performance.now() - afterTaskStateReadStart;
+          cacheRecorder.totalMs += afterTaskStateMs;
+          cacheRecorder.breakdownMs.stateRead += afterTaskStateMs;
+          observeCacheOccupancy(cacheRecorder, afterTaskState, {
+            label: 'flat-after-task',
+            mode: 'flat',
+            site,
+            groupKey,
+            taskId: task.id,
+          });
         } catch (err) {
           diagnostics[classifyFailure(err)] += 1;
+          diagnostics.failureRecords.push({
+            mode: 'flat',
+            taskId: task.id,
+            site,
+            groupKey,
+            stage,
+            message: err instanceof Error ? err.message : String(err),
+          });
           onLog?.({ text: `[WebArena/flat] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
         }
         progressCurrent += 1;
@@ -500,27 +755,88 @@ export async function runWebArenaBench(
         config.usePreloadedPageContext ? siteTasks[0]?.pageContext : '',
       );
       onLog?.({ text: `[WebArena/tree] site=${site} group=${groupKey} shared prefix chars=${sharedPrefix.length}` });
+      let sharedNodeId = -1;
+      let groupInitFailed = false;
       const sessionInitStart = performance.now();
-      await runtime.chatSessionInit(capToBytes(config.trueTreeMemoryCapMB), tieredCacheOptions(config));
-      cacheProfile.maintenanceBreakdownMs.sessionInitMs += performance.now() - sessionInitStart;
-      const stateReadStart = performance.now();
-      const state = await runtime.chatGetState();
-      cacheProfile.maintenanceBreakdownMs.stateReadMs += performance.now() - stateReadStart;
-      const setupStart = performance.now();
-      const setup = await runtime.chatFromNode(state.rootId, sharedPrefix, { nPredict: 0 });
-      cacheProfile.maintenanceBreakdownMs.prefixSetupMs += performance.now() - setupStart;
-      const sharedNodeId = setup.nodeId;
+      try {
+        await runtime.chatSessionInit(capToBytes(config.trueTreeMemoryCapMB), tieredCacheOptions(config));
+        const sessionMs = performance.now() - sessionInitStart;
+        cacheRecorder.totalMs += sessionMs;
+        cacheRecorder.breakdownMs.sessionInit += sessionMs;
+
+        const stateReadStart = performance.now();
+        const state = await runtime.chatGetState();
+        const stateMs = performance.now() - stateReadStart;
+        cacheRecorder.totalMs += stateMs;
+        cacheRecorder.breakdownMs.stateRead += stateMs;
+        observeCacheOccupancy(cacheRecorder, state, {
+          label: 'tree-before-setup',
+          mode: 'tree',
+          site,
+          groupKey,
+        });
+
+        const setupStart = performance.now();
+        const setup = await runtime.chatFromNode(state.rootId, sharedPrefix, { nPredict: 0 });
+        const setupMs = performance.now() - setupStart;
+        cacheRecorder.totalMs += setupMs;
+        cacheRecorder.breakdownMs.prefixSetup += setupMs;
+        sharedNodeId = setup.nodeId;
+      } catch (err) {
+        diagnostics[classifyFailure(err)] += 1;
+        for (const task of siteTasks) {
+          diagnostics.failureRecords.push({
+            mode: 'tree',
+            taskId: task.id,
+            site,
+            groupKey,
+            stage: 'shared-prefix-setup',
+            message: err instanceof Error ? err.message : String(err),
+          });
+          onLog?.({ text: `[WebArena/tree] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
+          progressCurrent += 1;
+          onProgress?.({ current: progressCurrent, total: selectedTasks.length * 2, label: 'WebArena tree' });
+        }
+        groupInitFailed = true;
+      }
+
+      if (groupInitFailed) {
+        continue;
+      }
 
       for (const task of siteTasks) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         const taskPrompt = buildTaskPrompt(task);
+        let stage = 'taskRun';
         try {
           const result = await runWllamaPrompt(runtime, sharedNodeId, taskPrompt, config.maxOutputTokens);
           const metric = buildMetric(task, 'tree', sharedPrefix, taskPrompt, result);
           treeMetrics.push(metric);
           logSampleMetric(onLog, metric);
+
+          stage = 'stateRead-after-task';
+          const afterTaskStateReadStart = performance.now();
+          const afterTaskState = await runtime.chatGetState();
+          const afterTaskStateMs = performance.now() - afterTaskStateReadStart;
+          cacheRecorder.totalMs += afterTaskStateMs;
+          cacheRecorder.breakdownMs.stateRead += afterTaskStateMs;
+          observeCacheOccupancy(cacheRecorder, afterTaskState, {
+            label: 'tree-after-task',
+            mode: 'tree',
+            site,
+            groupKey,
+            taskId: task.id,
+          });
         } catch (err) {
           diagnostics[classifyFailure(err)] += 1;
+          diagnostics.failureRecords.push({
+            mode: 'tree',
+            taskId: task.id,
+            site,
+            groupKey,
+            stage,
+            message: err instanceof Error ? err.message : String(err),
+          });
           onLog?.({ text: `[WebArena/tree] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
         }
         progressCurrent += 1;
@@ -529,16 +845,22 @@ export async function runWebArenaBench(
     }
   } finally {
     try {
+      const finalStateReadStart = performance.now();
+      finalState = await runtime.chatGetState();
+      const finalStateMs = performance.now() - finalStateReadStart;
+      cacheRecorder.totalMs += finalStateMs;
+      cacheRecorder.breakdownMs.stateRead += finalStateMs;
+    } catch {
+      finalState = null;
+    }
+    try {
       await runtime.exit();
     } catch {
       // best effort
     }
   }
 
-  cacheProfile.maintenanceMs = Object.values(cacheProfile.maintenanceBreakdownMs).reduce((sum, value) => sum + value, 0);
-  cacheProfile.runTotalMs = Math.max(0, performance.now() - tRun0);
-  cacheProfile.maintenancePct = cacheProfile.runTotalMs > 0 ? (cacheProfile.maintenanceMs / cacheProfile.runTotalMs) * 100 : 0;
-
+  const cacheProfile = buildCacheProfile(cacheRecorder, tRun0, finalState);
   return {
     modelUrl: config.modelUrl,
     config,

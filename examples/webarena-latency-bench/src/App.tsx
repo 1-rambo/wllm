@@ -135,6 +135,51 @@ function buildCdfCsv(report: BenchReport): string {
   return rows.join('\n');
 }
 
+function buildFailureCsv(report: BenchReport): string {
+  const header = ['mode', 'taskId', 'site', 'groupKey', 'stage', 'message'];
+  const rows = report.diagnostics.failureRecords.map((record) => ([
+    record.mode,
+    record.taskId,
+    record.site,
+    record.groupKey,
+    record.stage,
+    record.message,
+  ].map(escapeCsv).join(',')));
+  return [header.join(','), ...rows].join('\n');
+}
+
+function buildOccupancyCsv(report: BenchReport): string {
+  const header = [
+    'label',
+    'mode',
+    'site',
+    'groupKey',
+    'taskId',
+    'snapshotTokenBytes',
+    'tierL1Tokens',
+    'tierL2Tokens',
+    'tierL3Tokens',
+    'tierL1Slots',
+    'tierL2Slots',
+    'tierL3Slots',
+  ];
+  const rows = report.cacheProfile.occupancySamples.map((sample) => ([
+    sample.label,
+    sample.mode,
+    sample.site,
+    sample.groupKey,
+    sample.taskId ?? '',
+    sample.snapshotTokenBytes,
+    sample.tierL1Tokens,
+    sample.tierL2Tokens,
+    sample.tierL3Tokens,
+    sample.tierL1Slots,
+    sample.tierL2Slots,
+    sample.tierL3Slots,
+  ].map(escapeCsv).join(',')));
+  return [header.join(','), ...rows].join('\n');
+}
+
 function buildDetailsExport(report: BenchReport, tasks: WebArenaTask[], logs: string[], summaryLines: string[]) {
   const sampleMetrics = report.webarena
     ? [...report.webarena.sampleMetricsFlat, ...report.webarena.sampleMetricsTree]
@@ -166,6 +211,8 @@ function buildDetailsExport(report: BenchReport, tasks: WebArenaTask[], logs: st
         ttftTree: report.webarena?.ttftCdfTree ?? [],
       },
     },
+    failures: report.diagnostics.failureRecords,
+    cacheOccupancySamples: report.cacheProfile.occupancySamples,
     summaryLines,
     logs,
   };
@@ -192,18 +239,18 @@ export default function App() {
     const summary = report.webarena;
     if (config.backend === 'web-llm') {
       return [
-        `[WebArena] tasks=${summary.evalCount} sites=${Object.entries(summary.siteBreakdown).map(([k, v]) => `${k}:${v}`).join(', ')}`,
+        `[WebArena] tasks=${summary.evalCount} success=${summary.successCountTree} failed=${summary.failureCountTree} sites=${Object.entries(summary.siteBreakdown).map(([k, v]) => `${k}:${v}`).join(', ')}`,
         `[WebArena] web-llm Avg TTFT=${summary.avgTtftMsTree.toFixed(2)} ms P95 TTFT=${quantile(summary.sampleMetricsTree.map((m) => m.ttftMs), 0.95).toFixed(2)} ms`,
         `[WebArena] web-llm Avg Latency=${summary.avgLatencyMsTree.toFixed(2)} ms P95 Latency=${quantile(summary.sampleMetricsTree.map((m) => m.latencyMs), 0.95).toFixed(2)} ms`,
         `[WebArena] web-llm Avg Tokens/s=${summary.avgTokensPerSecondTree.toFixed(3)}`,
       ];
     }
     return [
-      `[WebArena] tasks=${summary.evalCount} sites=${Object.entries(summary.siteBreakdown).map(([k, v]) => `${k}:${v}`).join(', ')}`,
+      `[WebArena] tasks=${summary.evalCount} success flat/tree=${summary.successCountFlat}/${summary.successCountTree} failed flat/tree=${summary.failureCountFlat}/${summary.failureCountTree} sites=${Object.entries(summary.siteBreakdown).map(([k, v]) => `${k}:${v}`).join(', ')}`,
       `[WebArena] TTFT flat/tree=${summary.avgTtftMsFlat.toFixed(2)}/${summary.avgTtftMsTree.toFixed(2)} ms speedup=${summary.ttftSpeedupPct.toFixed(1)}%`,
       `[WebArena] Latency flat/tree=${summary.avgLatencyMsFlat.toFixed(2)}/${summary.avgLatencyMsTree.toFixed(2)} ms speedup=${summary.speedupPct.toFixed(1)}%`,
       `[WebArena] Tokens/s flat/tree=${summary.avgTokensPerSecondFlat.toFixed(3)}/${summary.avgTokensPerSecondTree.toFixed(3)} gain=${summary.tpsGainPct.toFixed(1)}%`,
-      `[WebArena] Maintenance session/state/prefix=${report.cacheProfile.maintenanceBreakdownMs.sessionInitMs.toFixed(2)}/${report.cacheProfile.maintenanceBreakdownMs.stateReadMs.toFixed(2)}/${report.cacheProfile.maintenanceBreakdownMs.prefixSetupMs.toFixed(2)} ms`,
+      `[WebArena] Maintenance session/state/prefix=${report.cacheProfile.maintenanceBreakdownMs.sessionInitMs.toFixed(2)}/${report.cacheProfile.maintenanceBreakdownMs.stateReadMs.toFixed(2)}/${report.cacheProfile.maintenanceBreakdownMs.prefixSetupMs.toFixed(2)} ms; snapshot=${report.cacheProfile.snapshotTokenBytes}B l1/l2/l3=${report.cacheProfile.tierL1Tokens}/${report.cacheProfile.tierL2Tokens}/${report.cacheProfile.tierL3Tokens}`,
     ];
   }, [report, config.backend]);
 
@@ -251,6 +298,9 @@ export default function App() {
     saveJson(`webarena-exp1-details-${timestamp}.json`, buildDetailsExport(report, usedTasks, logs, summaryLines));
     saveText(`webarena-exp1-sample-metrics-${timestamp}.csv`, buildSampleMetricsCsv(report));
     saveText(`webarena-exp1-cdf-${timestamp}.csv`, buildCdfCsv(report));
+    saveText(`webarena-exp1-failures-${timestamp}.csv`, buildFailureCsv(report));
+    saveText(`webarena-exp1-occupancy-${timestamp}.csv`, buildOccupancyCsv(report));
+    saveText(`webarena-exp1-logs-${timestamp}.log`, logs.join('\n'));
   };
 
   return (

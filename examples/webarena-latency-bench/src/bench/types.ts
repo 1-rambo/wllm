@@ -81,6 +81,10 @@ export interface BenchSeriesStats {
 export interface BenchSummary {
   benchmark: 'WebArena';
   evalCount: number;
+  successCountFlat: number;
+  successCountTree: number;
+  failureCountFlat: number;
+  failureCountTree: number;
   siteBreakdown: Record<string, number>;
   avgTtftMsFlat: number;
   avgTtftMsTree: number;
@@ -109,6 +113,52 @@ export interface CacheProfile {
     prefixSetupMs: number;
     otherMs: number;
   };
+  snapshotTokenBytes: number;
+  tierL1Tokens: number;
+  tierL2Tokens: number;
+  tierL3Tokens: number;
+  occupancyStats: {
+    sampleCount: number;
+    avgSnapshotTokenBytes: number;
+    peakSnapshotTokenBytes: number;
+    avgTierL1Tokens: number;
+    avgTierL2Tokens: number;
+    avgTierL3Tokens: number;
+    peakTierL1Tokens: number;
+    peakTierL2Tokens: number;
+    peakTierL3Tokens: number;
+    avgTierL1Slots: number;
+    avgTierL2Slots: number;
+    avgTierL3Slots: number;
+    peakTierL1Slots: number;
+    peakTierL2Slots: number;
+    peakTierL3Slots: number;
+  };
+  occupancySamples: CacheOccupancySample[];
+}
+
+export interface CacheOccupancySample {
+  label: string;
+  mode: BenchMode | 'runtime';
+  site: string;
+  groupKey: string;
+  taskId?: string;
+  snapshotTokenBytes: number;
+  tierL1Tokens: number;
+  tierL2Tokens: number;
+  tierL3Tokens: number;
+  tierL1Slots: number;
+  tierL2Slots: number;
+  tierL3Slots: number;
+}
+
+export interface BenchFailureRecord {
+  mode: BenchMode;
+  taskId: string;
+  site: string;
+  groupKey: string;
+  stage: string;
+  message: string;
 }
 
 export interface BenchDiagnostics {
@@ -117,6 +167,7 @@ export interface BenchDiagnostics {
   abortFailureCount: number;
   disposedFailureCount: number;
   otherFailureCount: number;
+  failureRecords: BenchFailureRecord[];
 }
 
 export interface BenchReport {

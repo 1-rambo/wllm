@@ -9,7 +9,7 @@ import {
 import { runSglangStyleBench } from './bench/runner';
 import type { BenchBackend, BenchConfig, BenchProgressEvent, BenchReport, BenchTarget, ExperimentRunMode, QAResult } from './bench/types';
 
-const MODEL_BASE_DIR = '/Users/rambo/Desktop/wllama-webgpu/examples/sglang-style-mmlu-hellaswag/model/';
+const MODEL_BASE_DIR = '/Users/rambo/Desktop/wllama-webgpu/examples/prefix-tree-chat/dist/';
 const MODEL_FILE = 'Llama-3.2-1B-Instruct-Q4_0.gguf';
 
 const DEFAULT_CONFIG: BenchConfig = {
