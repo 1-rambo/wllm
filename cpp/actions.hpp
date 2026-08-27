@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <cmath>
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <memory>
 #include <limits>
@@ -49,7 +50,34 @@ struct app_t
   std::unordered_map<int32_t, int32_t> node_to_seq_slot;
   std::unordered_map<int32_t, int32_t> seq_slot_to_node;
   std::vector<int32_t> free_seq_slots;
+  std::unordered_set<int32_t> queue_hot_nodes;
+  std::string admission_policy = "monotonic";
+  int32_t admission_max_repair_steps = 64;
   std::unique_ptr<llama_chat_tree> tree;
+
+  struct admission_attempt
+  {
+    bool active = false;
+    int32_t id = 0;
+    int32_t target_level = 0;
+    int32_t incoming_tokens = 0;
+    int32_t initial_token_deficit = 0;
+    int32_t initial_slot_deficit = 0;
+    int32_t repair_steps = 0;
+    int32_t demoted_tokens = 0;
+    int32_t checkpointed_tokens = 0;
+    int32_t removed_states = 0;
+    int64_t started_at_ms = 0;
+    bool success = false;
+    std::unordered_set<int32_t> visited_victims;
+    std::unordered_set<int32_t> removed_victims;
+    std::vector<int32_t> victim_ids;
+  };
+
+  int32_t next_admission_id = 1;
+  int32_t admission_depth = 0;
+  admission_attempt current_admission;
+  admission_attempt last_admission;
 };
 
 inline static std::string debug_runtime_snapshot(
@@ -130,6 +158,63 @@ inline static void seq_allocator_reset(app_t &app);
 inline static int32_t seq_allocator_get_slot(const app_t &app, int32_t node_id);
 inline static void seq_allocator_release_slot_for_node(app_t &app, int32_t node_id);
 inline static int32_t seq_allocator_ensure_slot_for_node(app_t &app, int32_t node_id, int32_t protected_node, std::string &err);
+
+inline static int64_t admission_now_ms()
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+inline static void admission_note_removed(app_t &app, int32_t node_id)
+{
+  if (!app.current_admission.active)
+  {
+    return;
+  }
+  if (app.current_admission.removed_victims.insert(node_id).second)
+  {
+    app.current_admission.removed_states++;
+  }
+}
+
+inline static void admission_note_victim(app_t &app, int32_t node_id)
+{
+  if (!app.current_admission.active)
+  {
+    return;
+  }
+  if (app.current_admission.visited_victims.insert(node_id).second)
+  {
+    app.current_admission.victim_ids.push_back(node_id);
+    app.current_admission.repair_steps++;
+  }
+}
+
+inline static bool tree_subtree_contains_pending(const app_t &app, int32_t node_id)
+{
+  if (!app.tree)
+  {
+    return false;
+  }
+  const auto *node = app.tree->find_node(node_id);
+  if (!node)
+  {
+    return false;
+  }
+  if (node->status == "generating" || node->status == "pending")
+  {
+    return true;
+  }
+  for (const int32_t child_id : node->child_ids)
+  {
+    if (tree_subtree_contains_pending(app, child_id))
+    {
+      return true;
+    }
+  }
+  return false;
+}
 
 inline std::vector<char> convert_string_to_buf(std::string &input)
 {
@@ -1133,6 +1218,7 @@ inline static void tree_remove_slot(app_t &app, int32_t node_id)
   {
     return;
   }
+  admission_note_removed(app, node_id);
   const int32_t seq_slot = seq_allocator_get_slot(app, node_id);
   std::cerr << "tree_remove_slot: removing node=" << node_id
             << ", seq_slot=" << seq_slot
@@ -1365,6 +1451,20 @@ inline static bool tier_ensure_space_for_level(
 inline static void tier_apply_capacity_limits(app_t &app, int32_t protected_slot);
 inline static void tier_assert_capacity_invariants(const app_t &app, const char *stage);
 
+inline static int32_t tier_incremental_tokens_for_slot(
+    const app_t &app,
+    int32_t slot_id,
+    int32_t level,
+    int32_t new_token_count)
+{
+  const int32_t incoming = std::max(0, new_token_count);
+  if (!app.tree || slot_id < 1 || app.tree->tier_slot_level(slot_id) != level)
+  {
+    return incoming;
+  }
+  return std::max(0, incoming - app.tree->tier_slot_token_count(slot_id));
+}
+
 inline static bool tier_persist_live_tokens_snapshot(
     app_t &app,
     int32_t slot_id,
@@ -1395,7 +1495,11 @@ inline static bool tier_persist_live_tokens_snapshot(
     if (!tier_ensure_space_for_level(
             app,
             LLAMA_CHAT_TREE_CACHE_TIER_L1,
-            n_past,
+            tier_incremental_tokens_for_slot(
+                app,
+                slot_id,
+                LLAMA_CHAT_TREE_CACHE_TIER_L1,
+                n_past),
             protected_slot,
             stage_err))
     {
@@ -1421,7 +1525,11 @@ inline static bool tier_persist_live_tokens_snapshot(
     if (!tier_ensure_space_for_level(
             app,
             LLAMA_CHAT_TREE_CACHE_TIER_L2,
-            n_past,
+            tier_incremental_tokens_for_slot(
+                app,
+                slot_id,
+                LLAMA_CHAT_TREE_CACHE_TIER_L2,
+                n_past),
             protected_slot,
             stage_err))
     {
@@ -1438,7 +1546,11 @@ inline static bool tier_persist_live_tokens_snapshot(
     if (!tier_ensure_space_for_level(
             app,
             LLAMA_CHAT_TREE_CACHE_TIER_L3,
-            n_past,
+            tier_incremental_tokens_for_slot(
+                app,
+                slot_id,
+                LLAMA_CHAT_TREE_CACHE_TIER_L3,
+                n_past),
             protected_slot,
             stage_err))
     {
@@ -1512,6 +1624,10 @@ inline static void tier_reset_all(app_t &app)
     std::remove(entry.second.c_str());
   }
   app.slot_disk_paths.clear();
+  app.queue_hot_nodes.clear();
+  app.current_admission = app_t::admission_attempt{};
+  app.last_admission = app_t::admission_attempt{};
+  app.admission_depth = 0;
   if (app.tree)
   {
     app.tree->tier_reset();
@@ -1594,6 +1710,63 @@ inline static int32_t tier_cap_for_level(const app_t &app, int32_t level)
   return 0;
 }
 
+class admission_scope
+{
+public:
+  admission_scope(
+      app_t &app,
+      int32_t target_level,
+      int32_t incoming_tokens,
+      int32_t protected_node = -1)
+      : app_(app), owner_(!app.current_admission.active)
+  {
+    app_.admission_depth++;
+    if (!owner_)
+    {
+      return;
+    }
+    app_.current_admission = app_t::admission_attempt{};
+    auto &attempt = app_.current_admission;
+    attempt.active = true;
+    attempt.id = app_.next_admission_id++;
+    attempt.target_level = target_level;
+    attempt.incoming_tokens = std::max(0, incoming_tokens);
+    attempt.started_at_ms = admission_now_ms();
+    const int32_t cap = tier_cap_for_level(app_, target_level);
+    const int32_t used = tier_total_tokens(app_, target_level);
+    attempt.initial_token_deficit =
+        cap > 0 ? std::max(0, used + attempt.incoming_tokens - cap) : 0;
+    const int32_t slot_cap = std::max(0, tier_seq_limit(app_) - 1);
+    const bool already_has_slot =
+        tier_is_valid_slot_id_for_seq(app_, seq_allocator_get_slot(app_, protected_node));
+    attempt.initial_slot_deficit =
+        target_level == LLAMA_CHAT_TREE_CACHE_TIER_L1 && !already_has_slot
+            ? std::max(0, (int32_t) app_.node_to_seq_slot.size() + 1 - slot_cap)
+            : 0;
+  }
+
+  void succeed() { success_ = true; }
+
+  ~admission_scope()
+  {
+    app_.admission_depth = std::max(0, app_.admission_depth - 1);
+    if (!owner_)
+    {
+      return;
+    }
+    app_.current_admission.success = success_;
+    app_.current_admission.active = false;
+    app_.current_admission.started_at_ms =
+        std::max<int64_t>(0, admission_now_ms() - app_.current_admission.started_at_ms);
+    app_.last_admission = app_.current_admission;
+  }
+
+private:
+  app_t &app_;
+  bool owner_ = false;
+  bool success_ = false;
+};
+
 inline static int32_t tier_seq_limit(const app_t &app)
 {
   if (app.ctx == nullptr)
@@ -1602,14 +1775,6 @@ inline static int32_t tier_seq_limit(const app_t &app)
   }
 
   const int32_t reported = std::max<int32_t>(1, (int32_t) llama_n_seq_max(app.ctx));
-
-  // In kv_unified mode, runtime reports n_seq_max=1 even though tree ops can
-  // still address multiple seq IDs (bounded by compile-time LLAMA_MAX_SEQ).
-  // Keep the tree slot budget compatible with the unified runtime behavior.
-  if (reported == 1)
-  {
-    return 256;
-  }
 
   return reported;
 }
@@ -1710,7 +1875,7 @@ inline static bool seq_allocator_evict_one(app_t &app, int32_t protected_node, s
   }
 
   auto prune_node = [&](int32_t node_id) -> bool {
-    if (app.tree->subtree_contains_pending(node_id))
+    if (tree_subtree_contains_pending(app, node_id))
     {
       std::cerr << "seq_allocator_evict_one: skip subtree prune for pending subtree, victim="
                 << node_id << std::endl;
@@ -1753,6 +1918,7 @@ inline static bool seq_allocator_evict_one(app_t &app, int32_t protected_node, s
     {
       continue;
     }
+    admission_note_victim(app, victim_node);
 
     if (level == LLAMA_CHAT_TREE_CACHE_TIER_L3)
     {
@@ -1794,6 +1960,11 @@ inline static bool seq_allocator_evict_one(app_t &app, int32_t protected_node, s
 
       app.slot_tokens.erase(victim_node);
       app.tree->tier_set_slot_level(victim_node, LLAMA_CHAT_TREE_CACHE_TIER_L3);
+      if (app.current_admission.active)
+      {
+        app.current_admission.demoted_tokens += victim_tokens;
+        app.current_admission.checkpointed_tokens += victim_tokens;
+      }
       app.tree->tier_on_slot_evict(LLAMA_CHAT_TREE_CACHE_TIER_L2);
       seq_allocator_release_slot_for_node(app, victim_node);
       return true;
@@ -1820,6 +1991,10 @@ inline static bool seq_allocator_evict_one(app_t &app, int32_t protected_node, s
       }
 
       app.tree->tier_set_slot_level(victim_node, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+      if (app.current_admission.active)
+      {
+        app.current_admission.demoted_tokens += victim_tokens;
+      }
       app.tree->tier_on_slot_evict(LLAMA_CHAT_TREE_CACHE_TIER_L1);
       seq_allocator_release_slot_for_node(app, victim_node);
       return true;
@@ -1866,6 +2041,26 @@ inline static int32_t seq_allocator_ensure_slot_for_node(app_t &app, int32_t nod
 
   while (app.free_seq_slots.empty())
   {
+    if (app.admission_policy == "reject")
+    {
+      err = "admission rejected because no live sequence slot is available";
+      if (app.tree)
+      {
+        app.tree->tier_on_slot_alloc_miss();
+      }
+      return -1;
+    }
+    if (app.admission_policy == "monotonic" &&
+        app.current_admission.active &&
+        app.current_admission.repair_steps >= app.admission_max_repair_steps)
+    {
+      err = "admission repair budget exhausted while allocating a sequence slot";
+      if (app.tree)
+      {
+        app.tree->tier_on_slot_alloc_miss();
+      }
+      return -1;
+    }
     needed_evict = true;
     if (!seq_allocator_evict_one(app, protected_node, err))
     {
@@ -1927,28 +2122,6 @@ inline static int32_t seq_allocator_ensure_slot_for_node(app_t &app, int32_t nod
   return slot;
 }
 
-inline static int32_t tier_total_hot_slots(const app_t &app)
-{
-  if (!app.tree)
-  {
-    return 0;
-  }
-  return app.tree->tier_total_slots(LLAMA_CHAT_TREE_CACHE_TIER_L1) +
-         app.tree->tier_total_slots(LLAMA_CHAT_TREE_CACHE_TIER_L2);
-}
-
-inline static int32_t tier_slot_soft_cap(const app_t &app)
-{
-  const int32_t n_seq = tier_seq_limit(app);
-  const int32_t hard_slot_cap = std::max(1, n_seq - 1); // seq_id 0 is live sequence
-  if (hard_slot_cap <= 2)
-  {
-    return 1;
-  }
-  const int32_t ratio_cap = std::max(1, (int32_t) std::floor((double) hard_slot_cap * 0.90));
-  return std::max(1, std::min(hard_slot_cap - 1, ratio_cap));
-}
-
 inline static bool tier_collect_invariant_violation(const app_t &app, std::string &detail)
 {
   if (!app.tree || !app.tree->tier_config().enabled)
@@ -2001,7 +2174,7 @@ inline static void tier_assert_capacity_invariants(const app_t &app, const char 
 
 inline static bool tier_prune_tree_node(app_t &app, int32_t node_id, int32_t protected_slot, std::string &err)
 {
-  if (app.tree->subtree_contains_pending(node_id))
+  if (tree_subtree_contains_pending(app, node_id))
   {
     std::cerr << "tier_prune_tree_node: skip subtree prune for pending subtree, victim=" << node_id
               << std::endl;
@@ -2060,6 +2233,8 @@ inline static bool tier_release_one_from_level(
 
   const int32_t victim_node_id = candidate;
   const auto *victim_node = app.tree->find_node(victim_node_id);
+  const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node_id));
+  admission_note_victim(app, victim_node_id);
 
   if (level == LLAMA_CHAT_TREE_CACHE_TIER_L1)
   {
@@ -2070,7 +2245,6 @@ inline static bool tier_release_one_from_level(
       return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
     }
 
-    const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node_id));
     const int32_t l2_cap = tier_cap_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L2);
     if (l2_cap > 0 && victim_tokens > l2_cap)
     {
@@ -2091,6 +2265,10 @@ inline static bool tier_release_one_from_level(
     }
 
     app.tree->tier_set_slot_level(victim_node_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    if (app.current_admission.active)
+    {
+      app.current_admission.demoted_tokens += victim_tokens;
+    }
     seq_allocator_release_slot_for_node(app, victim_node_id);
     return true;
   }
@@ -2104,7 +2282,6 @@ inline static bool tier_release_one_from_level(
       return tier_prune_tree_node(app, victim_node_id, protected_slot, err);
     }
 
-    const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node_id));
     const int32_t l3_cap = tier_cap_for_level(app, LLAMA_CHAT_TREE_CACHE_TIER_L3);
     if (l3_cap > 0 && victim_tokens > l3_cap)
     {
@@ -2131,6 +2308,11 @@ inline static bool tier_release_one_from_level(
     }
     app.slot_tokens.erase(victim_node_id);
     app.tree->tier_set_slot_level(victim_node_id, LLAMA_CHAT_TREE_CACHE_TIER_L3);
+    if (app.current_admission.active)
+    {
+      app.current_admission.demoted_tokens += victim_tokens;
+      app.current_admission.checkpointed_tokens += victim_tokens;
+    }
     seq_allocator_release_slot_for_node(app, victim_node_id);
     return true;
   }
@@ -2159,8 +2341,10 @@ inline static bool tier_ensure_space_for_level(
     int32_t protected_slot,
     std::string &err)
 {
+  admission_scope attempt(app, level, incoming_tokens, protected_slot);
   if (!app.tree || !app.tree->tier_config().enabled)
   {
+    attempt.succeed();
     return true;
   }
 
@@ -2168,6 +2352,7 @@ inline static bool tier_ensure_space_for_level(
   const int32_t incoming = std::max(0, incoming_tokens);
   if (cap <= 0)
   {
+    attempt.succeed();
     return true;
   }
   if (incoming > cap)
@@ -2178,20 +2363,26 @@ inline static bool tier_ensure_space_for_level(
     return false;
   }
 
-  const int32_t slot_soft_cap = tier_slot_soft_cap(app);
-  const bool enforce_slot_watermark =
-      slot_soft_cap > 0 &&
-      (level == LLAMA_CHAT_TREE_CACHE_TIER_L1 || level == LLAMA_CHAT_TREE_CACHE_TIER_L2);
-
   while (true)
   {
     const int32_t before_tokens = tier_total_tokens(app, level);
-    const int32_t before_slots = tier_total_hot_slots(app);
     const bool over_token_cap = before_tokens + incoming > cap;
-    const bool over_slot_cap = enforce_slot_watermark && before_slots >= slot_soft_cap;
-    if (!over_token_cap && !over_slot_cap)
+    if (!over_token_cap)
     {
       break;
+    }
+
+    if (app.admission_policy == "reject")
+    {
+      err = "admission rejected under capacity pressure";
+      return false;
+    }
+    if (app.admission_policy == "monotonic" &&
+        app.current_admission.active &&
+        app.current_admission.repair_steps >= app.admission_max_repair_steps)
+    {
+      err = "admission repair budget exhausted";
+      return false;
     }
 
     if (!tier_release_one_from_level(app, level, protected_slot, err))
@@ -2200,8 +2391,7 @@ inline static bool tier_ensure_space_for_level(
     }
 
     const int32_t after_tokens = tier_total_tokens(app, level);
-    const int32_t after_slots = tier_total_hot_slots(app);
-    if (after_tokens >= before_tokens && after_slots >= before_slots)
+    if (after_tokens >= before_tokens)
     {
       // Emergency fallback: hard-remove one slot to enforce progress.
       const int32_t forced = tier_pick_victim_slot(app, level, -1);
@@ -2223,14 +2413,8 @@ inline static bool tier_ensure_space_for_level(
     err = "ensure-space unresolved overflow in tier=" + std::to_string(level);
     return false;
   }
-  if (enforce_slot_watermark && tier_total_hot_slots(app) >= slot_soft_cap)
-  {
-    err = "ensure-space unresolved slot pressure: used=" + std::to_string(tier_total_hot_slots(app)) +
-          ", soft_cap=" + std::to_string(slot_soft_cap);
-    return false;
-  }
-
   tier_assert_capacity_invariants(app, "tier_ensure_space_for_level");
+  attempt.succeed();
   return true;
 }
 
@@ -2330,7 +2514,30 @@ inline static int32_t tier_pick_victim_slot(const app_t &app, int32_t tier, int3
   {
     return -1;
   }
-  return app.tree->tier_pick_victim_slot(tier, excluded_slot);
+  const int32_t preferred = app.tree->tier_pick_victim_slot(tier, excluded_slot);
+  if (preferred < 1 || app.queue_hot_nodes.find(preferred) == app.queue_hot_nodes.end())
+  {
+    return preferred;
+  }
+
+  int32_t fallback = -1;
+  int32_t oldest_access = std::numeric_limits<int32_t>::max();
+  for (const auto &entry : app.tree->nodes())
+  {
+    const auto &node = entry.second;
+    if (node.id < 1 || node.id == excluded_slot ||
+        app.queue_hot_nodes.find(node.id) != app.queue_hot_nodes.end() ||
+        app.tree->tier_slot_level(node.id) != tier)
+    {
+      continue;
+    }
+    if (node.last_accessed_at_s < oldest_access)
+    {
+      oldest_access = node.last_accessed_at_s;
+      fallback = node.id;
+    }
+  }
+  return fallback >= 1 ? fallback : preferred;
 }
 
 inline static void tier_apply_capacity_limits(app_t &app, int32_t protected_slot)
@@ -2373,6 +2580,15 @@ inline static bool tier_restore_slot_to_live_seq(
   int32_t &actual_n_past,
   std::string &err)
 {
+  admission_scope admission(
+      app,
+      LLAMA_CHAT_TREE_CACHE_TIER_L1,
+      tier_incremental_tokens_for_slot(
+          app,
+          slot_id,
+          LLAMA_CHAT_TREE_CACHE_TIER_L1,
+          requested_n_past),
+      slot_id);
   if (app.tree)
   {
     app.tree->tier_on_restore_attempt();
@@ -2428,6 +2644,7 @@ inline static bool tier_restore_slot_to_live_seq(
     {
       app.tree->tier_on_restore_hit(LLAMA_CHAT_TREE_CACHE_TIER_L1);
     }
+    admission.succeed();
     return true;
   }
 
@@ -2476,6 +2693,7 @@ inline static bool tier_restore_slot_to_live_seq(
       app.tree->tier_set_slot_level(slot_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
     }
     app.tree->tier_on_restore_hit(LLAMA_CHAT_TREE_CACHE_TIER_L1);
+    admission.succeed();
     return true;
   }
 
@@ -2520,7 +2738,25 @@ inline static bool tier_restore_slot_to_live_seq(
   tier_touch_slot(app, slot_id);
   tier_apply_capacity_limits(app, slot_id);
   tier_assert_capacity_invariants(app, "tier_restore_after_commit");
+  admission.succeed();
   return true;
+}
+
+template <typename T>
+inline static void fill_admission_result(T &res, const app_t &app)
+{
+  res.admission_id.value = app.last_admission.id;
+  res.admission_target_level.value = app.last_admission.target_level;
+  res.admission_incoming_tokens.value = app.last_admission.incoming_tokens;
+  res.admission_initial_token_deficit.value = app.last_admission.initial_token_deficit;
+  res.admission_initial_slot_deficit.value = app.last_admission.initial_slot_deficit;
+  res.admission_repair_steps.value = app.last_admission.repair_steps;
+  res.admission_demoted_tokens.value = app.last_admission.demoted_tokens;
+  res.admission_checkpointed_tokens.value = app.last_admission.checkpointed_tokens;
+  res.admission_removed_states.value = app.last_admission.removed_states;
+  res.admission_latency_ms.value = (int32_t) app.last_admission.started_at_ms;
+  res.admission_success.value = app.last_admission.success;
+  res.admission_victim_ids.arr = app.last_admission.victim_ids;
 }
 
 inline static bool tier_rebuild_slot_from_tree_prompt(
@@ -2648,6 +2884,13 @@ glue_msg_tree_init_res action_tree_init(app_t &app, const char *req_raw)
   tier_cfg.l3_path = req.tier_l3_path.value.empty()
                    ? std::string("/tmp/wllama-tier-cache")
                    : req.tier_l3_path.value;
+  app.admission_policy =
+      req.admission_policy.value == "reactive" ||
+      req.admission_policy.value == "reject"
+          ? req.admission_policy.value
+          : std::string("monotonic");
+  app.admission_max_repair_steps =
+      std::max(1, req.admission_max_repair_steps.value);
   app.tree->set_tier_config(tier_cfg);
   app.tree->init(req.memory_cap_bytes.value);
 
@@ -2739,6 +2982,17 @@ glue_msg_tree_state_res action_tree_state(app_t &app, const char *req_raw)
   res.tier_slot_evict_l2.value = tier_stats.slot_evict_l2;
   res.tier_slot_evict_l3.value = tier_stats.slot_evict_l3;
   res.tier_fallback_replays.value = tier_stats.fallback_replays;
+  res.admission_id.value = app.last_admission.id;
+  res.admission_target_level.value = app.last_admission.target_level;
+  res.admission_incoming_tokens.value = app.last_admission.incoming_tokens;
+  res.admission_initial_token_deficit.value = app.last_admission.initial_token_deficit;
+  res.admission_initial_slot_deficit.value = app.last_admission.initial_slot_deficit;
+  res.admission_repair_steps.value = app.last_admission.repair_steps;
+  res.admission_demoted_tokens.value = app.last_admission.demoted_tokens;
+  res.admission_checkpointed_tokens.value = app.last_admission.checkpointed_tokens;
+  res.admission_removed_states.value = app.last_admission.removed_states;
+  res.admission_latency_ms.value = (int32_t)app.last_admission.started_at_ms;
+  res.admission_success.value = app.last_admission.success;
   return res;
 }
 
@@ -2849,7 +3103,11 @@ glue_msg_tree_finish_turn_res action_tree_finish_turn(app_t &app, const char *re
     if (!tier_ensure_space_for_level(
             app,
             LLAMA_CHAT_TREE_CACHE_TIER_L1,
-            n_past,
+            tier_incremental_tokens_for_slot(
+                app,
+                req.node_id.value,
+                LLAMA_CHAT_TREE_CACHE_TIER_L1,
+                n_past),
             req.node_id.value,
             ensure_err))
     {
@@ -3066,6 +3324,7 @@ inline static glue_msg_tree_chat_start_res action_tree_chat_start_with_parent(
     const std::string &user_text)
 {
   glue_msg_tree_chat_start_res res;
+  app.last_admission = app_t::admission_attempt{};
   const auto t_start_begin = std::chrono::steady_clock::now();
 
   res.restore_cache_ms.value = 0;
@@ -3185,6 +3444,7 @@ inline static glue_msg_tree_chat_start_res action_tree_chat_start_with_parent(
 
   res.success.value = true;
   res.node_id.value = node_id;
+  fill_admission_result(res, app);
   return res;
 }
 
@@ -3201,7 +3461,49 @@ glue_msg_tree_cache_hint_res action_tree_cache_hint(app_t &app, const char *req_
   }
 
   (void) req.queue_pressure.value;
-  app.tree->tier_set_queue_hot_slots(req.hot_node_ids.arr);
+  app.queue_hot_nodes.clear();
+  for (const int32_t node_id : req.hot_node_ids.arr)
+  {
+    if (node_id >= 1)
+    {
+      app.queue_hot_nodes.insert(node_id);
+    }
+  }
+
+  res.success.value = true;
+  return res;
+}
+
+glue_msg_tree_release_res action_tree_release(app_t &app, const char *req_raw)
+{
+  PARSE_REQ(glue_msg_tree_release_req);
+  glue_msg_tree_release_res res;
+  res.released_slots.value = 0;
+  res.released_tokens.value = 0;
+
+  if (!app.tree)
+  {
+    res.success.value = false;
+    res.message.value = "Tree is not initialized";
+    return res;
+  }
+
+  for (const int32_t node_id : req.node_ids.arr)
+  {
+    if (node_id < 1)
+    {
+      continue;
+    }
+    const int32_t seq_slot = seq_allocator_get_slot(app, node_id);
+    if (!tier_is_valid_slot_id_for_seq(app, seq_slot))
+    {
+      continue;
+    }
+    res.released_tokens.value += std::max(0, tier_slot_token_count(app, node_id));
+    seq_allocator_release_slot_for_node(app, node_id);
+    app.tree->tier_set_slot_level(node_id, LLAMA_CHAT_TREE_CACHE_TIER_L2);
+    res.released_slots.value++;
+  }
 
   res.success.value = true;
   return res;
@@ -3214,6 +3516,7 @@ glue_msg_tree_chat_resume_res action_tree_chat_resume(app_t &app, const char *re
   res.restore_cache_ms.value = 0;
   res.rebuild_prompt_ms.value = 0;
   res.resumed_prefix_token_count.value = 0;
+  app.last_admission = app_t::admission_attempt{};
 
   if (!app.tree)
   {
@@ -3222,7 +3525,7 @@ glue_msg_tree_chat_resume_res action_tree_chat_resume(app_t &app, const char *re
 
   const int32_t node_id = req.node_id.value;
   std::string err;
-  if (!app.tree->chat_resume(node_id, err))
+  if (!app.tree->chat_set_active(node_id, err))
   {
     res.success.value = false;
     res.message.value = err;
@@ -3234,6 +3537,7 @@ glue_msg_tree_chat_resume_res action_tree_chat_resume(app_t &app, const char *re
     llama_memory_clear(llama_get_memory(app.ctx), true);
     app.tokens.clear();
     res.success.value = true;
+    fill_admission_result(res, app);
     return res;
   }
 
@@ -3279,6 +3583,7 @@ glue_msg_tree_chat_resume_res action_tree_chat_resume(app_t &app, const char *re
 
   res.success.value = true;
   res.resumed_prefix_token_count.value = actual_n_past;
+  fill_admission_result(res, app);
   return res;
 }
 
@@ -3296,27 +3601,54 @@ glue_msg_tree_chat_checkpoint_res action_tree_chat_checkpoint(app_t &app, const 
   const int32_t n_past = (int32_t)app.tokens.size();
   const int32_t snapshot_token_bytes = tree_estimate_snapshot_token_bytes(app, n_past);
   std::string err;
-
-  if (!app.tree->chat_checkpoint(
-          node_id,
-          req.assistant_text.value,
-          req.generation_time_ms.value,
-          n_past,
-          snapshot_token_bytes,
-          err))
   {
-    res.success.value = false;
-    res.message.value = err;
-    return res;
-  }
+    admission_scope admission(
+        app,
+        LLAMA_CHAT_TREE_CACHE_TIER_L1,
+        tier_incremental_tokens_for_slot(
+            app,
+            node_id,
+            LLAMA_CHAT_TREE_CACHE_TIER_L1,
+            n_past),
+        node_id);
 
-  if (!tier_persist_live_tokens_snapshot(app, node_id, n_past, node_id, true, err))
-  {
-    res.success.value = false;
-    res.message.value = "tier persist failed after checkpoint: " + err;
-    return res;
-  }
+    std::vector<int32_t> pruned_ids;
+    std::vector<int32_t> deleted_ids;
+    if (!app.tree->chat_finish(
+            node_id,
+            req.assistant_text.value,
+            req.generation_time_ms.value,
+            n_past,
+            snapshot_token_bytes,
+            false,
+            pruned_ids,
+            deleted_ids,
+            err))
+    {
+      res.success.value = false;
+      res.message.value = err;
+      return res;
+    }
 
+    if (!tier_persist_live_tokens_snapshot(app, node_id, n_past, node_id, true, err))
+    {
+      res.success.value = false;
+      res.message.value = "tier persist failed after checkpoint: " + err;
+      return res;
+    }
+
+    for (const int32_t pruned_id : pruned_ids)
+    {
+      tree_remove_slot(app, pruned_id);
+    }
+    for (const int32_t deleted_id : deleted_ids)
+    {
+      tree_remove_slot(app, deleted_id);
+    }
+
+    admission.succeed();
+  }
+  fill_admission_result(res, app);
   res.success.value = true;
   return res;
 }
@@ -3359,6 +3691,18 @@ glue_msg_tree_chat_start_hist_res action_tree_chat_start_hist(app_t &app, const 
   res.restore_attempted.value = by_parent.restore_attempted.value;
   res.restore_hit.value = by_parent.restore_hit.value;
   res.rebuild_used.value = by_parent.rebuild_used.value;
+  res.admission_id.value = by_parent.admission_id.value;
+  res.admission_target_level.value = by_parent.admission_target_level.value;
+  res.admission_incoming_tokens.value = by_parent.admission_incoming_tokens.value;
+  res.admission_initial_token_deficit.value = by_parent.admission_initial_token_deficit.value;
+  res.admission_initial_slot_deficit.value = by_parent.admission_initial_slot_deficit.value;
+  res.admission_repair_steps.value = by_parent.admission_repair_steps.value;
+  res.admission_demoted_tokens.value = by_parent.admission_demoted_tokens.value;
+  res.admission_checkpointed_tokens.value = by_parent.admission_checkpointed_tokens.value;
+  res.admission_removed_states.value = by_parent.admission_removed_states.value;
+  res.admission_latency_ms.value = by_parent.admission_latency_ms.value;
+  res.admission_success.value = by_parent.admission_success.value;
+  res.admission_victim_ids.arr = by_parent.admission_victim_ids.arr;
   res.roles.arr = std::move(by_parent.roles.arr);
   res.contents.arr = std::move(by_parent.contents.arr);
   res.formatted_chat.value = by_parent.formatted_chat.value;
@@ -3404,6 +3748,15 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
   std::string err;
   const int32_t n_past = (int32_t)app.tokens.size();
   const int32_t snapshot_token_bytes = tree_estimate_snapshot_token_bytes(app, n_past);
+  admission_scope admission(
+      app,
+      LLAMA_CHAT_TREE_CACHE_TIER_L1,
+      tier_incremental_tokens_for_slot(
+          app,
+          node_id,
+          LLAMA_CHAT_TREE_CACHE_TIER_L1,
+          n_past),
+      node_id);
 
   if (!app.tree->chat_finish(
         node_id,
@@ -3465,6 +3818,7 @@ glue_msg_tree_chat_finish_res action_tree_chat_finish(app_t &app, const char *re
     tree_remove_slot(app, id);
   }
 
+  admission.succeed();
   res.success.value = true;
   return res;
 }

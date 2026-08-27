@@ -1,4 +1,4 @@
-import { ProxyToWorker } from './worker';
+import { ProxyToWorker, type WllamaWorkerRuntime } from './worker';
 import {
   absoluteUrl,
   bufToText,
@@ -36,6 +36,7 @@ import type {
   GlueMsgTreeChatCheckpointRes,
   GlueMsgTreeChatFinishRes,
   GlueMsgTreeCacheHintRes,
+  GlueMsgTreeReleaseRes,
   GlueMsgTreeChatResumeRes,
   GlueMsgTreeChatStartHistRes,
   GlueMsgTreeChatStartRes,
@@ -44,6 +45,12 @@ import type {
   GlueMsgTreeStateRes,
   GlueMsgTreeSwitchRes,
 } from './glue/messages';
+import {
+  compareEngineChatPriority,
+  decodeSliceBudget,
+  type EngineChatLifecycleState,
+  shouldProtectSession,
+} from './engine-chat-policy';
 import { LIBLLAMA_VERSION } from './workers-code/generated';
 
 const HF_MODEL_ID_REGEX = /^([a-zA-Z0-9_\-\.]+)\/([a-zA-Z0-9_\-\.]+)$/;
@@ -54,7 +61,8 @@ const MIN_CTX_PER_SEQUENCE = 1024;
 const DEFAULT_ENGINE_CHAT_SERVICE_UPPER_BOUND_MS = 30000;
 const DEFAULT_ENGINE_CHAT_QUEUE_MAX_PENDING = 128;
 const DEFAULT_ENGINE_CHAT_SLICE_TOKEN_BUDGET = 128;
-const DEFAULT_ENGINE_CHAT_EVICTION_HINT_TOP_K = 4;
+const DEFAULT_ENGINE_CHAT_EVICTION_HINT_TOP_K = 64;
+const DEFAULT_ENGINE_CHAT_FOREGROUND_HANDOFF_GRACE_MS = 16;
 const DEFAULT_ENGINE_CHAT_COST_PREFILL_PER_TOKEN_MS = 3;
 const DEFAULT_ENGINE_CHAT_COST_DECODE_PER_TOKEN_MS = 4;
 const DEFAULT_ENGINE_CHAT_COST_POST_MS = 2;
@@ -131,13 +139,46 @@ export interface WllamaConfig {
   /**
    * Maximum token budget per serve slice for long generation requests.
    *
-  * Default: 128
+   * Default: 128
    */
   engineChatSliceTokenBudget?: number;
   /**
+   * Token budget for a foreground decode slice.
+   * Defaults to engineChatSliceTokenBudget.
+   */
+  engineChatForegroundSliceTokenBudget?: number;
+  /**
+   * Token budget for a background decode slice while foreground work is waiting.
+   * Defaults to min(16, engineChatSliceTokenBudget).
+   */
+  engineChatBackgroundSliceTokenBudget?: number;
+  /**
+   * Short quiescence window after a client becomes foreground. This lets the
+   * foreground request arrive before already-yielded background work is
+   * dispatched again.
+   *
+   * Default: 16
+   */
+  engineChatForegroundHandoffGraceMs?: number;
+  /**
+   * Policy used to protect resumable session heads from replacement.
+   */
+  engineChatRetentionPolicy?:
+    | 'evict-on-pause'
+    | 'retain-until-full'
+    | 'lru'
+    | 'ttl'
+    | 'lifecycle-aware';
+  /**
+   * Retention window used by ttl and lifecycle-aware policies.
+   *
+   * Default: 30000
+   */
+  engineChatRetentionTtlMs?: number;
+  /**
    * Number of queued parent nodes sent to native cache-hint path.
    *
-   * Default: 4
+   * Default: 64
    */
   engineChatEvictionHintTopK?: number;
   /**
@@ -249,7 +290,21 @@ export interface WllamaConfig {
    *
    * Default: `dual-queue`
    */
-  engineChatSchedulingPolicy?: 'fcfs-no-slice' | 'single-size-aware' | 'dual-queue';
+  engineChatSchedulingPolicy?:
+    | 'fcfs-no-slice'
+    | 'single-size-aware'
+    | 'dual-queue'
+    | 'foreground-aware';
+  /**
+   * Internal event sink used by the shared browser service and benchmarks.
+   */
+  engineChatEventListener?: (event: {
+    type: string;
+    timestampMs: number;
+    requestId?: number;
+    clientId?: string;
+    data?: Record<string, unknown>;
+  }) => void;
 }
 
 export interface WllamaChatMessage {
@@ -444,6 +499,21 @@ export interface WllamaTreeNode {
   lastAccessedAt: number;
 }
 
+export interface WllamaAdmissionResult {
+  id: number;
+  targetLevel: number;
+  incomingTokens: number;
+  initialTokenDeficit: number;
+  initialSlotDeficit: number;
+  repairSteps: number;
+  demotedTokens: number;
+  checkpointedTokens: number;
+  removedStates: number;
+  latencyMs: number;
+  success: boolean;
+  victimIds: number[];
+}
+
 export interface WllamaTreeState {
   nodes: Map<number, WllamaTreeNode>;
   rootId: number;
@@ -482,6 +552,7 @@ export interface WllamaTreeState {
     slotEvictL2: number;
     slotEvictL3: number;
     fallbackReplays: number;
+    lastAdmission: WllamaAdmissionResult;
   };
 }
 
@@ -493,18 +564,29 @@ export interface WllamaTieredCacheOptions {
   pruneL1L2TokenThreshold?: number;
   pruneL2L3TokenThreshold?: number;
   replacementPolicy?: 'hybrid' | 'lru' | 'lfu' | 'size-only' | 'random';
+  admissionPolicy?: 'reactive' | 'reject' | 'monotonic';
+  admissionMaxRepairSteps?: number;
   l3Path?: string;
 }
 
 export interface WllamaChatFromNodeOptions extends ChatCompletionOptions {
   onChunk?: (piece: string, fullText: string) => void;
+  clientId?: string;
+  logicalSessionId?: string;
+  foreground?: boolean;
+  lifecycleState?: EngineChatLifecycleState;
+  lifecycleEpoch?: number;
 }
 
 export interface WllamaChatSessionOptions extends WllamaChatFromNodeOptions {}
 
 export interface WllamaEngineChatDebugMeta {
   requestId: number;
-  schedulingPolicy: 'fcfs-no-slice' | 'single-size-aware' | 'dual-queue';
+  schedulingPolicy:
+    | 'fcfs-no-slice'
+    | 'single-size-aware'
+    | 'dual-queue'
+    | 'foreground-aware';
   createdAt: number;
   firstPickedAt?: number;
   completedAt: number;
@@ -581,7 +663,12 @@ interface EngineChatRequest {
   options: WllamaChatFromNodeOptions;
   queueType: 'normal' | 'overdue';
   createdAt: number;
-  enqueuedAt: number;
+  lastEnqueuedAt: number;
+  clientId?: string | undefined;
+  logicalSessionId?: string | undefined;
+  foreground: boolean;
+  lifecycleState: EngineChatLifecycleState;
+  lifecycleEpoch: number;
   nAheadAtEnqueue: number;
   estimatedServiceMs: number;
   estimatedPrefillMs: number;
@@ -702,6 +789,23 @@ export class Wllama {
   private engineChatNormalQueue: EngineChatRequest[] = [];
   private engineChatOverdueQueue: EngineChatRequest[] = [];
   private engineChatQueueRunning: boolean = false;
+  private engineChatActiveRequest: EngineChatRequest | undefined;
+  private engineChatForegroundGraceUntil = 0;
+  private engineChatClientState = new Map<
+    string,
+    {
+      foreground: boolean;
+      lifecycleState: EngineChatLifecycleState;
+      lifecycleEpoch: number;
+      changedAt: number;
+      lastForegroundAt: number;
+    }
+  >();
+  private engineChatSessionHeads = new Map<string, number>();
+  private engineChatRetentionTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private engineChatCostObservations: EngineChatCostObservation[] = [];
   private engineChatCostObservedCount: number = 0;
   private engineChatLearnedPrefillCostPerTokenMs?: number;
@@ -712,12 +816,19 @@ export class Wllama {
   private engineChatLearnedRestoreL3CostPerTokenMs?: number;
   private engineChatLearnedRebuildCostPerTokenMs?: number;
   private engineChatLearnedParentRecoverCostMs?: number;
+  private engineChatLastEmittedAdmissionId = 0;
+  private runtimeOverrides: WllamaWorkerRuntime;
 
-  constructor(pathConfig: AssetsPathConfig, wllamaConfig: WllamaConfig = {}) {
+  constructor(
+    pathConfig: AssetsPathConfig,
+    wllamaConfig: WllamaConfig = {},
+    runtimeOverrides: WllamaWorkerRuntime = {}
+  ) {
     checkEnvironmentCompatible();
     if (!pathConfig) throw new WllamaError('AssetsPathConfig is required');
     this.pathConfig = pathConfig;
     this.config = wllamaConfig;
+    this.runtimeOverrides = runtimeOverrides;
     this.cacheManager = wllamaConfig.cacheManager ?? new CacheManager();
     this.modelManager =
       wllamaConfig.modelManager ??
@@ -746,6 +857,206 @@ export class Wllama {
       return;
     }
     this.logger().debug(`[EngineChatTrace] ${message}`);
+  }
+
+  private emitEngineChatEvent(
+    type: string,
+    req?: EngineChatRequest,
+    data?: Record<string, unknown>,
+    clientId?: string
+  ): void {
+    const resolvedClientId = req?.clientId ?? clientId;
+    this.config.engineChatEventListener?.({
+      type,
+      timestampMs:
+        typeof performance !== 'undefined' ? performance.now() : Date.now(),
+      ...(req ? { requestId: req.id } : {}),
+      ...(resolvedClientId !== undefined ? { clientId: resolvedClientId } : {}),
+      ...(data ? { data } : {}),
+    });
+  }
+
+  private emitAdmissionEvent(
+    req: EngineChatRequest,
+    admission: WllamaAdmissionResult
+  ): void {
+    if (
+      admission.id <= 0 ||
+      admission.id <= this.engineChatLastEmittedAdmissionId
+    ) {
+      return;
+    }
+    this.engineChatLastEmittedAdmissionId = admission.id;
+    this.emitEngineChatEvent(
+      !admission.success
+        ? 'admission_reject'
+        : admission.removedStates > 0
+          ? 'admission_fallback'
+          : 'admission_commit',
+      req,
+      { ...admission }
+    );
+  }
+
+  async updateEngineChatClientState(
+    clientId: string,
+    update: {
+      foreground: boolean;
+      lifecycleState: EngineChatLifecycleState;
+      lifecycleEpoch: number;
+      changedAt?: number;
+    }
+  ): Promise<void> {
+    const current = this.engineChatClientState.get(clientId);
+    if (current && update.lifecycleEpoch < current.lifecycleEpoch) return;
+    const changedAt = update.changedAt ?? Date.now();
+    this.engineChatClientState.set(clientId, {
+      foreground: update.foreground,
+      lifecycleState: update.lifecycleState,
+      lifecycleEpoch: update.lifecycleEpoch,
+      changedAt,
+      lastForegroundAt: update.foreground
+        ? changedAt
+        : (current?.lastForegroundAt ?? changedAt),
+    });
+    if (update.foreground && !current?.foreground) {
+      this.engineChatForegroundGraceUntil = Math.max(
+        this.engineChatForegroundGraceUntil,
+        Date.now() + this.getEngineChatForegroundHandoffGraceMs()
+      );
+    }
+    const apply = (req: EngineChatRequest) => {
+      if (
+        req.clientId !== clientId ||
+        update.lifecycleEpoch < req.lifecycleEpoch
+      )
+        return;
+      req.foreground = update.foreground;
+      req.lifecycleState = update.lifecycleState;
+      req.lifecycleEpoch = update.lifecycleEpoch;
+    };
+    this.engineChatNormalQueue.forEach(apply);
+    this.engineChatOverdueQueue.forEach(apply);
+    if (this.engineChatActiveRequest) apply(this.engineChatActiveRequest);
+    if (current?.foreground && !update.foreground) {
+      this.emitEngineChatEvent(
+        'session_pause',
+        undefined,
+        {
+          lifecycleState: update.lifecycleState,
+          sessionHeadIds: this.sessionHeadIdsForClient(clientId),
+        },
+        clientId
+      );
+    } else if ((!current || !current.foreground) && update.foreground) {
+      this.emitEngineChatEvent(
+        'session_resume',
+        undefined,
+        {
+          lifecycleState: update.lifecycleState,
+          sessionHeadIds: this.sessionHeadIdsForClient(clientId),
+        },
+        clientId
+      );
+    }
+    this.emitEngineChatEvent(
+      'foreground_change',
+      undefined,
+      {
+        foreground: update.foreground,
+        lifecycleState: update.lifecycleState,
+        lifecycleEpoch: update.lifecycleEpoch,
+        changedAt,
+      },
+      clientId
+    );
+    await this.applyEngineChatRetentionPolicy(clientId);
+  }
+
+  removeEngineChatClient(clientId: string): void {
+    this.engineChatClientState.delete(clientId);
+    const timer = this.engineChatRetentionTimers.get(clientId);
+    if (timer) clearTimeout(timer);
+    this.engineChatRetentionTimers.delete(clientId);
+    for (const key of this.engineChatSessionHeads.keys()) {
+      if (key.startsWith(`${clientId}\u0000`)) {
+        this.engineChatSessionHeads.delete(key);
+      }
+    }
+    void this.sendEngineChatCacheHint();
+  }
+
+  async flushEngineChatRetentionPolicies(): Promise<void> {
+    for (const clientId of this.engineChatClientState.keys()) {
+      await this.applyEngineChatRetentionPolicy(clientId);
+    }
+    await this.sendEngineChatCacheHint();
+  }
+
+  private sessionHeadIdsForClient(clientId: string): number[] {
+    const ids: number[] = [];
+    for (const [key, nodeId] of this.engineChatSessionHeads) {
+      if (key.startsWith(`${clientId}\u0000`)) ids.push(nodeId);
+    }
+    return ids;
+  }
+
+  private async applyEngineChatRetentionPolicy(
+    clientId: string
+  ): Promise<void> {
+    const previousTimer = this.engineChatRetentionTimers.get(clientId);
+    if (previousTimer) clearTimeout(previousTimer);
+    this.engineChatRetentionTimers.delete(clientId);
+
+    const client = this.engineChatClientState.get(clientId);
+    if (!client || client.foreground) {
+      await this.sendEngineChatCacheHint();
+      return;
+    }
+
+    const policy = this.config.engineChatRetentionPolicy ?? 'lifecycle-aware';
+    if (policy === 'evict-on-pause') {
+      await this.treeReleaseNodes(
+        this.sessionHeadIdsForClient(clientId),
+        clientId
+      );
+    } else if (policy === 'ttl' || policy === 'lifecycle-aware') {
+      const ttl =
+        typeof this.config.engineChatRetentionTtlMs === 'number' &&
+        Number.isFinite(this.config.engineChatRetentionTtlMs) &&
+        this.config.engineChatRetentionTtlMs >= 0
+          ? this.config.engineChatRetentionTtlMs
+          : 30000;
+      if (policy === 'ttl') {
+        this.engineChatRetentionTimers.set(
+          clientId,
+          setTimeout(() => {
+            this.engineChatRetentionTimers.delete(clientId);
+            const latest = this.engineChatClientState.get(clientId);
+            if (!latest || latest.foreground) return;
+            void this.treeReleaseNodes(
+              this.sessionHeadIdsForClient(clientId),
+              clientId
+            );
+          }, ttl)
+        );
+      } else if (client.lifecycleState === 'hidden') {
+        const remainingMs = Math.max(
+          0,
+          ttl - (Date.now() - client.lastForegroundAt)
+        );
+        this.engineChatRetentionTimers.set(
+          clientId,
+          setTimeout(() => {
+            this.engineChatRetentionTimers.delete(clientId);
+            const latest = this.engineChatClientState.get(clientId);
+            if (!latest || latest.foreground) return;
+            void this.sendEngineChatCacheHint();
+          }, remainingMs)
+        );
+      }
+    }
+    await this.sendEngineChatCacheHint();
   }
 
   private checkModelLoaded() {
@@ -1002,7 +1313,9 @@ export class Wllama {
     // detect if we can use multi-thread
     if (await isSupportMultiThread()) {
       if (this.pathConfig['multi-thread/wllama.wasm']) {
-        const hwConcurrency = Math.floor((navigator.hardwareConcurrency || 1) / 2);
+        const hwConcurrency = Math.floor(
+          (navigator.hardwareConcurrency || 1) / 2
+        );
         this.nbThreads = config.n_threads ?? hwConcurrency;
         if (this.nbThreads > 1) {
           this.useMultiThread = true;
@@ -1024,9 +1337,7 @@ export class Wllama {
 
     // TODO: investigate why WebGPU + multi-threading causes performance issues
     if (this.useWebGPU) {
-      this.logger().warn(
-        'Disabling multi-threading when using WebGPU backend'
-      );
+      this.logger().warn('Disabling multi-threading when using WebGPU backend');
       this.useMultiThread = false;
       this.nbThreads = 1;
     }
@@ -1046,7 +1357,8 @@ export class Wllama {
       mPathConfig,
       this.nbThreads,
       this.config.suppressNativeLog ?? false,
-      this.logger()
+      this.logger(),
+      this.runtimeOverrides
     );
     const modelFiles = blobs.map((blob, i) => ({
       name: `model-${i}.gguf`,
@@ -1062,10 +1374,16 @@ export class Wllama {
     }
     // load the model
     const resolvedNCtx = config.n_ctx || 1024;
-    const maxNSeqFromCtx = Math.max(1, Math.floor(resolvedNCtx / MIN_CTX_PER_SEQUENCE));
+    const maxNSeqFromCtx = Math.max(
+      1,
+      Math.floor(resolvedNCtx / MIN_CTX_PER_SEQUENCE)
+    );
     const hardNSeqMax = Math.min(MAX_SAFE_N_SEQ_MAX, maxNSeqFromCtx);
     const requestedNSeqMax = config.n_seq_max ?? hardNSeqMax;
-    const safeNSeqMax = Math.min(Math.max(1, Math.floor(requestedNSeqMax)), hardNSeqMax);
+    const safeNSeqMax = Math.min(
+      Math.max(1, Math.floor(requestedNSeqMax)),
+      hardNSeqMax
+    );
     if (safeNSeqMax !== requestedNSeqMax) {
       this.logger().warn(
         `n_seq_max=${requestedNSeqMax} is not supported by current runtime/context, using ${safeNSeqMax} instead`
@@ -1357,7 +1675,10 @@ export class Wllama {
         }
 
         cursor = end;
-        if (cursor < tokens.length && Date.now() - roundStartedAt >= roundBudgetMs) {
+        if (
+          cursor < tokens.length &&
+          Date.now() - roundStartedAt >= roundBudgetMs
+        ) {
           break;
         }
       }
@@ -1829,21 +2150,84 @@ export class Wllama {
         diskReads: result.tier_disk_reads,
         diskWrites: result.tier_disk_writes,
         l3OverflowEvents: result.tier_l3_overflow_events,
-        restoreAttempts: (result as unknown as Record<string, number>).tier_restore_attempts ?? 0,
-        restoreHitsL1: (result as unknown as Record<string, number>).tier_restore_hits_l1 ?? 0,
-        restoreHitsL2: (result as unknown as Record<string, number>).tier_restore_hits_l2 ?? 0,
-        restoreHitsL3: (result as unknown as Record<string, number>).tier_restore_hits_l3 ?? 0,
-        restoreMisses: (result as unknown as Record<string, number>).tier_restore_misses ?? 0,
-        restoreRebuilds: (result as unknown as Record<string, number>).tier_restore_rebuilds ?? 0,
-        parentRecoverAttempts: (result as unknown as Record<string, number>).tier_parent_recover_attempts ?? 0,
-        parentRecoverSuccesses: (result as unknown as Record<string, number>).tier_parent_recover_successes ?? 0,
-        parentRecoverFailures: (result as unknown as Record<string, number>).tier_parent_recover_failures ?? 0,
-        slotAllocHits: (result as unknown as Record<string, number>).tier_slot_alloc_hits ?? 0,
-        slotAllocMisses: (result as unknown as Record<string, number>).tier_slot_alloc_misses ?? 0,
-        slotEvictL1: (result as unknown as Record<string, number>).tier_slot_evict_l1 ?? 0,
-        slotEvictL2: (result as unknown as Record<string, number>).tier_slot_evict_l2 ?? 0,
-        slotEvictL3: (result as unknown as Record<string, number>).tier_slot_evict_l3 ?? 0,
-        fallbackReplays: (result as unknown as Record<string, number>).tier_fallback_replays ?? 0,
+        restoreAttempts:
+          (result as unknown as Record<string, number>).tier_restore_attempts ??
+          0,
+        restoreHitsL1:
+          (result as unknown as Record<string, number>).tier_restore_hits_l1 ??
+          0,
+        restoreHitsL2:
+          (result as unknown as Record<string, number>).tier_restore_hits_l2 ??
+          0,
+        restoreHitsL3:
+          (result as unknown as Record<string, number>).tier_restore_hits_l3 ??
+          0,
+        restoreMisses:
+          (result as unknown as Record<string, number>).tier_restore_misses ??
+          0,
+        restoreRebuilds:
+          (result as unknown as Record<string, number>).tier_restore_rebuilds ??
+          0,
+        parentRecoverAttempts:
+          (result as unknown as Record<string, number>)
+            .tier_parent_recover_attempts ?? 0,
+        parentRecoverSuccesses:
+          (result as unknown as Record<string, number>)
+            .tier_parent_recover_successes ?? 0,
+        parentRecoverFailures:
+          (result as unknown as Record<string, number>)
+            .tier_parent_recover_failures ?? 0,
+        slotAllocHits:
+          (result as unknown as Record<string, number>).tier_slot_alloc_hits ??
+          0,
+        slotAllocMisses:
+          (result as unknown as Record<string, number>)
+            .tier_slot_alloc_misses ?? 0,
+        slotEvictL1:
+          (result as unknown as Record<string, number>).tier_slot_evict_l1 ?? 0,
+        slotEvictL2:
+          (result as unknown as Record<string, number>).tier_slot_evict_l2 ?? 0,
+        slotEvictL3:
+          (result as unknown as Record<string, number>).tier_slot_evict_l3 ?? 0,
+        fallbackReplays:
+          (result as unknown as Record<string, number>).tier_fallback_replays ??
+          0,
+        lastAdmission: {
+          id: (result as unknown as Record<string, number>).admission_id ?? 0,
+          targetLevel:
+            (result as unknown as Record<string, number>)
+              .admission_target_level ?? 0,
+          incomingTokens:
+            (result as unknown as Record<string, number>)
+              .admission_incoming_tokens ?? 0,
+          initialTokenDeficit:
+            (result as unknown as Record<string, number>)
+              .admission_initial_token_deficit ?? 0,
+          initialSlotDeficit:
+            (result as unknown as Record<string, number>)
+              .admission_initial_slot_deficit ?? 0,
+          repairSteps:
+            (result as unknown as Record<string, number>)
+              .admission_repair_steps ?? 0,
+          demotedTokens:
+            (result as unknown as Record<string, number>)
+              .admission_demoted_tokens ?? 0,
+          checkpointedTokens:
+            (result as unknown as Record<string, number>)
+              .admission_checkpointed_tokens ?? 0,
+          removedStates:
+            (result as unknown as Record<string, number>)
+              .admission_removed_states ?? 0,
+          latencyMs:
+            (result as unknown as Record<string, number>)
+              .admission_latency_ms ?? 0,
+          success:
+            (result as unknown as Record<string, boolean>).admission_success ??
+            true,
+          victimIds:
+            (result as unknown as { admission_victim_ids?: number[] })
+              .admission_victim_ids ?? [],
+        },
       },
     };
   }
@@ -1853,18 +2237,28 @@ export class Wllama {
     tieredCache: WllamaTieredCacheOptions = {}
   ): Promise<WllamaTreeState> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeInitRes>('chat_init', {
-      _name: 'trin_req',
-      memory_cap_bytes: memoryCapBytes,
-      tiered_cache_enabled: tieredCache.enabled ?? false,
-      tier_l1_token_cap: tieredCache.l1TokenCap ?? 0,
-      tier_l2_token_cap: tieredCache.l2TokenCap ?? 0,
-      tier_l3_token_cap: tieredCache.l3TokenCap ?? 0,
-      tier_prune_l1_l2_token_threshold: tieredCache.pruneL1L2TokenThreshold ?? 0,
-      tier_prune_l2_l3_token_threshold: tieredCache.pruneL2L3TokenThreshold ?? 0,
-      tier_replacement_policy: tieredCache.replacementPolicy ?? 'hybrid',
-      tier_l3_path: tieredCache.l3Path ?? '/tmp/wllama-tier-cache',
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeInitRes>(
+      'chat_init',
+      {
+        _name: 'trin_req',
+        memory_cap_bytes: memoryCapBytes,
+        tiered_cache_enabled: tieredCache.enabled ?? false,
+        tier_l1_token_cap: tieredCache.l1TokenCap ?? 0,
+        tier_l2_token_cap: tieredCache.l2TokenCap ?? 0,
+        tier_l3_token_cap: tieredCache.l3TokenCap ?? 0,
+        tier_prune_l1_l2_token_threshold:
+          tieredCache.pruneL1L2TokenThreshold ?? 0,
+        tier_prune_l2_l3_token_threshold:
+          tieredCache.pruneL2L3TokenThreshold ?? 0,
+        tier_replacement_policy: tieredCache.replacementPolicy ?? 'hybrid',
+        tier_l3_path: tieredCache.l3Path ?? '/tmp/wllama-tier-cache',
+        admission_policy: tieredCache.admissionPolicy ?? 'monotonic',
+        admission_max_repair_steps: Math.max(
+          1,
+          Math.floor(tieredCache.admissionMaxRepairSteps ?? 64)
+        ),
+      }
+    );
     if (!result.success) {
       throw new WllamaError(`treeInit failed: ${result.message}`);
     }
@@ -1902,6 +2296,7 @@ export class Wllama {
 
   async chatReset(): Promise<WllamaTreeState> {
     await this.chatEnsureReady();
+    this.resetEngineChatSessionMetadata();
     return await this.treeReset();
   }
 
@@ -1911,6 +2306,7 @@ export class Wllama {
   ): Promise<WllamaTreeState> {
     // Reinitialize tree session so new memory/tier settings always take effect.
     // This matches UI semantics: "apply and reset session".
+    this.resetEngineChatSessionMetadata();
     return this.treeInit(memoryCapBytes, tieredCache);
   }
 
@@ -1927,6 +2323,15 @@ export class Wllama {
     return this.chatReset();
   }
 
+  private resetEngineChatSessionMetadata(): void {
+    for (const timer of this.engineChatRetentionTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.engineChatRetentionTimers.clear();
+    this.engineChatSessionHeads.clear();
+    this.engineChatLastEmittedAdmissionId = 0;
+  }
+
   async chatFromNode(
     parentId: number,
     userText: string,
@@ -1941,7 +2346,12 @@ export class Wllama {
     userText: string,
     options: WllamaChatFromNodeOptions
   ): Promise<WllamaChatFromNodeResult> {
-    return this.enqueueEngineChatInternal(parentId, undefined, userText, options);
+    return this.enqueueEngineChatInternal(
+      parentId,
+      undefined,
+      userText,
+      options
+    );
   }
 
   private enqueueEngineChatByHistory(
@@ -1949,7 +2359,12 @@ export class Wllama {
     userText: string,
     options: WllamaChatFromNodeOptions
   ): Promise<WllamaChatFromNodeResult> {
-    return this.enqueueEngineChatInternal(undefined, history, userText, options);
+    return this.enqueueEngineChatInternal(
+      undefined,
+      history,
+      userText,
+      options
+    );
   }
 
   private async enqueueEngineChatInternal(
@@ -1977,11 +2392,19 @@ export class Wllama {
     }
 
     const state = await this.treeGetState();
-    const preparedPrompt = await this.prepareEngineChatPrompt(state, parentId, baseHistory, userText);
+    const preparedPrompt = await this.prepareEngineChatPrompt(
+      state,
+      parentId,
+      baseHistory,
+      userText
+    );
 
     return new Promise((resolve, reject) => {
       const nAheadAtEnqueue = this.getEngineChatPendingCount();
       const createdAt = Date.now();
+      const clientState = options.clientId
+        ? this.engineChatClientState.get(options.clientId)
+        : undefined;
       const req: EngineChatRequest = {
         id: this.nextEngineChatRequestId++,
         parentId,
@@ -1990,7 +2413,14 @@ export class Wllama {
         options,
         queueType: 'normal',
         createdAt,
-        enqueuedAt: createdAt,
+        lastEnqueuedAt: createdAt,
+        clientId: options.clientId,
+        logicalSessionId: options.logicalSessionId,
+        foreground: options.foreground ?? clientState?.foreground ?? false,
+        lifecycleState:
+          options.lifecycleState ?? clientState?.lifecycleState ?? 'hidden',
+        lifecycleEpoch:
+          options.lifecycleEpoch ?? clientState?.lifecycleEpoch ?? 0,
         nAheadAtEnqueue,
         estimatedServiceMs: 0,
         estimatedPrefillMs: 0,
@@ -2020,16 +2450,29 @@ export class Wllama {
       const abortSignal = options.abortSignal;
       if (abortSignal) {
         const onAbort = () => {
+          this.emitEngineChatEvent('request_cancel', req, {
+            stage: req.runtime?.stage ?? 'queued',
+          });
           const removed = this.removeRequestFromQueues(req.id);
           if (removed) {
             req.reject(new WllamaAbortError());
           }
         };
-        req.cleanupAbort = () => abortSignal.removeEventListener('abort', onAbort);
+        req.cleanupAbort = () =>
+          abortSignal.removeEventListener('abort', onAbort);
         abortSignal.addEventListener('abort', onAbort, { once: true });
       }
 
       this.engineChatNormalQueue.push(req);
+      this.emitEngineChatEvent('request_arrive', req, {
+        parentId: parentId ?? preparedPrompt.parentNodeId ?? null,
+        foreground: req.foreground,
+        lifecycleState: req.lifecycleState,
+      });
+      this.emitEngineChatEvent('request_enqueue', req, {
+        queue: req.queueType,
+        pending: this.getEngineChatPendingCount(),
+      });
       this.traceEngineChat(
         `enqueue req=${req.id} parent=${parentId ?? preparedPrompt.parentNodeId ?? 'history'} pending=${this.getEngineChatPendingCount()} nAhead=${req.nAheadAtEnqueue} budgetMs=${req.waitBudgetMs} estMs=${Math.round(req.estimatedServiceMs)}`
       );
@@ -2043,10 +2486,13 @@ export class Wllama {
     }
 
     this.engineChatQueueRunning = true;
-    this.traceEngineChat(`queue loop start pending=${this.getEngineChatPendingCount()}`);
+    this.traceEngineChat(
+      `queue loop start pending=${this.getEngineChatPendingCount()}`
+    );
     try {
       while (this.getEngineChatPendingCount() > 0) {
         this.promoteOverdueEngineChatRequests();
+        await this.waitForForegroundHandoff();
         await this.sendEngineChatCacheHint();
 
         const req = await this.pickNextEngineChatRequest();
@@ -2062,22 +2508,52 @@ export class Wllama {
         }
 
         try {
-          if (!req.processingStartedAt) {
+          const isFirstPick = req.processingStartedAt === undefined;
+          if (isFirstPick) {
             req.processingStartedAt = Date.now();
           }
           req.firstPickedAt ??= req.processingStartedAt;
+          this.engineChatActiveRequest = req;
+          if (isFirstPick) {
+            this.emitEngineChatEvent('request_first_pick', req, {
+              totalWaitMs: Date.now() - req.createdAt,
+            });
+          }
           this.traceEngineChat(
-            `start req=${req.id} q=${req.queueType} waitMs=${Date.now() - req.enqueuedAt} pendingAfterPick=${this.getEngineChatPendingCount()} slices=${req.sliceCount}`
+            `start req=${req.id} q=${req.queueType} waitMs=${Date.now() - req.createdAt} pendingAfterPick=${this.getEngineChatPendingCount()} slices=${req.sliceCount}`
           );
+          this.emitEngineChatEvent('slice_dispatch', req, {
+            stage: req.runtime?.stage ?? 'start',
+            foreground: req.foreground,
+          });
+          const sliceStartedAt =
+            typeof performance !== 'undefined' ? performance.now() : Date.now();
           const slice = await this.executeEngineChatSlice(req);
+          const sliceCompletedAt =
+            typeof performance !== 'undefined' ? performance.now() : Date.now();
+          this.emitEngineChatEvent('slice_complete', req, {
+            done: slice.done,
+            stage: req.runtime?.stage ?? 'complete',
+            foreground: req.foreground,
+            durationMs: Math.max(0, sliceCompletedAt - sliceStartedAt),
+          });
           if (slice.done) {
             const doneAt = Date.now();
             const serviceMs = doneAt - (req.processingStartedAt ?? doneAt);
             this.recordEngineChatCostObservation(req, slice.phases, serviceMs);
             this.traceEngineChat(
-              `finish req=${req.id} serviceMs=${serviceMs} totalMs=${doneAt - req.enqueuedAt} slices=${req.sliceCount} generatedTokens=${req.generatedTokens}`
+              `finish req=${req.id} serviceMs=${serviceMs} totalMs=${doneAt - req.createdAt} slices=${req.sliceCount} generatedTokens=${req.generatedTokens}`
             );
+            this.emitEngineChatEvent('request_complete', req, {
+              totalWallMs: doneAt - req.createdAt,
+              generatedTokens: req.generatedTokens,
+            });
             req.cleanupAbort?.();
+            if (req.clientId) {
+              const sessionKey = `${req.clientId}\u0000${req.logicalSessionId ?? 'default'}`;
+              this.engineChatSessionHeads.set(sessionKey, slice.result.nodeId);
+              await this.applyEngineChatRetentionPolicy(req.clientId);
+            }
             const ttftMs = req.runtime?.firstTokenAt
               ? Math.max(0, req.runtime.firstTokenAt - req.createdAt)
               : Math.max(0, doneAt - req.createdAt);
@@ -2090,7 +2566,9 @@ export class Wllama {
                 requestId: req.id,
                 schedulingPolicy: this.getEngineChatSchedulingPolicy(),
                 createdAt: req.createdAt,
-                firstPickedAt: req.firstPickedAt,
+                ...(req.firstPickedAt !== undefined
+                  ? { firstPickedAt: req.firstPickedAt }
+                  : {}),
                 completedAt: doneAt,
                 totalWallMs: Math.max(0, doneAt - req.createdAt),
                 serviceMs,
@@ -2113,21 +2591,32 @@ export class Wllama {
             this.traceEngineChat(
               `yield req=${req.id} nextStage=${req.runtime?.stage ?? 'na'} pending=${this.getEngineChatPendingCount()} slices=${req.sliceCount}`
             );
+            // Yield to the browser task queue, not only the promise microtask
+            // queue. SharedWorker lifecycle messages cannot update foreground
+            // priority while a chain of immediately-resolved slices is running.
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
           }
         } catch (err) {
           const failAt = Date.now();
           const msg = err instanceof Error ? err.message : String(err);
           this.traceEngineChat(
-            `fail req=${req.id} serviceMs=${req.processingStartedAt ? failAt - req.processingStartedAt : -1} totalMs=${failAt - req.enqueuedAt} err=${msg}`,
+            `fail req=${req.id} serviceMs=${req.processingStartedAt ? failAt - req.processingStartedAt : -1} totalMs=${failAt - req.createdAt} err=${msg}`,
             'warn'
           );
+          this.emitEngineChatEvent('request_fail', req, { message: msg });
           req.cleanupAbort?.();
           req.reject(err);
+        } finally {
+          if (this.engineChatActiveRequest?.id === req.id) {
+            this.engineChatActiveRequest = undefined;
+          }
         }
       }
     } finally {
       this.engineChatQueueRunning = false;
-      this.traceEngineChat(`queue loop end pending=${this.getEngineChatPendingCount()}`);
+      this.traceEngineChat(
+        `queue loop end pending=${this.getEngineChatPendingCount()}`
+      );
       if (this.getEngineChatPendingCount() > 0) {
         void this.processEngineChatQueue();
       }
@@ -2135,15 +2624,22 @@ export class Wllama {
   }
 
   private getEngineChatPendingCount(): number {
-    return this.engineChatNormalQueue.length + this.engineChatOverdueQueue.length;
+    return (
+      this.engineChatNormalQueue.length + this.engineChatOverdueQueue.length
+    );
   }
 
-  private getEngineChatSchedulingPolicy(): 'fcfs-no-slice' | 'single-size-aware' | 'dual-queue' {
+  private getEngineChatSchedulingPolicy():
+    | 'fcfs-no-slice'
+    | 'single-size-aware'
+    | 'dual-queue'
+    | 'foreground-aware' {
     const configured = this.config.engineChatSchedulingPolicy;
     if (
-      configured === 'fcfs-no-slice'
-      || configured === 'single-size-aware'
-      || configured === 'dual-queue'
+      configured === 'fcfs-no-slice' ||
+      configured === 'single-size-aware' ||
+      configured === 'dual-queue' ||
+      configured === 'foreground-aware'
     ) {
       return configured;
     }
@@ -2165,7 +2661,8 @@ export class Wllama {
   }
 
   private promoteOverdueEngineChatRequests(): void {
-    if (this.getEngineChatSchedulingPolicy() !== 'dual-queue') {
+    const policy = this.getEngineChatSchedulingPolicy();
+    if (policy !== 'dual-queue' && policy !== 'foreground-aware') {
       return;
     }
     if (this.engineChatNormalQueue.length === 0) {
@@ -2175,7 +2672,7 @@ export class Wllama {
     const now = Date.now();
     for (let i = this.engineChatNormalQueue.length - 1; i >= 0; i--) {
       const req = this.engineChatNormalQueue[i];
-      const waitMs = Math.max(0, now - req.enqueuedAt);
+      const waitMs = Math.max(0, now - req.createdAt);
       if (waitMs < req.waitBudgetMs) {
         continue;
       }
@@ -2191,9 +2688,6 @@ export class Wllama {
 
   private async sendEngineChatCacheHint(): Promise<void> {
     const hotNodeIds = this.collectHotParentNodeIdsForHint();
-    if (hotNodeIds.length === 0) {
-      return;
-    }
     const pending = this.getEngineChatPendingCount();
     const maxPending = Math.max(1, this.getEngineChatQueueMaxPending());
     const queuePressure = Math.max(0, Math.min(1, pending / maxPending));
@@ -2213,12 +2707,20 @@ export class Wllama {
         if (ids.length >= k) {
           break;
         }
-        const candidates = [req.runtime?.nodeId, req.parentId, req.preparedPrompt?.parentNodeId];
+        const candidates = [
+          req.runtime?.nodeId,
+          req.parentId,
+          req.preparedPrompt?.parentNodeId,
+        ];
         for (const candidate of candidates) {
           if (ids.length >= k) {
             break;
           }
-          if (typeof candidate !== 'number' || candidate < 0 || seen.has(candidate)) {
+          if (
+            typeof candidate !== 'number' ||
+            candidate < 0 ||
+            seen.has(candidate)
+          ) {
             continue;
           }
           seen.add(candidate);
@@ -2228,17 +2730,52 @@ export class Wllama {
     };
     appendFrom(this.engineChatOverdueQueue);
     appendFrom(this.engineChatNormalQueue);
+    if (this.engineChatActiveRequest) {
+      appendFrom([this.engineChatActiveRequest]);
+    }
+    const retentionPolicy =
+      this.config.engineChatRetentionPolicy ?? 'lifecycle-aware';
+    if (retentionPolicy === 'lru') {
+      return ids;
+    }
+    const ttlMs =
+      typeof this.config.engineChatRetentionTtlMs === 'number' &&
+      Number.isFinite(this.config.engineChatRetentionTtlMs) &&
+      this.config.engineChatRetentionTtlMs >= 0
+        ? this.config.engineChatRetentionTtlMs
+        : 30000;
+    const now = Date.now();
+    for (const [sessionKey, nodeId] of this.engineChatSessionHeads) {
+      const separator = sessionKey.indexOf('\u0000');
+      const clientId =
+        separator >= 0 ? sessionKey.slice(0, separator) : sessionKey;
+      const lifecycle = this.engineChatClientState.get(clientId);
+      const protect = shouldProtectSession(
+        retentionPolicy,
+        lifecycle,
+        now,
+        ttlMs
+      );
+      if (protect && nodeId >= 1 && !seen.has(nodeId)) {
+        seen.add(nodeId);
+        ids.push(nodeId);
+      }
+    }
     return ids;
   }
 
-  private async pickNextEngineChatRequest(): Promise<EngineChatRequest | undefined> {
+  private async pickNextEngineChatRequest(): Promise<
+    EngineChatRequest | undefined
+  > {
     const pending = this.getEngineChatPendingCount();
     if (pending === 0) {
       return undefined;
     }
     const policy = this.getEngineChatSchedulingPolicy();
     if (policy === 'fcfs-no-slice') {
-      const picked = this.engineChatNormalQueue.shift() ?? this.engineChatOverdueQueue.shift();
+      const picked =
+        this.engineChatNormalQueue.shift() ??
+        this.engineChatOverdueQueue.shift();
       if (picked) {
         picked.queueType = 'normal';
       }
@@ -2270,9 +2807,10 @@ export class Wllama {
       const candidates: CandidateMetrics[] = [];
       for (let i = 0; i < queue.length; i++) {
         const req = queue[i];
-        const waitMs = Math.max(0, now - req.enqueuedAt);
+        const waitMs = Math.max(0, now - req.createdAt);
         this.refreshEngineChatRequestEstimate(req, state, waitMs);
-        const pendingDependency = this.findPendingDependencyForEngineChatRequest(req, state);
+        const pendingDependency =
+          this.findPendingDependencyForEngineChatRequest(req, state);
         candidates.push({
           req,
           idx: i,
@@ -2303,11 +2841,19 @@ export class Wllama {
       return best;
     };
 
-    const normalCandidates = buildCandidates(this.engineChatNormalQueue, 'normal');
+    const normalCandidates = buildCandidates(
+      this.engineChatNormalQueue,
+      'normal'
+    );
     if (policy === 'single-size-aware') {
-      const runnableNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
-      const blockedNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId !== undefined);
-      const best = pickBest(runnableNormal, false) ?? pickBest(blockedNormal, false);
+      const runnableNormal = normalCandidates.filter(
+        (candidate) => candidate.blockedByPendingNodeId === undefined
+      );
+      const blockedNormal = normalCandidates.filter(
+        (candidate) => candidate.blockedByPendingNodeId !== undefined
+      );
+      const best =
+        pickBest(runnableNormal, false) ?? pickBest(blockedNormal, false);
       if (!best) {
         return undefined;
       }
@@ -2325,17 +2871,52 @@ export class Wllama {
       return picked;
     }
 
-    const overdueCandidates = buildCandidates(this.engineChatOverdueQueue, 'overdue');
-    const runnableOverdue = overdueCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
-    const runnableNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId === undefined);
-    const blockedOverdue = overdueCandidates.filter((candidate) => candidate.blockedByPendingNodeId !== undefined);
-    const blockedNormal = normalCandidates.filter((candidate) => candidate.blockedByPendingNodeId !== undefined);
+    const overdueCandidates = buildCandidates(
+      this.engineChatOverdueQueue,
+      'overdue'
+    );
+    const runnableOverdue = overdueCandidates.filter(
+      (candidate) => candidate.blockedByPendingNodeId === undefined
+    );
+    const runnableNormal = normalCandidates.filter(
+      (candidate) => candidate.blockedByPendingNodeId === undefined
+    );
+    const blockedOverdue = overdueCandidates.filter(
+      (candidate) => candidate.blockedByPendingNodeId !== undefined
+    );
+    const blockedNormal = normalCandidates.filter(
+      (candidate) => candidate.blockedByPendingNodeId !== undefined
+    );
 
+    const pickForegroundAware = (
+      runnable: CandidateMetrics[],
+      blocked: CandidateMetrics[]
+    ): CandidateMetrics | undefined => {
+      const choose = (items: CandidateMetrics[]) => {
+        const foreground = items.filter(
+          (candidate) => candidate.req.foreground
+        );
+        const pool = foreground.length > 0 ? foreground : items;
+        const overdue = pool.filter(
+          (candidate) => candidate.queueType === 'overdue'
+        );
+        return pickBest(
+          overdue.length > 0 ? overdue : pool,
+          overdue.length > 0
+        );
+      };
+      return choose(runnable) ?? choose(blocked);
+    };
     const best =
-      pickBest(runnableOverdue, true)
-      ?? pickBest(runnableNormal, false)
-      ?? pickBest(blockedOverdue, true)
-      ?? pickBest(blockedNormal, false);
+      policy === 'foreground-aware'
+        ? pickForegroundAware(
+            [...runnableOverdue, ...runnableNormal],
+            [...blockedOverdue, ...blockedNormal]
+          )
+        : (pickBest(runnableOverdue, true) ??
+          pickBest(runnableNormal, false) ??
+          pickBest(blockedOverdue, true) ??
+          pickBest(blockedNormal, false));
 
     if (!best) {
       return undefined;
@@ -2349,9 +2930,10 @@ export class Wllama {
       );
     }
 
-    const targetQueue = best.queueType === 'overdue'
-      ? this.engineChatOverdueQueue
-      : this.engineChatNormalQueue;
+    const targetQueue =
+      best.queueType === 'overdue'
+        ? this.engineChatOverdueQueue
+        : this.engineChatNormalQueue;
     const [picked] = targetQueue.splice(best.idx, 1);
     if (picked) {
       picked.queueType = best.queueType;
@@ -2414,19 +2996,24 @@ export class Wllama {
 
     const prompt = await this.formatChat(messages, true);
     const promptTokens = await this.tokenizePromptForEngineChat(prompt);
-    const parentNode = typeof resolvedParentId === 'number'
-      ? state.nodes.get(resolvedParentId)
-      : undefined;
+    const parentNode =
+      typeof resolvedParentId === 'number'
+        ? state.nodes.get(resolvedParentId)
+        : undefined;
     const parentPrefixTokens =
       parentNode && resolvedParentId !== state.rootId
         ? Math.max(0, parentNode.prefixTokenCount)
         : 0;
-    const restoreSource = this.classifyEngineChatRestoreSource(parentNode, parentPrefixTokens);
+    const restoreSource = this.classifyEngineChatRestoreSource(
+      parentNode,
+      parentPrefixTokens
+    );
     const restoredPrefixTokens =
       restoreSource === 'l1' || restoreSource === 'l2' || restoreSource === 'l3'
         ? parentPrefixTokens
         : 0;
-    const rebuiltPrefixTokens = restoreSource === 'rebuild' ? parentPrefixTokens : 0;
+    const rebuiltPrefixTokens =
+      restoreSource === 'rebuild' ? parentPrefixTokens : 0;
 
     return {
       prompt,
@@ -2506,22 +3093,34 @@ export class Wllama {
         parentNodeId: runtime.nodeId,
         parentPrefixTokens: Math.max(0, runtime.resumedPrefixTokenCount),
         restoreSource: runtime.restoreSource,
-        restoredPrefixTokens: runtime.restoreSource === 'l1' || runtime.restoreSource === 'l2' || runtime.restoreSource === 'l3'
-          ? Math.max(0, runtime.resumedPrefixTokenCount)
-          : 0,
-        rebuiltPrefixTokens: runtime.restoreSource === 'rebuild'
-          ? Math.max(0, runtime.resumedPrefixTokenCount)
-          : 0,
+        restoredPrefixTokens:
+          runtime.restoreSource === 'l1' ||
+          runtime.restoreSource === 'l2' ||
+          runtime.restoreSource === 'l3'
+            ? Math.max(0, runtime.resumedPrefixTokenCount)
+            : 0,
+        rebuiltPrefixTokens:
+          runtime.restoreSource === 'rebuild'
+            ? Math.max(0, runtime.resumedPrefixTokenCount)
+            : 0,
         promptTailTokens: Math.max(0, runtime.remainingPromptTokens.length),
       };
     }
 
     const parentNodeId = runtime?.nodeId ?? fallback.parentNodeId;
-    const parentNode = typeof parentNodeId === 'number' ? state.nodes.get(parentNodeId) : undefined;
+    const parentNode =
+      typeof parentNodeId === 'number'
+        ? state.nodes.get(parentNodeId)
+        : undefined;
     const parentPrefixTokens = runtime
       ? Math.max(0, runtime.resumedPrefixTokenCount)
-      : (parentNode && parentNodeId !== state.rootId ? Math.max(0, parentNode.prefixTokenCount) : 0);
-    const restoreSource = this.classifyEngineChatRestoreSource(parentNode, parentPrefixTokens);
+      : parentNode && parentNodeId !== state.rootId
+        ? Math.max(0, parentNode.prefixTokenCount)
+        : 0;
+    const restoreSource = this.classifyEngineChatRestoreSource(
+      parentNode,
+      parentPrefixTokens
+    );
 
     return {
       ...fallback,
@@ -2529,7 +3128,9 @@ export class Wllama {
       parentPrefixTokens,
       restoreSource,
       restoredPrefixTokens:
-        restoreSource === 'l1' || restoreSource === 'l2' || restoreSource === 'l3'
+        restoreSource === 'l1' ||
+        restoreSource === 'l2' ||
+        restoreSource === 'l3'
           ? parentPrefixTokens
           : 0,
       rebuiltPrefixTokens: restoreSource === 'rebuild' ? parentPrefixTokens : 0,
@@ -2547,7 +3148,12 @@ export class Wllama {
   ): void {
     const prepared = this.refreshEngineChatPreparedPrompt(req, state);
     req.preparedPrompt = prepared;
-    const est = this.estimateEngineChatServiceCost(prepared, req.options.nPredict, req.runtime, waitMs);
+    const est = this.estimateEngineChatServiceCost(
+      prepared,
+      req.options.nPredict,
+      req.runtime,
+      waitMs
+    );
     req.estimatedServiceMs = est.totalMs;
     req.estimatedPrefillMs = est.prefillMs;
     req.estimatedDecodeMs = est.decodeMs;
@@ -2562,11 +3168,19 @@ export class Wllama {
     req.estimatedRestoreSource = prepared.restoreSource;
     req.targetPredictTokens = est.predictTokens;
     const nAhead = nAheadAtEnqueue ?? req.nAheadAtEnqueue;
-    const pMaxMs = Math.max(this.getEngineChatServiceUpperBoundMs(), Math.ceil(est.totalMs));
+    const pMaxMs = Math.max(
+      this.getEngineChatServiceUpperBoundMs(),
+      Math.ceil(est.totalMs)
+    );
     req.baselineWorkMs = nAhead * pMaxMs;
     const rawBudgetMs = req.baselineWorkMs + pMaxMs;
-    const scaledBudgetMs = Math.ceil(rawBudgetMs * this.getEngineChatWaitBudgetScale());
-    const cappedBudgetMs = Math.min(scaledBudgetMs, this.getEngineChatWaitBudgetCapMs());
+    const scaledBudgetMs = Math.ceil(
+      rawBudgetMs * this.getEngineChatWaitBudgetScale()
+    );
+    const cappedBudgetMs = Math.min(
+      scaledBudgetMs,
+      this.getEngineChatWaitBudgetCapMs()
+    );
     req.waitBudgetMs = Math.max(1, cappedBudgetMs);
   }
 
@@ -2576,15 +3190,15 @@ export class Wllama {
     runtime?: EngineChatRuntime,
     waitMs: number = 0
   ): {
-      prefillMs: number;
-      decodeMs: number;
-      postMs: number;
-      cacheMoveMs: number;
-      rebuildMs: number;
-      parentRecoverMs: number;
-      totalMs: number;
-      predictTokens: number;
-    } {
+    prefillMs: number;
+    decodeMs: number;
+    postMs: number;
+    cacheMoveMs: number;
+    rebuildMs: number;
+    parentRecoverMs: number;
+    totalMs: number;
+    predictTokens: number;
+  } {
     const warmupRequests = this.getEngineChatCostWarmupRequests();
     if (this.engineChatCostObservedCount < warmupRequests) {
       return {
@@ -2595,26 +3209,39 @@ export class Wllama {
         rebuildMs: 0,
         parentRecoverMs: 0,
         totalMs: this.getEngineChatServiceUpperBoundMs(),
-        predictTokens: runtime ? this.getEngineChatNextDecodeSliceTokens(runtime) : this.getEngineChatInitialDecodeSliceTokens(nPredict),
+        predictTokens: runtime
+          ? this.getEngineChatNextDecodeSliceTokens(runtime)
+          : this.getEngineChatInitialDecodeSliceTokens(nPredict),
       };
     }
 
-    const prefillPerToken = this.engineChatLearnedPrefillCostPerTokenMs
-      ?? this.getEngineChatPrefillCostPerTokenMs();
-    const decodePerToken = this.engineChatLearnedDecodeCostPerTokenMs
-      ?? this.getEngineChatDecodeCostPerTokenMs();
-    const postMs = this.engineChatLearnedPostCostMs ?? this.getEngineChatPostCostMs();
-    const rebuildPerToken = this.engineChatLearnedRebuildCostPerTokenMs
-      ?? this.getEngineChatRebuildCostPerTokenMs();
-    const parentRecoverMs = this.engineChatLearnedParentRecoverCostMs
-      ?? prepared.estimatedParentRecoverMs
-      ?? this.getEngineChatParentRecoverCostMs();
+    const prefillPerToken =
+      this.engineChatLearnedPrefillCostPerTokenMs ??
+      this.getEngineChatPrefillCostPerTokenMs();
+    const decodePerToken =
+      this.engineChatLearnedDecodeCostPerTokenMs ??
+      this.getEngineChatDecodeCostPerTokenMs();
+    const postMs =
+      this.engineChatLearnedPostCostMs ?? this.getEngineChatPostCostMs();
+    const rebuildPerToken =
+      this.engineChatLearnedRebuildCostPerTokenMs ??
+      this.getEngineChatRebuildCostPerTokenMs();
+    const parentRecoverMs =
+      this.engineChatLearnedParentRecoverCostMs ??
+      prepared.estimatedParentRecoverMs ??
+      this.getEngineChatParentRecoverCostMs();
 
     const prefillTokens =
       runtime?.stage === 'prefill'
-        ? Math.min(prepared.promptTailTokens, this.getEngineChatPrefillSliceTokenBudget())
+        ? Math.min(
+            prepared.promptTailTokens,
+            this.getEngineChatPrefillSliceTokenBudget()
+          )
         : !runtime && prepared.promptTailTokens > 0
-          ? Math.min(prepared.promptTailTokens, this.getEngineChatPrefillSliceTokenBudget())
+          ? Math.min(
+              prepared.promptTailTokens,
+              this.getEngineChatPrefillSliceTokenBudget()
+            )
           : 0;
     const predictTokens =
       runtime?.stage === 'decode'
@@ -2625,21 +3252,31 @@ export class Wllama {
 
     const restoreCostPerToken =
       prepared.restoreSource === 'l1'
-        ? (this.engineChatLearnedRestoreL1CostPerTokenMs ?? this.getEngineChatRestoreL1CostPerTokenMs())
+        ? (this.engineChatLearnedRestoreL1CostPerTokenMs ??
+          this.getEngineChatRestoreL1CostPerTokenMs())
         : prepared.restoreSource === 'l2'
-          ? (this.engineChatLearnedRestoreL2CostPerTokenMs ?? this.getEngineChatRestoreL2CostPerTokenMs())
+          ? (this.engineChatLearnedRestoreL2CostPerTokenMs ??
+            this.getEngineChatRestoreL2CostPerTokenMs())
           : prepared.restoreSource === 'l3'
-            ? (this.engineChatLearnedRestoreL3CostPerTokenMs ?? this.getEngineChatRestoreL3CostPerTokenMs())
+            ? (this.engineChatLearnedRestoreL3CostPerTokenMs ??
+              this.getEngineChatRestoreL3CostPerTokenMs())
             : 0;
 
     const prefillMs = prefillTokens * prefillPerToken;
     const decodeMs = predictTokens * decodePerToken;
     const cacheMoveMs = prepared.restoredPrefixTokens * restoreCostPerToken;
     const rebuildMs = prepared.rebuiltPrefixTokens * rebuildPerToken;
-    const queuePenaltyMs = waitMs > 0 ? Math.min(waitMs * 0.05, prefillMs + decodeMs) : 0;
+    const queuePenaltyMs =
+      waitMs > 0 ? Math.min(waitMs * 0.05, prefillMs + decodeMs) : 0;
     const totalMs = Math.max(
       1,
-      prefillMs + decodeMs + postMs + cacheMoveMs + rebuildMs + parentRecoverMs + queuePenaltyMs
+      prefillMs +
+        decodeMs +
+        postMs +
+        cacheMoveMs +
+        rebuildMs +
+        parentRecoverMs +
+        queuePenaltyMs
     );
 
     return {
@@ -2656,13 +3293,20 @@ export class Wllama {
 
   private requeueEngineChatRequest(req: EngineChatRequest): void {
     req.queueType = 'normal';
-    req.enqueuedAt = Date.now();
+    req.lastEnqueuedAt = Date.now();
     req.nAheadAtEnqueue = this.getEngineChatPendingCount();
-    this.refreshEngineChatRequestEstimate(req, null, 0, req.nAheadAtEnqueue);
+    this.refreshEngineChatRequestEstimate(
+      req,
+      null,
+      Math.max(0, Date.now() - req.createdAt),
+      req.nAheadAtEnqueue
+    );
     this.engineChatNormalQueue.push(req);
   }
 
-  private async ensureEngineChatRuntimeReady(req: EngineChatRequest): Promise<void> {
+  private async ensureEngineChatRuntimeReady(
+    req: EngineChatRequest
+  ): Promise<void> {
     if (!req.runtime) {
       await this.initializeEngineChatRuntime(req);
     } else {
@@ -2671,17 +3315,27 @@ export class Wllama {
     if (!req.runtime) {
       throw new WllamaError(`engine chat runtime missing for req=${req.id}`);
     }
-    await this.samplingInit(req.options.sampling ?? {}, req.runtime.samplingHistoryTokens);
+    await this.samplingInit(
+      req.options.sampling ?? {},
+      req.runtime.samplingHistoryTokens
+    );
   }
 
-  private async initializeEngineChatRuntime(req: EngineChatRequest): Promise<void> {
-    const started =
-      Array.isArray(req.baseHistory)
-        ? await this.treeChatStartFromHistory(req.baseHistory, req.userText)
-        : await this.treeChatStart(req.parentId ?? 0, req.userText);
-    const prompt = started.formattedPrompt || req.preparedPrompt?.prompt || (await this.formatChat(started.messages, true));
-    const promptTokens = req.preparedPrompt?.promptTokens ?? (await this.tokenizePromptForEngineChat(prompt));
-    const { cachedPrefixTokens, promptTailTokens } = await this.alignPromptWithCurrentCache(promptTokens);
+  private async initializeEngineChatRuntime(
+    req: EngineChatRequest
+  ): Promise<void> {
+    const started = Array.isArray(req.baseHistory)
+      ? await this.treeChatStartFromHistory(req.baseHistory, req.userText)
+      : await this.treeChatStart(req.parentId ?? 0, req.userText);
+    const prompt =
+      started.formattedPrompt ||
+      req.preparedPrompt?.prompt ||
+      (await this.formatChat(started.messages, true));
+    const promptTokens =
+      req.preparedPrompt?.promptTokens ??
+      (await this.tokenizePromptForEngineChat(prompt));
+    const { cachedPrefixTokens, promptTailTokens } =
+      await this.alignPromptWithCurrentCache(promptTokens);
     const rebuildUsed = started.timing.rebuildPromptMs > 0;
     req.runtime = {
       nodeId: started.nodeId,
@@ -2705,11 +3359,25 @@ export class Wllama {
       accumulatedDecodeMs: 0,
       restoredPrefixTokens: rebuildUsed ? 0 : cachedPrefixTokens,
       rebuiltPrefixTokens: rebuildUsed ? cachedPrefixTokens : 0,
-      restoreSource: rebuildUsed ? 'rebuild' : (req.preparedPrompt?.restoreSource ?? 'none'),
+      restoreSource: rebuildUsed
+        ? 'rebuild'
+        : (req.preparedPrompt?.restoreSource ?? 'none'),
       promptTokenCount: promptTokens.length,
       promptTailTokenCount: promptTailTokens.length,
       resumedPrefixTokenCount: cachedPrefixTokens,
     };
+    this.emitEngineChatEvent(
+      started.timing.rebuildPromptMs > 0 ? 'state_rebuild' : 'state_restore',
+      req,
+      {
+        restoreSource: req.runtime.restoreSource,
+        restoredPrefixTokens: req.runtime.restoredPrefixTokens,
+        rebuiltPrefixTokens: req.runtime.rebuiltPrefixTokens,
+        restoreMs: started.timing.restoreCacheMs,
+        rebuildMs: started.timing.rebuildPromptMs,
+      }
+    );
+    this.emitAdmissionEvent(req, started.admission);
   }
 
   private async resumeEngineChatRuntime(req: EngineChatRequest): Promise<void> {
@@ -2720,9 +3388,21 @@ export class Wllama {
     req.runtime.cacheLoadMs += resumed.restoreCacheMs;
     req.runtime.rebuildMs += resumed.rebuildPromptMs;
     req.runtime.resumedPrefixTokenCount = resumed.resumedPrefixTokenCount;
+    this.emitEngineChatEvent(
+      resumed.rebuildPromptMs > 0 ? 'state_rebuild' : 'state_restore',
+      req,
+      {
+        restoredPrefixTokens: resumed.resumedPrefixTokenCount,
+        restoreMs: resumed.restoreCacheMs,
+        rebuildMs: resumed.rebuildPromptMs,
+      }
+    );
+    this.emitAdmissionEvent(req, resumed.admission);
   }
 
-  private async rollbackEngineChatRuntime(req: EngineChatRequest): Promise<void> {
+  private async rollbackEngineChatRuntime(
+    req: EngineChatRequest
+  ): Promise<void> {
     if (!req.runtime) {
       return;
     }
@@ -2746,8 +3426,14 @@ export class Wllama {
   }> {
     const cachedTokens = await this.getCachedTokens();
     let cachedPrefixTokens = 0;
-    for (; cachedPrefixTokens < Math.min(cachedTokens.length, promptTokens.length); cachedPrefixTokens++) {
-      if (cachedTokens[cachedPrefixTokens] !== promptTokens[cachedPrefixTokens]) {
+    for (
+      ;
+      cachedPrefixTokens < Math.min(cachedTokens.length, promptTokens.length);
+      cachedPrefixTokens++
+    ) {
+      if (
+        cachedTokens[cachedPrefixTokens] !== promptTokens[cachedPrefixTokens]
+      ) {
         break;
       }
     }
@@ -2766,9 +3452,13 @@ export class Wllama {
     }
   }
 
-  private async executeEngineChatPrefillSlice(req: EngineChatRequest): Promise<number> {
+  private async executeEngineChatPrefillSlice(
+    req: EngineChatRequest
+  ): Promise<number> {
     if (!req.runtime) {
-      throw new WllamaError(`engine chat runtime missing for prefill req=${req.id}`);
+      throw new WllamaError(
+        `engine chat runtime missing for prefill req=${req.id}`
+      );
     }
     const runtime = req.runtime;
     if (runtime.remainingPromptTokens.length === 0) {
@@ -2777,17 +3467,29 @@ export class Wllama {
 
     await this.resetPerfContext();
     const roundBudgetMs = this.getEngineChatPrefillSliceMaxMs();
-    const tokenBudget = this.getEngineChatPrefillSliceTokenBudget();
-    const chunkSize = Math.max(1, this.loadedContextInfo?.n_batch ?? 1);
-    const completionOpts = req.options.abortSignal ? { abortSignal: req.options.abortSignal } : {};
+    const tokenBudget = this.getEngineChatPrefillSliceTokenBudget(req);
+    const chunkSize = Math.max(
+      1,
+      Math.min(this.loadedContextInfo?.n_batch ?? 1, tokenBudget)
+    );
+    const completionOpts = req.options.abortSignal
+      ? { abortSignal: req.options.abortSignal }
+      : {};
     const startedAt = Date.now();
     let processed = 0;
 
-    while (runtime.remainingPromptTokens.length > 0 && processed < tokenBudget) {
+    while (
+      runtime.remainingPromptTokens.length > 0 &&
+      processed < tokenBudget
+    ) {
       if (req.options.abortSignal?.aborted) {
         throw new WllamaAbortError();
       }
-      const take = Math.min(chunkSize, tokenBudget - processed, runtime.remainingPromptTokens.length);
+      const take = Math.min(
+        chunkSize,
+        tokenBudget - processed,
+        runtime.remainingPromptTokens.length
+      );
       const chunk = runtime.remainingPromptTokens.slice(0, take);
       const isFinalOverallChunk = take === runtime.remainingPromptTokens.length;
       await this.samplingAccept(chunk);
@@ -2802,12 +3504,21 @@ export class Wllama {
       }
       runtime.remainingPromptTokens.splice(0, take);
       processed += take;
-      if (runtime.remainingPromptTokens.length > 0 && Date.now() - startedAt >= roundBudgetMs) {
+      if (!req.foreground && this.hasForegroundPending()) {
+        break;
+      }
+      if (
+        runtime.remainingPromptTokens.length > 0 &&
+        Date.now() - startedAt >= roundBudgetMs
+      ) {
         break;
       }
     }
 
-    if (runtime.remainingPromptTokens.length === 0 && this.isEncoderDecoderArchitecture()) {
+    if (
+      runtime.remainingPromptTokens.length === 0 &&
+      this.isEncoderDecoderArchitecture()
+    ) {
       await this.decode([this.getDecoderStartToken()], completionOpts);
     }
 
@@ -2823,11 +3534,13 @@ export class Wllama {
     finished: boolean;
   }> {
     if (!req.runtime) {
-      throw new WllamaError(`engine chat runtime missing for decode req=${req.id}`);
+      throw new WllamaError(
+        `engine chat runtime missing for decode req=${req.id}`
+      );
     }
     const runtime = req.runtime;
     const stopTokens = new Set(req.options.stopTokens ?? []);
-    const maxTokens = this.getEngineChatNextDecodeSliceTokens(runtime);
+    const maxTokens = this.getEngineChatNextDecodeSliceTokens(runtime, req);
     if (maxTokens <= 0) {
       return { decodeMs: 0, aborted: false, finished: true };
     }
@@ -2848,6 +3561,11 @@ export class Wllama {
       runtime.generatedTokensSoFar += 1;
       runtime.assistantText += piece;
       runtime.firstTokenAt ??= Date.now();
+      if (runtime.generatedTokensSoFar === 1) {
+        this.emitEngineChatEvent('first_token', req, {
+          ttftMs: runtime.firstTokenAt - req.createdAt,
+        });
+      }
       req.options.onChunk?.(piece, runtime.assistantText);
 
       if (req.options.abortSignal?.aborted) {
@@ -2859,8 +3577,14 @@ export class Wllama {
       runtime.samplingHistoryTokens.push(sampled.token);
       await this.decode([sampled.token], {});
 
-      if (Number.isFinite(runtime.generatedTokensLimit)
-        && runtime.generatedTokensSoFar >= runtime.generatedTokensLimit) {
+      if (!req.foreground && this.hasForegroundPending()) {
+        break;
+      }
+
+      if (
+        Number.isFinite(runtime.generatedTokensLimit) &&
+        runtime.generatedTokensSoFar >= runtime.generatedTokensLimit
+      ) {
         finished = true;
         break;
       }
@@ -2874,21 +3598,19 @@ export class Wllama {
     return { decodeMs, aborted, finished };
   }
 
-  private async executeEngineChatSlice(
-    req: EngineChatRequest
-  ): Promise<
+  private async executeEngineChatSlice(req: EngineChatRequest): Promise<
     | {
-      done: true;
-      result: WllamaChatFromNodeResult;
-      phases: {
-        prefillMs: number;
-        decodeMs: number;
-        postMs: number;
-        cacheLoadMs: number;
-        rebuildMs: number;
-        parentRecoverMs: number;
-      };
-    }
+        done: true;
+        result: WllamaChatFromNodeResult;
+        phases: {
+          prefillMs: number;
+          decodeMs: number;
+          postMs: number;
+          cacheLoadMs: number;
+          rebuildMs: number;
+          parentRecoverMs: number;
+        };
+      }
     | { done: false }
   > {
     try {
@@ -2896,33 +3618,37 @@ export class Wllama {
       if (!req.runtime) {
         throw new WllamaError(`engine chat runtime missing for req=${req.id}`);
       }
-      const allowYield = this.isEngineChatYieldEnabled()
-        && this.getEngineChatSchedulingPolicy() !== 'fcfs-no-slice';
+      const allowYield =
+        this.isEngineChatYieldEnabled() &&
+        this.getEngineChatSchedulingPolicy() !== 'fcfs-no-slice';
 
       while (true) {
         if (req.runtime.stage === 'prefill') {
           const prefillMs = await this.executeEngineChatPrefillSlice(req);
           req.runtime.accumulatedPrefillMs += prefillMs;
           req.sliceCount += 1;
-          req.runtime.resumedPrefixTokenCount = this.getEngineChatRuntimeLiveTokenCount(req.runtime);
+          req.runtime.resumedPrefixTokenCount =
+            this.getEngineChatRuntimeLiveTokenCount(req.runtime);
           if (req.runtime.remainingPromptTokens.length > 0) {
             if (allowYield) {
-              await this.treeChatCheckpoint(
+              const checkpointAdmission = await this.treeChatCheckpoint(
                 req.runtime.nodeId,
                 req.runtime.assistantText,
                 Date.now() - req.runtime.startedAt
               );
+              this.emitAdmissionEvent(req, checkpointAdmission);
               return { done: false };
             }
             continue;
           }
           req.runtime.stage = 'decode';
           if (allowYield) {
-            await this.treeChatCheckpoint(
+            const checkpointAdmission = await this.treeChatCheckpoint(
               req.runtime.nodeId,
               req.runtime.assistantText,
               Date.now() - req.runtime.startedAt
             );
+            this.emitAdmissionEvent(req, checkpointAdmission);
             return { done: false };
           }
           continue;
@@ -2932,7 +3658,8 @@ export class Wllama {
         req.runtime.accumulatedDecodeMs += detail.decodeMs;
         req.generatedTokens = req.runtime.generatedTokensSoFar;
         req.sliceCount += 1;
-        req.runtime.resumedPrefixTokenCount = this.getEngineChatRuntimeLiveTokenCount(req.runtime);
+        req.runtime.resumedPrefixTokenCount =
+          this.getEngineChatRuntimeLiveTokenCount(req.runtime);
 
         if (detail.aborted) {
           const state = await this.treeChatFinish(
@@ -2961,11 +3688,12 @@ export class Wllama {
 
         if (!detail.finished) {
           if (allowYield) {
-            await this.treeChatCheckpoint(
+            const checkpointAdmission = await this.treeChatCheckpoint(
               req.runtime.nodeId,
               req.runtime.assistantText,
               Date.now() - req.runtime.startedAt
             );
+            this.emitAdmissionEvent(req, checkpointAdmission);
             return { done: false };
           }
           continue;
@@ -2978,6 +3706,7 @@ export class Wllama {
           Date.now() - req.runtime.startedAt,
           false
         );
+        this.emitAdmissionEvent(req, state.tierStats.lastAdmission);
         const postMs = Math.max(0, Date.now() - postStartedAt);
         return {
           done: true,
@@ -2997,6 +3726,15 @@ export class Wllama {
         };
       }
     } catch (err) {
+      try {
+        const failedAdmission = (await this.treeGetState()).tierStats
+          .lastAdmission;
+        if (failedAdmission.id > 0 && !failedAdmission.success) {
+          this.emitAdmissionEvent(req, failedAdmission);
+        }
+      } catch {
+        // Preserve the original inference failure.
+      }
       await this.rollbackEngineChatRuntime(req);
       throw err;
     }
@@ -3004,7 +3742,11 @@ export class Wllama {
 
   private getEngineChatServiceUpperBoundMs(): number {
     const configured = this.config.engineChatServiceUpperBoundMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_SERVICE_UPPER_BOUND_MS;
     }
     return Math.floor(configured);
@@ -3012,7 +3754,11 @@ export class Wllama {
 
   private getEngineChatQueueMaxPending(): number {
     const configured = this.config.engineChatQueueMaxPending;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_QUEUE_MAX_PENDING;
     }
     return Math.floor(configured);
@@ -3020,15 +3766,76 @@ export class Wllama {
 
   private getEngineChatSliceTokenBudget(): number {
     const configured = this.config.engineChatSliceTokenBudget;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_SLICE_TOKEN_BUDGET;
     }
     return Math.max(1, Math.floor(configured));
   }
 
+  private getEngineChatDecodeSliceTokenBudget(req?: EngineChatRequest): number {
+    const base = this.getEngineChatSliceTokenBudget();
+    if (req?.foreground) {
+      const configured = this.config.engineChatForegroundSliceTokenBudget;
+      return typeof configured === 'number' &&
+        Number.isFinite(configured) &&
+        configured > 0
+        ? Math.max(1, Math.floor(configured))
+        : base;
+    }
+    if (this.hasForegroundPending()) {
+      const configured = this.config.engineChatBackgroundSliceTokenBudget;
+      return typeof configured === 'number' &&
+        Number.isFinite(configured) &&
+        configured > 0
+        ? Math.max(1, Math.floor(configured))
+        : Math.min(16, base);
+    }
+    return base;
+  }
+
+  private getEngineChatForegroundHandoffGraceMs(): number {
+    const configured = this.config.engineChatForegroundHandoffGraceMs;
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured < 0
+    ) {
+      return DEFAULT_ENGINE_CHAT_FOREGROUND_HANDOFF_GRACE_MS;
+    }
+    return Math.floor(configured);
+  }
+
+  private async waitForForegroundHandoff(): Promise<void> {
+    if (
+      this.getEngineChatSchedulingPolicy() !== 'foreground-aware' ||
+      this.hasForegroundPending()
+    ) {
+      return;
+    }
+    const remaining = this.engineChatForegroundGraceUntil - Date.now();
+    if (remaining > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+    }
+  }
+
+  private hasForegroundPending(): boolean {
+    return (
+      this.engineChatNormalQueue.some((req) => req.foreground) ||
+      this.engineChatOverdueQueue.some((req) => req.foreground)
+    );
+  }
+
   private getEngineChatEvictionHintTopK(): number {
     const configured = this.config.engineChatEvictionHintTopK;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_EVICTION_HINT_TOP_K;
     }
     return Math.max(1, Math.floor(configured));
@@ -3036,8 +3843,13 @@ export class Wllama {
 
   private getEngineChatPrefillCostPerTokenMs(): number {
     const configured =
-      this.config.engineChatPrefillCostPerTokenMs ?? this.config.engineChatPrefillCostPerUnitMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+      this.config.engineChatPrefillCostPerTokenMs ??
+      this.config.engineChatPrefillCostPerUnitMs;
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_PREFILL_PER_TOKEN_MS;
     }
     return configured;
@@ -3045,7 +3857,11 @@ export class Wllama {
 
   private getEngineChatDecodeCostPerTokenMs(): number {
     const configured = this.config.engineChatDecodeCostPerTokenMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_DECODE_PER_TOKEN_MS;
     }
     return configured;
@@ -3053,7 +3869,11 @@ export class Wllama {
 
   private getEngineChatPostCostMs(): number {
     const configured = this.config.engineChatPostCostMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_POST_MS;
     }
     return configured;
@@ -3061,20 +3881,37 @@ export class Wllama {
 
   private getEngineChatPrefillSliceMaxMs(): number {
     const configured = this.config.engineChatPrefillSliceMaxMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_PREFILL_SLICE_MAX_MS;
     }
     return Math.max(100, Math.floor(configured));
   }
 
-  private getEngineChatPrefillSliceTokenBudget(): number {
+  private getEngineChatPrefillSliceTokenBudget(
+    req?: EngineChatRequest
+  ): number {
     const perTokenMs = Math.max(0.1, this.getEngineChatPrefillCostPerTokenMs());
-    return Math.max(1, Math.floor(this.getEngineChatPrefillSliceMaxMs() / perTokenMs));
+    const base = Math.max(
+      1,
+      Math.floor(this.getEngineChatPrefillSliceMaxMs() / perTokenMs)
+    );
+    if (!req?.foreground && this.hasForegroundPending()) {
+      return Math.min(base, this.getEngineChatDecodeSliceTokenBudget(req));
+    }
+    return base;
   }
 
   private getEngineChatRestoreL1CostPerTokenMs(): number {
     const configured = this.config.engineChatRestoreL1CostPerTokenMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured < 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_RESTORE_L1_PER_TOKEN_MS;
     }
     return configured;
@@ -3082,8 +3919,13 @@ export class Wllama {
 
   private getEngineChatRestoreL2CostPerTokenMs(): number {
     const configured =
-      this.config.engineChatRestoreL2CostPerTokenMs ?? this.config.engineChatCacheMoveCostPerUnitMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+      this.config.engineChatRestoreL2CostPerTokenMs ??
+      this.config.engineChatCacheMoveCostPerUnitMs;
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured < 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_RESTORE_L2_PER_TOKEN_MS;
     }
     return configured;
@@ -3091,7 +3933,11 @@ export class Wllama {
 
   private getEngineChatRestoreL3CostPerTokenMs(): number {
     const configured = this.config.engineChatRestoreL3CostPerTokenMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured < 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_RESTORE_L3_PER_TOKEN_MS;
     }
     return configured;
@@ -3099,8 +3945,13 @@ export class Wllama {
 
   private getEngineChatRebuildCostPerTokenMs(): number {
     const configured =
-      this.config.engineChatRebuildCostPerTokenMs ?? this.config.engineChatRebuildCostPerUnitMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+      this.config.engineChatRebuildCostPerTokenMs ??
+      this.config.engineChatRebuildCostPerUnitMs;
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured < 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_REBUILD_PER_TOKEN_MS;
     }
     return configured;
@@ -3108,7 +3959,11 @@ export class Wllama {
 
   private getEngineChatParentRecoverCostMs(): number {
     const configured = this.config.engineChatParentRecoverCostMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured < 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured < 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_PARENT_RECOVER_MS;
     }
     return configured;
@@ -3116,7 +3971,11 @@ export class Wllama {
 
   private getEngineChatCostWarmupRequests(): number {
     const configured = this.config.engineChatCostWarmupRequests;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_WARMUP_REQUESTS;
     }
     return Math.max(1, Math.floor(configured));
@@ -3124,7 +3983,11 @@ export class Wllama {
 
   private getEngineChatCostSampleWindow(): number {
     const configured = this.config.engineChatCostSampleWindow;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return DEFAULT_ENGINE_CHAT_COST_SAMPLE_WINDOW;
     }
     return Math.max(16, Math.floor(configured));
@@ -3132,7 +3995,11 @@ export class Wllama {
 
   private getEngineChatWaitBudgetScale(): number {
     const configured = this.config.engineChatWaitBudgetScale;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return 1;
     }
     return configured;
@@ -3140,7 +4007,11 @@ export class Wllama {
 
   private getEngineChatWaitBudgetCapMs(): number {
     const configured = this.config.engineChatWaitBudgetCapMs;
-    if (typeof configured !== 'number' || !Number.isFinite(configured) || configured <= 0) {
+    if (
+      typeof configured !== 'number' ||
+      !Number.isFinite(configured) ||
+      configured <= 0
+    ) {
       return Number.POSITIVE_INFINITY;
     }
     return configured;
@@ -3173,22 +4044,30 @@ export class Wllama {
     const decodeTokens = Math.max(0, Math.floor(req.generatedTokens));
     const promptTailTokens = Math.max(
       0,
-      Math.floor(req.runtime?.promptTailTokenCount ?? req.estimatedPromptTailTokens)
+      Math.floor(
+        req.runtime?.promptTailTokenCount ?? req.estimatedPromptTailTokens
+      )
     );
     const restoredPrefixTokens = Math.max(
       0,
-      Math.floor(req.runtime?.restoredPrefixTokens ?? req.estimatedRestoredPrefixTokens)
+      Math.floor(
+        req.runtime?.restoredPrefixTokens ?? req.estimatedRestoredPrefixTokens
+      )
     );
     const rebuiltPrefixTokens = Math.max(
       0,
-      Math.floor(req.runtime?.rebuiltPrefixTokens ?? req.estimatedRebuiltPrefixTokens)
+      Math.floor(
+        req.runtime?.rebuiltPrefixTokens ?? req.estimatedRebuiltPrefixTokens
+      )
     );
     const restoredFromTier =
       req.runtime?.restoreSource === 'l1' || req.estimatedRestoreSource === 'l1'
         ? 1
-        : req.runtime?.restoreSource === 'l2' || req.estimatedRestoreSource === 'l2'
+        : req.runtime?.restoreSource === 'l2' ||
+            req.estimatedRestoreSource === 'l2'
           ? 2
-          : req.runtime?.restoreSource === 'l3' || req.estimatedRestoreSource === 'l3'
+          : req.runtime?.restoreSource === 'l3' ||
+              req.estimatedRestoreSource === 'l3'
             ? 3
             : 0;
 
@@ -3212,14 +4091,19 @@ export class Wllama {
 
     const maxWindow = this.getEngineChatCostSampleWindow();
     if (this.engineChatCostObservations.length > maxWindow) {
-      this.engineChatCostObservations.splice(0, this.engineChatCostObservations.length - maxWindow);
+      this.engineChatCostObservations.splice(
+        0,
+        this.engineChatCostObservations.length - maxWindow
+      );
     }
 
     this.maybeUpdateEngineChatLearnedCostModel();
   }
 
   private maybeUpdateEngineChatLearnedCostModel(): void {
-    if (this.engineChatCostObservedCount < this.getEngineChatCostWarmupRequests()) {
+    if (
+      this.engineChatCostObservedCount < this.getEngineChatCostWarmupRequests()
+    ) {
       return;
     }
     if (this.engineChatCostObservations.length < 5) {
@@ -3270,26 +4154,33 @@ export class Wllama {
       parentRecoverMsSum += obs.parentRecoverMs;
     }
 
-    const learnedPrefill = prefillWeight > 0
-      ? prefillWeightedMs / prefillWeight
-      : this.getEngineChatPrefillCostPerTokenMs();
-    const learnedDecode = decodeWeight > 0
-      ? decodeWeightedMs / decodeWeight
-      : this.getEngineChatDecodeCostPerTokenMs();
-    const learnedRestoreL1 = restoreL1Weight > 0
-      ? restoreL1WeightedMs / restoreL1Weight
-      : this.getEngineChatRestoreL1CostPerTokenMs();
-    const learnedRestoreL2 = restoreL2Weight > 0
-      ? restoreL2WeightedMs / restoreL2Weight
-      : this.getEngineChatRestoreL2CostPerTokenMs();
-    const learnedRestoreL3 = restoreL3Weight > 0
-      ? restoreL3WeightedMs / restoreL3Weight
-      : this.getEngineChatRestoreL3CostPerTokenMs();
-    const learnedRebuild = rebuildWeight > 0
-      ? rebuildWeightedMs / rebuildWeight
-      : this.getEngineChatRebuildCostPerTokenMs();
+    const learnedPrefill =
+      prefillWeight > 0
+        ? prefillWeightedMs / prefillWeight
+        : this.getEngineChatPrefillCostPerTokenMs();
+    const learnedDecode =
+      decodeWeight > 0
+        ? decodeWeightedMs / decodeWeight
+        : this.getEngineChatDecodeCostPerTokenMs();
+    const learnedRestoreL1 =
+      restoreL1Weight > 0
+        ? restoreL1WeightedMs / restoreL1Weight
+        : this.getEngineChatRestoreL1CostPerTokenMs();
+    const learnedRestoreL2 =
+      restoreL2Weight > 0
+        ? restoreL2WeightedMs / restoreL2Weight
+        : this.getEngineChatRestoreL2CostPerTokenMs();
+    const learnedRestoreL3 =
+      restoreL3Weight > 0
+        ? restoreL3WeightedMs / restoreL3Weight
+        : this.getEngineChatRestoreL3CostPerTokenMs();
+    const learnedRebuild =
+      rebuildWeight > 0
+        ? rebuildWeightedMs / rebuildWeight
+        : this.getEngineChatRebuildCostPerTokenMs();
     const learnedPost = postMsSum / this.engineChatCostObservations.length;
-    const learnedParentRecover = parentRecoverMsSum / this.engineChatCostObservations.length;
+    const learnedParentRecover =
+      parentRecoverMsSum / this.engineChatCostObservations.length;
 
     const boundedPrefill = Math.min(200, Math.max(0.1, learnedPrefill));
     const boundedDecode = Math.min(200, Math.max(0.1, learnedDecode));
@@ -3298,17 +4189,22 @@ export class Wllama {
     const boundedRestoreL3 = Math.min(400, Math.max(0, learnedRestoreL3));
     const boundedRebuild = Math.min(400, Math.max(0, learnedRebuild));
     const boundedPost = Math.min(2000, Math.max(0, learnedPost));
-    const boundedParentRecover = Math.min(2000, Math.max(0, learnedParentRecover));
+    const boundedParentRecover = Math.min(
+      2000,
+      Math.max(0, learnedParentRecover)
+    );
 
     const alpha = 0.2;
     this.engineChatLearnedPrefillCostPerTokenMs =
       this.engineChatLearnedPrefillCostPerTokenMs === undefined
         ? boundedPrefill
-        : (1 - alpha) * this.engineChatLearnedPrefillCostPerTokenMs + alpha * boundedPrefill;
+        : (1 - alpha) * this.engineChatLearnedPrefillCostPerTokenMs +
+          alpha * boundedPrefill;
     this.engineChatLearnedDecodeCostPerTokenMs =
       this.engineChatLearnedDecodeCostPerTokenMs === undefined
         ? boundedDecode
-        : (1 - alpha) * this.engineChatLearnedDecodeCostPerTokenMs + alpha * boundedDecode;
+        : (1 - alpha) * this.engineChatLearnedDecodeCostPerTokenMs +
+          alpha * boundedDecode;
     this.engineChatLearnedPostCostMs =
       this.engineChatLearnedPostCostMs === undefined
         ? boundedPost
@@ -3316,23 +4212,28 @@ export class Wllama {
     this.engineChatLearnedRestoreL1CostPerTokenMs =
       this.engineChatLearnedRestoreL1CostPerTokenMs === undefined
         ? boundedRestoreL1
-        : (1 - alpha) * this.engineChatLearnedRestoreL1CostPerTokenMs + alpha * boundedRestoreL1;
+        : (1 - alpha) * this.engineChatLearnedRestoreL1CostPerTokenMs +
+          alpha * boundedRestoreL1;
     this.engineChatLearnedRestoreL2CostPerTokenMs =
       this.engineChatLearnedRestoreL2CostPerTokenMs === undefined
         ? boundedRestoreL2
-        : (1 - alpha) * this.engineChatLearnedRestoreL2CostPerTokenMs + alpha * boundedRestoreL2;
+        : (1 - alpha) * this.engineChatLearnedRestoreL2CostPerTokenMs +
+          alpha * boundedRestoreL2;
     this.engineChatLearnedRestoreL3CostPerTokenMs =
       this.engineChatLearnedRestoreL3CostPerTokenMs === undefined
         ? boundedRestoreL3
-        : (1 - alpha) * this.engineChatLearnedRestoreL3CostPerTokenMs + alpha * boundedRestoreL3;
+        : (1 - alpha) * this.engineChatLearnedRestoreL3CostPerTokenMs +
+          alpha * boundedRestoreL3;
     this.engineChatLearnedRebuildCostPerTokenMs =
       this.engineChatLearnedRebuildCostPerTokenMs === undefined
         ? boundedRebuild
-        : (1 - alpha) * this.engineChatLearnedRebuildCostPerTokenMs + alpha * boundedRebuild;
+        : (1 - alpha) * this.engineChatLearnedRebuildCostPerTokenMs +
+          alpha * boundedRebuild;
     this.engineChatLearnedParentRecoverCostMs =
       this.engineChatLearnedParentRecoverCostMs === undefined
         ? boundedParentRecover
-        : (1 - alpha) * this.engineChatLearnedParentRecoverCostMs + alpha * boundedParentRecover;
+        : (1 - alpha) * this.engineChatLearnedParentRecoverCostMs +
+          alpha * boundedParentRecover;
 
     this.traceEngineChat(
       `cost-model update n=${this.engineChatCostObservedCount} coeff={prefill:${this.engineChatLearnedPrefillCostPerTokenMs.toFixed(2)}, decode:${this.engineChatLearnedDecodeCostPerTokenMs.toFixed(2)}, post:${this.engineChatLearnedPostCostMs.toFixed(2)}, restoreL1:${this.engineChatLearnedRestoreL1CostPerTokenMs.toFixed(2)}, restoreL2:${this.engineChatLearnedRestoreL2CostPerTokenMs.toFixed(2)}, restoreL3:${this.engineChatLearnedRestoreL3CostPerTokenMs.toFixed(2)}, rebuild:${this.engineChatLearnedRebuildCostPerTokenMs.toFixed(2)}, parentRecover:${this.engineChatLearnedParentRecoverCostMs.toFixed(2)}}`
@@ -3352,46 +4253,65 @@ export class Wllama {
     },
     useOverdueOrder: boolean
   ): boolean {
-    if (useOverdueOrder) {
-      // overdue order: (wait, estimatedService, enqueuedAt, id)
-      if (a.waitMs !== b.waitMs) return a.waitMs > b.waitMs;
-      if (a.estimatedServiceMs !== b.estimatedServiceMs) {
-        return a.estimatedServiceMs < b.estimatedServiceMs;
-      }
-      if (a.req.enqueuedAt !== b.req.enqueuedAt) return a.req.enqueuedAt < b.req.enqueuedAt;
-      return a.req.id < b.req.id;
-    }
-
-    // non-overdue order: (estimatedService, wait, enqueuedAt, id)
-    if (a.estimatedServiceMs !== b.estimatedServiceMs) {
-      return a.estimatedServiceMs < b.estimatedServiceMs;
-    }
-    if (a.waitMs !== b.waitMs) return a.waitMs > b.waitMs;
-    if (a.req.enqueuedAt !== b.req.enqueuedAt) return a.req.enqueuedAt < b.req.enqueuedAt;
-    return a.req.id < b.req.id;
-  }
-
-  private getEngineChatInitialDecodeSliceTokens(nPredict: number | undefined): number {
-    if (typeof nPredict !== 'number' || !Number.isFinite(nPredict)) {
-      return this.getEngineChatSliceTokenBudget();
-    }
-    return Math.max(0, Math.floor(nPredict));
-  }
-
-  private getEngineChatRuntimeLiveTokenCount(runtime: EngineChatRuntime): number {
-    return Math.max(
-      0,
-      runtime.promptTokenCount - runtime.remainingPromptTokens.length + runtime.generatedTokensSoFar
+    return (
+      compareEngineChatPriority(
+        {
+          foreground: a.req.foreground,
+          overdue: useOverdueOrder,
+          waitMs: a.waitMs,
+          estimatedServiceMs: a.estimatedServiceMs,
+          createdAt: a.req.createdAt,
+          id: a.req.id,
+        },
+        {
+          foreground: b.req.foreground,
+          overdue: useOverdueOrder,
+          waitMs: b.waitMs,
+          estimatedServiceMs: b.estimatedServiceMs,
+          createdAt: b.req.createdAt,
+          id: b.req.id,
+        },
+        false
+      ) < 0
     );
   }
 
-  private getEngineChatNextDecodeSliceTokens(runtime: EngineChatRuntime): number {
-    if (!Number.isFinite(runtime.generatedTokensLimit)) {
+  private getEngineChatInitialDecodeSliceTokens(
+    nPredict: number | undefined
+  ): number {
+    if (typeof nPredict !== 'number' || !Number.isFinite(nPredict)) {
       return this.getEngineChatSliceTokenBudget();
     }
+    return Math.min(
+      this.getEngineChatSliceTokenBudget(),
+      Math.max(0, Math.floor(nPredict))
+    );
+  }
+
+  private getEngineChatRuntimeLiveTokenCount(
+    runtime: EngineChatRuntime
+  ): number {
     return Math.max(
       0,
-      Math.max(0, runtime.generatedTokensLimit - runtime.generatedTokensSoFar)
+      runtime.promptTokenCount -
+        runtime.remainingPromptTokens.length +
+        runtime.generatedTokensSoFar
+    );
+  }
+
+  private getEngineChatNextDecodeSliceTokens(
+    runtime: EngineChatRuntime,
+    req?: EngineChatRequest
+  ): number {
+    return decodeSliceBudget(
+      this.getEngineChatSliceTokenBudget(),
+      Number.isFinite(runtime.generatedTokensLimit)
+        ? runtime.generatedTokensLimit - runtime.generatedTokensSoFar
+        : Number.POSITIVE_INFINITY,
+      req?.foreground ?? false,
+      this.hasForegroundPending(),
+      this.config.engineChatForegroundSliceTokenBudget,
+      this.config.engineChatBackgroundSliceTokenBudget
     );
   }
 
@@ -3414,42 +4334,53 @@ export class Wllama {
     userText: string,
     options: WllamaChatFromNodeOptions = {},
     baseHistory?: WllamaChatMessage[]
-  ): Promise<{ nodeId: number; assistantText: string; state: WllamaTreeState }> {
+  ): Promise<{
+    nodeId: number;
+    assistantText: string;
+    state: WllamaTreeState;
+  }> {
     if (options.abortSignal?.aborted) {
       throw new WllamaAbortError();
     }
 
-    const reqId = (options as unknown as { __engineReqId?: number }).__engineReqId;
+    const reqId = (options as unknown as { __engineReqId?: number })
+      .__engineReqId;
     const parentKey =
       typeof parentId === 'number' && parentId >= 0
         ? `parent=${parentId}`
         : `historyLen=${baseHistory?.length ?? 0}`;
     const traceKey = `req=${reqId ?? 'na'} ${parentKey}`;
     const opStartedAt = Date.now();
-    let stage: 'chat_start' | 'create_completion' | 'streaming' | 'chat_finish' | 'rollback' = 'chat_start';
+    let stage:
+      | 'chat_start'
+      | 'create_completion'
+      | 'streaming'
+      | 'chat_finish'
+      | 'rollback' = 'chat_start';
     let chunkCount = 0;
     let lastProgressAt = opStartedAt;
     let firstTokenAt = 0;
     const heartbeatId = this.isEngineChatTraceEnabled()
       ? setInterval(() => {
-        const now = Date.now();
-        this.traceEngineChat(
-          `${traceKey} heartbeat stage=${stage} elapsedMs=${now - opStartedAt} chunks=${chunkCount} sinceProgressMs=${now - lastProgressAt}`,
-          now - lastProgressAt > 10000 ? 'warn' : 'debug'
-        );
-      }, 5000)
+          const now = Date.now();
+          this.traceEngineChat(
+            `${traceKey} heartbeat stage=${stage} elapsedMs=${now - opStartedAt} chunks=${chunkCount} sinceProgressMs=${now - lastProgressAt}`,
+            now - lastProgressAt > 10000 ? 'warn' : 'debug'
+          );
+        }, 5000)
       : null;
 
-    const started =
-      Array.isArray(baseHistory)
-        ? await this.treeChatStartFromHistory(baseHistory, userText)
-        : await this.treeChatStart(parentId ?? 0, userText);
+    const started = Array.isArray(baseHistory)
+      ? await this.treeChatStartFromHistory(baseHistory, userText)
+      : await this.treeChatStart(parentId ?? 0, userText);
     const t0 = Date.now();
     let assistantText = '';
 
     try {
       stage = 'create_completion';
-      const prompt = started.formattedPrompt || (await this.formatChat(started.messages, true));
+      const prompt =
+        started.formattedPrompt ||
+        (await this.formatChat(started.messages, true));
       const stream = await this.createCompletion(prompt, {
         ...options,
         stream: true,
@@ -3465,7 +4396,9 @@ export class Wllama {
         lastProgressAt = Date.now();
         if (firstTokenAt === 0) {
           firstTokenAt = lastProgressAt;
-          this.traceEngineChat(`${traceKey} first-token ttftMs=${firstTokenAt - t0}`);
+          this.traceEngineChat(
+            `${traceKey} first-token ttftMs=${firstTokenAt - t0}`
+          );
         }
         const piece = new TextDecoder().decode(chunk.piece, { stream: true });
         assistantText = chunk.currentText;
@@ -3503,25 +4436,34 @@ export class Wllama {
     }
   }
 
-  private resolveNodeIdByHistory(state: WllamaTreeState, history: WllamaChatMessage[]): number {
+  private resolveNodeIdByHistory(
+    state: WllamaTreeState,
+    history: WllamaChatMessage[]
+  ): number {
     const turns = this.historyToTurns(history);
     let currentId = state.rootId;
 
     for (const turn of turns) {
       const current = state.nodes.get(currentId);
       if (!current) {
-        throw new WllamaError(`Node ${currentId} not found while resolving history`);
+        throw new WllamaError(
+          `Node ${currentId} not found while resolving history`
+        );
       }
 
       const nextId = current.childIds.find((childId) => {
         const child = state.nodes.get(childId);
-        return !!child
-          && child.turn.user === turn.user
-          && child.turn.assistant === turn.assistant;
+        return (
+          !!child &&
+          child.turn.user === turn.user &&
+          child.turn.assistant === turn.assistant
+        );
       });
 
       if (nextId === undefined) {
-        throw new WllamaError('History does not map to an existing conversation path');
+        throw new WllamaError(
+          'History does not map to an existing conversation path'
+        );
       }
       currentId = nextId;
     }
@@ -3529,7 +4471,9 @@ export class Wllama {
     return currentId;
   }
 
-  private historyToTurns(history: WllamaChatMessage[]): Array<{ user: string; assistant: string }> {
+  private historyToTurns(
+    history: WllamaChatMessage[]
+  ): Array<{ user: string; assistant: string }> {
     const turns: Array<{ user: string; assistant: string }> = [];
     let pendingUser = '';
 
@@ -3539,14 +4483,18 @@ export class Wllama {
       }
       if (msg.role === 'user') {
         if (pendingUser) {
-          throw new WllamaError('Invalid history: consecutive user messages are not supported');
+          throw new WllamaError(
+            'Invalid history: consecutive user messages are not supported'
+          );
         }
         pendingUser = msg.content;
         continue;
       }
       if (msg.role === 'assistant') {
         if (!pendingUser) {
-          throw new WllamaError('Invalid history: assistant message without preceding user message');
+          throw new WllamaError(
+            'Invalid history: assistant message without preceding user message'
+          );
         }
         turns.push({ user: pendingUser, assistant: msg.content });
         pendingUser = '';
@@ -3554,7 +4502,9 @@ export class Wllama {
     }
 
     if (pendingUser) {
-      throw new WllamaError('Invalid history: trailing user message is not allowed in base history');
+      throw new WllamaError(
+        'Invalid history: trailing user message is not allowed in base history'
+      );
     }
 
     return turns;
@@ -3562,45 +4512,90 @@ export class Wllama {
 
   private async treeGetState(): Promise<WllamaTreeState> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeStateRes>('chat_state', {
-      _name: 'trst_req',
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeStateRes>(
+      'chat_state',
+      {
+        _name: 'trst_req',
+      }
+    );
     if (!result.success) {
       throw new WllamaError(`treeGetState failed: ${result.message}`);
     }
     return this.mapTreeState(result);
   }
 
-  private async treeCacheHint(hotNodeIds: number[], queuePressure: number): Promise<void> {
+  private async treeCacheHint(
+    hotNodeIds: number[],
+    queuePressure: number
+  ): Promise<void> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeCacheHintRes>('chat_cache_hint', {
-      _name: 'tchi_req',
-      hot_node_ids: hotNodeIds,
-      queue_pressure: queuePressure,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeCacheHintRes>(
+      'chat_cache_hint',
+      {
+        _name: 'tchi_req',
+        hot_node_ids: hotNodeIds,
+        queue_pressure: queuePressure,
+      }
+    );
     if (!result.success) {
       throw new WllamaError(`treeCacheHint failed: ${result.message}`);
     }
+  }
+
+  private async treeReleaseNodes(
+    nodeIds: number[],
+    clientId?: string
+  ): Promise<void> {
+    if (nodeIds.length === 0) return;
+    const result = await this.proxy.wllamaAction<GlueMsgTreeReleaseRes>(
+      'chat_release',
+      {
+        _name: 'trel_req',
+        node_ids: nodeIds,
+      }
+    );
+    if (!result.success) {
+      throw new WllamaError(`treeReleaseNodes failed: ${result.message}`);
+    }
+    this.emitEngineChatEvent(
+      'state_release',
+      undefined,
+      {
+        nodeIds,
+        releasedSlots: result.released_slots,
+        releasedTokens: result.released_tokens,
+      },
+      clientId
+    );
   }
 
   private async treeChatResume(nodeId: number): Promise<{
     restoreCacheMs: number;
     rebuildPromptMs: number;
     resumedPrefixTokenCount: number;
+    admission: WllamaAdmissionResult;
   }> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeChatResumeRes>('chat_resume', {
-      _name: 'tchr_req',
-      node_id: nodeId,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatResumeRes>(
+      'chat_resume',
+      {
+        _name: 'tchr_req',
+        node_id: nodeId,
+      }
+    );
     if (!result.success) {
-      throw new WllamaError(`treeChatResume(${nodeId}) failed: ${result.message}`);
+      throw new WllamaError(
+        `treeChatResume(${nodeId}) failed: ${result.message}`
+      );
     }
     this.nCachedTokens = result.resumed_prefix_token_count ?? 0;
     return {
       restoreCacheMs: result.restore_cache_ms ?? 0,
       rebuildPromptMs: result.rebuild_prompt_ms ?? 0,
       resumedPrefixTokenCount: result.resumed_prefix_token_count ?? 0,
+      admission: this.mapAdmissionResult(
+        result as unknown as Record<string, unknown>
+      ),
     };
   }
 
@@ -3608,34 +4603,49 @@ export class Wllama {
     nodeId: number,
     assistantText: string,
     generationTimeMs: number
-  ): Promise<void> {
+  ): Promise<WllamaAdmissionResult> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeChatCheckpointRes>('chat_checkpoint', {
-      _name: 'tchp_req',
-      node_id: nodeId,
-      assistant_text: assistantText,
-      generation_time_ms: generationTimeMs,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatCheckpointRes>(
+      'chat_checkpoint',
+      {
+        _name: 'tchp_req',
+        node_id: nodeId,
+        assistant_text: assistantText,
+        generation_time_ms: generationTimeMs,
+      }
+    );
     if (!result.success) {
-      throw new WllamaError(`treeChatCheckpoint(${nodeId}) failed: ${result.message}`);
+      throw new WllamaError(
+        `treeChatCheckpoint(${nodeId}) failed: ${result.message}`
+      );
     }
+    return this.mapAdmissionResult(
+      result as unknown as Record<string, unknown>
+    );
   }
 
   private async treeSwitch(nodeId: number): Promise<WllamaTreeState> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeSwitchRes>('chat_set_active', {
-      _name: 'trsw_req',
-      node_id: nodeId,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeSwitchRes>(
+      'chat_set_active',
+      {
+        _name: 'trsw_req',
+        node_id: nodeId,
+      }
+    );
     if (!result.success) {
       throw new WllamaError(`treeSwitch(${nodeId}) failed: ${result.message}`);
     }
     const state = await this.treeGetState();
-    this.nCachedTokens = state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
+    this.nCachedTokens =
+      state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
     return state;
   }
 
-  private async treeChatStart(parentId: number, userText: string): Promise<{
+  private async treeChatStart(
+    parentId: number,
+    userText: string
+  ): Promise<{
     nodeId: number;
     messages: WllamaChatMessage[];
     formattedPrompt: string;
@@ -3646,15 +4656,21 @@ export class Wllama {
       parentRecoverMs: number;
       startOverheadMs: number;
     };
+    admission: WllamaAdmissionResult;
   }> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeChatStartRes>('chat_start', {
-      _name: 'tchs_req',
-      parent_id: parentId,
-      user_text: userText,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatStartRes>(
+      'chat_start',
+      {
+        _name: 'tchs_req',
+        parent_id: parentId,
+        user_text: userText,
+      }
+    );
     if (!result.success) {
-      throw new WllamaError(`treeChatStart(${parentId}) failed: ${result.message}`);
+      throw new WllamaError(
+        `treeChatStart(${parentId}) failed: ${result.message}`
+      );
     }
 
     const messages: WllamaChatMessage[] = [];
@@ -3680,6 +4696,9 @@ export class Wllama {
         parentRecoverMs: result.parent_recover_ms ?? 0,
         startOverheadMs: result.start_overhead_ms ?? 0,
       },
+      admission: this.mapAdmissionResult(
+        result as unknown as Record<string, unknown>
+      ),
     };
   }
 
@@ -3697,18 +4716,24 @@ export class Wllama {
       parentRecoverMs: number;
       startOverheadMs: number;
     };
+    admission: WllamaAdmissionResult;
   }> {
     this.checkModelLoaded();
     const roles = history.map((m) => m.role);
     const contents = history.map((m) => m.content);
-    const result = await this.proxy.wllamaAction<GlueMsgTreeChatStartHistRes>('chat_start_hist', {
-      _name: 'tchh_req',
-      roles,
-      contents,
-      user_text: userText,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatStartHistRes>(
+      'chat_start_hist',
+      {
+        _name: 'tchh_req',
+        roles,
+        contents,
+        user_text: userText,
+      }
+    );
     if (!result.success) {
-      throw new WllamaError(`treeChatStartFromHistory failed: ${result.message}`);
+      throw new WllamaError(
+        `treeChatStartFromHistory failed: ${result.message}`
+      );
     }
 
     const messages: WllamaChatMessage[] = [];
@@ -3721,7 +4746,8 @@ export class Wllama {
     }
 
     const state = await this.treeGetState();
-    this.nCachedTokens = state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
+    this.nCachedTokens =
+      state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
     return {
       nodeId: result.node_id,
       messages,
@@ -3733,6 +4759,30 @@ export class Wllama {
         parentRecoverMs: result.parent_recover_ms ?? 0,
         startOverheadMs: result.start_overhead_ms ?? 0,
       },
+      admission: this.mapAdmissionResult(
+        result as unknown as Record<string, unknown>
+      ),
+    };
+  }
+
+  private mapAdmissionResult(
+    result: Record<string, unknown>
+  ): WllamaAdmissionResult {
+    return {
+      id: Number(result.admission_id ?? 0),
+      targetLevel: Number(result.admission_target_level ?? 0),
+      incomingTokens: Number(result.admission_incoming_tokens ?? 0),
+      initialTokenDeficit: Number(result.admission_initial_token_deficit ?? 0),
+      initialSlotDeficit: Number(result.admission_initial_slot_deficit ?? 0),
+      repairSteps: Number(result.admission_repair_steps ?? 0),
+      demotedTokens: Number(result.admission_demoted_tokens ?? 0),
+      checkpointedTokens: Number(result.admission_checkpointed_tokens ?? 0),
+      removedStates: Number(result.admission_removed_states ?? 0),
+      latencyMs: Number(result.admission_latency_ms ?? 0),
+      success: Boolean(result.admission_success ?? true),
+      victimIds: Array.isArray(result.admission_victim_ids)
+        ? result.admission_victim_ids.map(Number)
+        : [],
     };
   }
 
@@ -3743,28 +4793,37 @@ export class Wllama {
     abortedOrError: boolean
   ): Promise<WllamaTreeState> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeChatFinishRes>('chat_finish', {
-      _name: 'tchf_req',
-      node_id: nodeId,
-      assistant_text: assistantText,
-      generation_time_ms: generationTimeMs,
-      aborted_or_error: abortedOrError,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeChatFinishRes>(
+      'chat_finish',
+      {
+        _name: 'tchf_req',
+        node_id: nodeId,
+        assistant_text: assistantText,
+        generation_time_ms: generationTimeMs,
+        aborted_or_error: abortedOrError,
+      }
+    );
     if (!result.success) {
-      throw new WllamaError(`treeChatFinish(${nodeId}) failed: ${result.message}`);
+      throw new WllamaError(
+        `treeChatFinish(${nodeId}) failed: ${result.message}`
+      );
     }
 
     const state = await this.treeGetState();
-    this.nCachedTokens = state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
+    this.nCachedTokens =
+      state.nodes.get(state.activeNodeId)?.prefixTokenCount ?? 0;
     return state;
   }
 
   private async treeDelete(nodeId: number): Promise<WllamaTreeState> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeDeleteRes>('chat_delete', {
-      _name: 'trde_req',
-      node_id: nodeId,
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeDeleteRes>(
+      'chat_delete',
+      {
+        _name: 'trde_req',
+        node_id: nodeId,
+      }
+    );
     if (!result.success) {
       throw new WllamaError(`treeDelete(${nodeId}) failed: ${result.message}`);
     }
@@ -3773,9 +4832,12 @@ export class Wllama {
 
   private async treeReset(): Promise<WllamaTreeState> {
     this.checkModelLoaded();
-    const result = await this.proxy.wllamaAction<GlueMsgTreeResetRes>('chat_reset', {
-      _name: 'trrs_req',
-    });
+    const result = await this.proxy.wllamaAction<GlueMsgTreeResetRes>(
+      'chat_reset',
+      {
+        _name: 'trrs_req',
+      }
+    );
     if (!result.success) {
       throw new WllamaError(`treeReset failed: ${result.message}`);
     }
@@ -3866,6 +4928,7 @@ export class Wllama {
    * Note: This function will NOT crash if model is not yet loaded
    */
   async exit(): Promise<void> {
+    this.resetEngineChatSessionMetadata();
     await this.proxy?.wllamaExit();
     this.proxy = null as any;
   }
@@ -3882,8 +4945,15 @@ export class Wllama {
       queueType: req.queueType,
       parentId: req.parentId ?? null,
       historyLength: req.baseHistory?.length ?? 0,
-      enqueuedForMs: now - req.enqueuedAt,
-      processingForMs: req.processingStartedAt ? now - req.processingStartedAt : 0,
+      enqueuedForMs: now - req.createdAt,
+      latestQueueResidenceMs: now - req.lastEnqueuedAt,
+      clientId: req.clientId ?? null,
+      foreground: req.foreground,
+      lifecycleState: req.lifecycleState,
+      lifecycleEpoch: req.lifecycleEpoch,
+      processingForMs: req.processingStartedAt
+        ? now - req.processingStartedAt
+        : 0,
       nAheadAtEnqueue: req.nAheadAtEnqueue,
       waitBudgetMs: req.waitBudgetMs,
       estimatedServiceMs: req.estimatedServiceMs,
@@ -3921,14 +4991,21 @@ export class Wllama {
             warmupRequests: this.getEngineChatCostWarmupRequests(),
             sampleWindow: this.getEngineChatCostSampleWindow(),
             sampleCount: this.engineChatCostObservations.length,
-            learnedPrefillCostPerTokenMs: this.engineChatLearnedPrefillCostPerTokenMs ?? null,
-            learnedDecodeCostPerTokenMs: this.engineChatLearnedDecodeCostPerTokenMs ?? null,
+            learnedPrefillCostPerTokenMs:
+              this.engineChatLearnedPrefillCostPerTokenMs ?? null,
+            learnedDecodeCostPerTokenMs:
+              this.engineChatLearnedDecodeCostPerTokenMs ?? null,
             learnedPostCostMs: this.engineChatLearnedPostCostMs ?? null,
-            learnedRestoreL1CostPerTokenMs: this.engineChatLearnedRestoreL1CostPerTokenMs ?? null,
-            learnedRestoreL2CostPerTokenMs: this.engineChatLearnedRestoreL2CostPerTokenMs ?? null,
-            learnedRestoreL3CostPerTokenMs: this.engineChatLearnedRestoreL3CostPerTokenMs ?? null,
-            learnedRebuildCostPerTokenMs: this.engineChatLearnedRebuildCostPerTokenMs ?? null,
-            learnedParentRecoverCostMs: this.engineChatLearnedParentRecoverCostMs ?? null,
+            learnedRestoreL1CostPerTokenMs:
+              this.engineChatLearnedRestoreL1CostPerTokenMs ?? null,
+            learnedRestoreL2CostPerTokenMs:
+              this.engineChatLearnedRestoreL2CostPerTokenMs ?? null,
+            learnedRestoreL3CostPerTokenMs:
+              this.engineChatLearnedRestoreL3CostPerTokenMs ?? null,
+            learnedRebuildCostPerTokenMs:
+              this.engineChatLearnedRebuildCostPerTokenMs ?? null,
+            learnedParentRecoverCostMs:
+              this.engineChatLearnedParentRecoverCostMs ?? null,
           },
           normalPending,
           overduePending,
@@ -3948,14 +5025,21 @@ export class Wllama {
           warmupRequests: this.getEngineChatCostWarmupRequests(),
           sampleWindow: this.getEngineChatCostSampleWindow(),
           sampleCount: this.engineChatCostObservations.length,
-          learnedPrefillCostPerTokenMs: this.engineChatLearnedPrefillCostPerTokenMs ?? null,
-          learnedDecodeCostPerTokenMs: this.engineChatLearnedDecodeCostPerTokenMs ?? null,
+          learnedPrefillCostPerTokenMs:
+            this.engineChatLearnedPrefillCostPerTokenMs ?? null,
+          learnedDecodeCostPerTokenMs:
+            this.engineChatLearnedDecodeCostPerTokenMs ?? null,
           learnedPostCostMs: this.engineChatLearnedPostCostMs ?? null,
-          learnedRestoreL1CostPerTokenMs: this.engineChatLearnedRestoreL1CostPerTokenMs ?? null,
-          learnedRestoreL2CostPerTokenMs: this.engineChatLearnedRestoreL2CostPerTokenMs ?? null,
-          learnedRestoreL3CostPerTokenMs: this.engineChatLearnedRestoreL3CostPerTokenMs ?? null,
-          learnedRebuildCostPerTokenMs: this.engineChatLearnedRebuildCostPerTokenMs ?? null,
-          learnedParentRecoverCostMs: this.engineChatLearnedParentRecoverCostMs ?? null,
+          learnedRestoreL1CostPerTokenMs:
+            this.engineChatLearnedRestoreL1CostPerTokenMs ?? null,
+          learnedRestoreL2CostPerTokenMs:
+            this.engineChatLearnedRestoreL2CostPerTokenMs ?? null,
+          learnedRestoreL3CostPerTokenMs:
+            this.engineChatLearnedRestoreL3CostPerTokenMs ?? null,
+          learnedRebuildCostPerTokenMs:
+            this.engineChatLearnedRebuildCostPerTokenMs ?? null,
+          learnedParentRecoverCostMs:
+            this.engineChatLearnedParentRecoverCostMs ?? null,
         },
         normalPending,
         overduePending,

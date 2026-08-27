@@ -27,6 +27,12 @@ interface Logger {
   error: typeof console.error;
 }
 
+export interface WllamaWorkerRuntime {
+  moduleCode?: string;
+  llamaCppCode?: string;
+  workerFactory?: (workerCode: string | Blob) => Worker;
+}
+
 interface TaskParam {
   verb:
     | 'module.init'
@@ -58,28 +64,37 @@ export class ProxyToWorker {
   pathConfig: any;
   multiThread: boolean;
   nbThread: number;
+  runtime: WllamaWorkerRuntime;
 
   constructor(
     pathConfig: any,
     nbThread: number = 1,
     suppressNativeLog: boolean,
-    logger: Logger
+    logger: Logger,
+    runtime: WllamaWorkerRuntime = {}
   ) {
     this.pathConfig = pathConfig;
     this.nbThread = nbThread;
     this.multiThread = nbThread > 1;
     this.logger = logger;
     this.suppressNativeLog = suppressNativeLog;
+    this.runtime = runtime;
   }
 
   async moduleInit(ggufFiles: { name: string; blob: Blob }[]): Promise<void> {
     if (!this.pathConfig['wllama.wasm']) {
       throw new Error('"single-thread/wllama.wasm" is missing from pathConfig');
     }
-    let moduleCode = this.multiThread
-      ? WLLAMA_MULTI_THREAD_CODE
-      : WLLAMA_SINGLE_THREAD_CODE;
-    let mainModuleCode = moduleCode.replace('var Module', 'var ___Module');
+    const moduleCode =
+      this.runtime.moduleCode ??
+      (this.multiThread ? WLLAMA_MULTI_THREAD_CODE : WLLAMA_SINGLE_THREAD_CODE);
+    const mainModuleCode = moduleCode.replace(
+      /(^|\n)var Module(?=\s*=)/,
+      '$1var ___Module'
+    );
+    if (mainModuleCode === moduleCode) {
+      throw new Error('Cannot locate Emscripten Module declaration');
+    }
     const runOptions = {
       pathConfig: this.pathConfig,
       nbThread: this.nbThread,
@@ -87,9 +102,9 @@ export class ProxyToWorker {
     const completeCode: string = [
       `const RUN_OPTIONS = ${JSON.stringify(runOptions)};`,
       `function wModuleInit() { ${mainModuleCode}; return Module; }`,
-      LLAMA_CPP_WORKER_CODE,
+      this.runtime.llamaCppCode ?? LLAMA_CPP_WORKER_CODE,
     ].join(';\n\n');
-    this.worker = createWorker(completeCode);
+    this.worker = (this.runtime.workerFactory ?? createWorker)(completeCode);
     this.worker.onmessage = this.onRecvMsg.bind(this);
     this.worker.onerror = this.logger.error;
 

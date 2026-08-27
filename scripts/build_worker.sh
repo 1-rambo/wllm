@@ -31,6 +31,10 @@ process_file() {
 process_file ./src/workers-code/llama-cpp.js  LLAMA_CPP_WORKER_CODE
 process_file ./src/workers-code/opfs-utils.js OPFS_UTILS_WORKER_CODE
 
+SERVICE_BUNDLE="$(mktemp -d)/browser-service-scope.js"
+node ./scripts/build_browser_service_scope.mjs "$SERVICE_BUNDLE"
+process_file "$SERVICE_BUNDLE" BROWSER_SERVICE_SCOPE_CODE
+
 # emscripten
 process_file ./src/multi-thread/wllama.js         WLLAMA_MULTI_THREAD_CODE
 process_file ./src/single-thread/wllama.js        WLLAMA_SINGLE_THREAD_CODE

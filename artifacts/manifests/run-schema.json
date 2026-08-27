@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wllm.browser-service.run.v1",
+  "title": "wLLM browser service event",
+  "type": "object",
+  "required": [
+    "runId",
+    "schemaVersion",
+    "sequence",
+    "type",
+    "timestampMs"
+  ],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "const": "wllm.browser-service.v1" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "type": { "type": "string", "minLength": 1 },
+    "timestampMs": { "type": "number", "minimum": 0 },
+    "clientId": { "type": "string" },
+    "requestId": { "type": "integer", "minimum": 1 },
+    "data": { "type": "object" }
+  },
+  "additionalProperties": false
+}

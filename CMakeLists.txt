@@ -4,13 +4,14 @@ project("wllama")
 option(GGML_WEBGPU "Enable GGML WebGPU backend" ON)
 option(GGML_WEBGPU_JSPI "Enable GGML WebGPU JSPI support" ON)
 option(LLAMA_WASM_MEM64 "Enable 64-bit memory for WebAssembly builds" OFF)
-add_subdirectory(llama.cpp)
 
 set(CMAKE_THREAD_LIBS_INIT "-lpthread")
 set(CMAKE_HAVE_THREADS_LIBRARY 1)
 set(CMAKE_USE_WIN32_THREADS_INIT 0)
 set(CMAKE_USE_PTHREADS_INIT 1)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
+
+add_subdirectory(llama.cpp)
 
 set(WLLAMA_SRC cpp/wllama.cpp
     cpp/actions.hpp

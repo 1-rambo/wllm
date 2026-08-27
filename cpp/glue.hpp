@@ -21,7 +21,7 @@
 #include <functional>
 
 // increase when messages change
-#define GLUE_VERSION 3
+#define GLUE_VERSION 4
 
 #define GLUE_MAGIC 0x45554c47 // "GLUE"
 #define GLUE_PROTO_ID_LEN 8
@@ -922,6 +922,8 @@ struct glue_msg_tree_init_req
   GLUE_FIELD(int, tier_prune_l2_l3_token_threshold)
   GLUE_FIELD(str, tier_replacement_policy)
   GLUE_FIELD(str, tier_l3_path)
+  GLUE_FIELD(str, admission_policy)
+  GLUE_FIELD(int, admission_max_repair_steps)
 };
 
 struct glue_msg_tree_init_res
@@ -990,6 +992,18 @@ struct glue_msg_tree_state_res
   GLUE_FIELD(int, tier_slot_evict_l2)
   GLUE_FIELD(int, tier_slot_evict_l3)
   GLUE_FIELD(int, tier_fallback_replays)
+  GLUE_FIELD(int, admission_id)
+  GLUE_FIELD(int, admission_target_level)
+  GLUE_FIELD(int, admission_incoming_tokens)
+  GLUE_FIELD(int, admission_initial_token_deficit)
+  GLUE_FIELD(int, admission_initial_slot_deficit)
+  GLUE_FIELD(int, admission_repair_steps)
+  GLUE_FIELD(int, admission_demoted_tokens)
+  GLUE_FIELD(int, admission_checkpointed_tokens)
+  GLUE_FIELD(int, admission_removed_states)
+  GLUE_FIELD(int, admission_latency_ms)
+  GLUE_FIELD(bool, admission_success)
+  GLUE_FIELD(arr_int, admission_victim_ids)
 };
 
 struct glue_msg_tree_switch_req
@@ -1074,6 +1088,21 @@ struct glue_msg_tree_cache_hint_res
   GLUE_FIELD(str, message)
 };
 
+struct glue_msg_tree_release_req
+{
+  GLUE_HANDLER("trel_req")
+  GLUE_FIELD(arr_int, node_ids)
+};
+
+struct glue_msg_tree_release_res
+{
+  GLUE_HANDLER("trel_res")
+  GLUE_FIELD(bool, success)
+  GLUE_FIELD(str, message)
+  GLUE_FIELD(int, released_slots)
+  GLUE_FIELD(int, released_tokens)
+};
+
 struct glue_msg_tree_chat_resume_req
 {
   GLUE_HANDLER("tchr_req")
@@ -1088,6 +1117,18 @@ struct glue_msg_tree_chat_resume_res
   GLUE_FIELD(int, restore_cache_ms)
   GLUE_FIELD(int, rebuild_prompt_ms)
   GLUE_FIELD(int, resumed_prefix_token_count)
+  GLUE_FIELD(int, admission_id)
+  GLUE_FIELD(int, admission_target_level)
+  GLUE_FIELD(int, admission_incoming_tokens)
+  GLUE_FIELD(int, admission_initial_token_deficit)
+  GLUE_FIELD(int, admission_initial_slot_deficit)
+  GLUE_FIELD(int, admission_repair_steps)
+  GLUE_FIELD(int, admission_demoted_tokens)
+  GLUE_FIELD(int, admission_checkpointed_tokens)
+  GLUE_FIELD(int, admission_removed_states)
+  GLUE_FIELD(int, admission_latency_ms)
+  GLUE_FIELD(bool, admission_success)
+  GLUE_FIELD(arr_int, admission_victim_ids)
 };
 
 struct glue_msg_tree_chat_checkpoint_req
@@ -1103,6 +1144,18 @@ struct glue_msg_tree_chat_checkpoint_res
   GLUE_HANDLER("tchp_res")
   GLUE_FIELD(bool, success)
   GLUE_FIELD(str, message)
+  GLUE_FIELD(int, admission_id)
+  GLUE_FIELD(int, admission_target_level)
+  GLUE_FIELD(int, admission_incoming_tokens)
+  GLUE_FIELD(int, admission_initial_token_deficit)
+  GLUE_FIELD(int, admission_initial_slot_deficit)
+  GLUE_FIELD(int, admission_repair_steps)
+  GLUE_FIELD(int, admission_demoted_tokens)
+  GLUE_FIELD(int, admission_checkpointed_tokens)
+  GLUE_FIELD(int, admission_removed_states)
+  GLUE_FIELD(int, admission_latency_ms)
+  GLUE_FIELD(bool, admission_success)
+  GLUE_FIELD(arr_int, admission_victim_ids)
 };
 
 /////////
@@ -1130,6 +1183,18 @@ struct glue_msg_tree_chat_start_res
   GLUE_FIELD(bool, restore_attempted)
   GLUE_FIELD(bool, restore_hit)
   GLUE_FIELD(bool, rebuild_used)
+  GLUE_FIELD(int, admission_id)
+  GLUE_FIELD(int, admission_target_level)
+  GLUE_FIELD(int, admission_incoming_tokens)
+  GLUE_FIELD(int, admission_initial_token_deficit)
+  GLUE_FIELD(int, admission_initial_slot_deficit)
+  GLUE_FIELD(int, admission_repair_steps)
+  GLUE_FIELD(int, admission_demoted_tokens)
+  GLUE_FIELD(int, admission_checkpointed_tokens)
+  GLUE_FIELD(int, admission_removed_states)
+  GLUE_FIELD(int, admission_latency_ms)
+  GLUE_FIELD(bool, admission_success)
+  GLUE_FIELD(arr_int, admission_victim_ids)
   GLUE_FIELD(arr_str, roles)
   GLUE_FIELD(arr_str, contents)
   GLUE_FIELD(str, formatted_chat)
@@ -1157,6 +1222,18 @@ struct glue_msg_tree_chat_start_hist_res
   GLUE_FIELD(bool, restore_attempted)
   GLUE_FIELD(bool, restore_hit)
   GLUE_FIELD(bool, rebuild_used)
+  GLUE_FIELD(int, admission_id)
+  GLUE_FIELD(int, admission_target_level)
+  GLUE_FIELD(int, admission_incoming_tokens)
+  GLUE_FIELD(int, admission_initial_token_deficit)
+  GLUE_FIELD(int, admission_initial_slot_deficit)
+  GLUE_FIELD(int, admission_repair_steps)
+  GLUE_FIELD(int, admission_demoted_tokens)
+  GLUE_FIELD(int, admission_checkpointed_tokens)
+  GLUE_FIELD(int, admission_removed_states)
+  GLUE_FIELD(int, admission_latency_ms)
+  GLUE_FIELD(bool, admission_success)
+  GLUE_FIELD(arr_int, admission_victim_ids)
   GLUE_FIELD(arr_str, roles)
   GLUE_FIELD(arr_str, contents)
   GLUE_FIELD(str, formatted_chat)

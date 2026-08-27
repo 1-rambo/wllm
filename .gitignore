@@ -8,6 +8,7 @@ node_modules
 /wasm
 /esm
 /models
+/artifacts/runs
 _tmp
 
 /scripts/_tmp_hf_space

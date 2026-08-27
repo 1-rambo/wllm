@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>wLLM browser service smoke test</title>
+  </head>
+  <body>
+    <output id="status">connecting</output>
+    <script type="module">
+      import { BrowserLLMClient } from '/esm/index.js';
+
+      const params = new URL(location.href).searchParams;
+      const modulePath = params.get('module');
+      const wasmPath = params.get('wasm') ?? '/src/single-thread/wllama.wasm';
+      const runtimeAssets = modulePath
+        ? { moduleCode: await (await fetch(modulePath)).text() }
+        : {};
+      const client = new BrowserLLMClient(
+        {
+          'single-thread/wllama.wasm': wasmPath,
+        },
+        {
+          preferWebGPU: params.get('gpu') === '1',
+          engineChatSchedulingPolicy:
+            params.get('scheduler') ?? 'foreground-aware',
+          engineChatSliceTokenBudget: Number(params.get('slice') ?? 4),
+          engineChatBackgroundSliceTokenBudget: Number(
+            params.get('backgroundSlice') ?? 1
+          ),
+          engineChatYieldEnabled: params.get('yield') !== 'false',
+          engineChatRetentionPolicy:
+            params.get('retention') ?? 'lifecycle-aware',
+          engineChatRetentionTtlMs: Number(params.get('retentionTtl') ?? 30000),
+          engineChatTraceEnabled: true,
+          suppressNativeLog: params.get('nativeLog') !== '1',
+        },
+        runtimeAssets
+      );
+      window.wllmBrowserClient = client;
+      window.wllmMeasureInteraction = async () => {
+        const startedAt = performance.now();
+        await client.recordEvent('input_dispatch');
+        return await new Promise((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(async () => {
+              const latencyMs = performance.now() - startedAt;
+              await client.recordEvent('next_paint', { latencyMs });
+              resolve(latencyMs);
+            });
+          });
+        });
+      };
+      window.wllmBrowserReady = client.connect().then(async () => {
+        if (params.has('foreground')) {
+          await client.updateLifecycle({
+            foreground: params.get('foreground') === '1',
+            lifecycleState:
+              params.get('foreground') === '1' ? 'active' : 'hidden',
+          });
+        } else {
+          await client.updateLifecycle();
+        }
+        const status = await client.status();
+        document.querySelector('#status').textContent = JSON.stringify(status);
+        return status;
+      });
+    </script>
+  </body>
+</html>

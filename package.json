@@ -24,6 +24,10 @@
     "upload": "npm run format && npm run build && npm publish --access public",
     "format": "prettier --write .",
     "test": "vitest",
+    "test:policy": "vitest run src/engine-chat-policy.test.ts --browser.enabled=false",
+    "test:browser-service": "node examples/browser-service-smoke/run.mjs",
+    "test:browser-service:model": "node examples/browser-service-smoke/run-model.mjs",
+    "experiment:browser-service": "node examples/browser-service-smoke/run-experiment.mjs",
     "test:firefox": "BROWSER=firefox vitest",
     "test:safari": "BROWSER=safari vitest"
   },

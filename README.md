@@ -37,6 +37,44 @@ wllm is not just a runtime wrapper. It is a web serving system with three core p
 - Tiered cache state observability (L1/L2/L3 tokens/slots, promotions/demotions, disk read/write counters)
 - Queue-based chat request scheduling with reuse-aware scoring
 - Model split loading and parallel download support
+- Same-origin multi-tab serving through `BrowserLLMClient` and a SharedWorker
+- Browser lifecycle-aware Retain--Admit--Activate policies
+- Versioned JSONL telemetry for foreground-handoff experiments
+
+## Shared Browser Service
+
+`BrowserLLMClient` connects all same-origin tabs to one SharedWorker. The
+SharedWorker owns the model, conversation tree, request scheduler, retention
+state, and admission controller.
+
+```ts
+import { BrowserLLMClient } from '@wllama/wllama';
+
+const client = new BrowserLLMClient(CONFIG_PATHS, {
+  preferWebGPU: true,
+  engineChatSchedulingPolicy: 'foreground-aware',
+  engineChatRetentionPolicy: 'lifecycle-aware',
+});
+
+await client.loadModelFromUrl('/models/model.gguf', {
+  n_ctx: 8192,
+  n_seq_max: 8,
+});
+
+await client.chatSessionInit(1024 * 1024 * 1024, {
+  enabled: true,
+  admissionPolicy: 'monotonic',
+});
+
+const result = await client.chatFromNode(0, 'Hello', {
+  logicalSessionId: 'main',
+  nPredict: 128,
+});
+```
+
+The page client reports visibility, focus, freeze, resume, and page lifecycle
+changes automatically. See `examples/browser-service-smoke/README.md` for
+multi-tab tests and experiment commands.
 
 ## API Surface Policy
 

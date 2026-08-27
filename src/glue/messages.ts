@@ -3,7 +3,7 @@
 
 import type { GlueMessageProto } from './glue';
 
-export const GLUE_VERSION = 3;
+export const GLUE_VERSION = 4;
 
 export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
   "erro_evt": {
@@ -1123,6 +1123,16 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
         "type": "str",
         "name": "tier_l3_path",
         "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "admission_policy",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_max_repair_steps",
+        "isNullable": false
       }
     ]
   },
@@ -1408,6 +1418,66 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
         "type": "int",
         "name": "tier_fallback_replays",
         "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_target_level",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_incoming_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_token_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_slot_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_repair_steps",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_demoted_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_checkpointed_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_removed_states",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_latency_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "admission_success",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "admission_victim_ids",
+        "isNullable": false
       }
     ]
   },
@@ -1604,6 +1674,45 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       }
     ]
   },
+  "trel_req": {
+    "name": "trel_req",
+    "structName": "glue_msg_tree_release_req",
+    "className": "GlueMsgTreeReleaseReq",
+    "fields": [
+      {
+        "type": "arr_int",
+        "name": "node_ids",
+        "isNullable": false
+      }
+    ]
+  },
+  "trel_res": {
+    "name": "trel_res",
+    "structName": "glue_msg_tree_release_res",
+    "className": "GlueMsgTreeReleaseRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "released_slots",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "released_tokens",
+        "isNullable": false
+      }
+    ]
+  },
   "tchr_req": {
     "name": "tchr_req",
     "structName": "glue_msg_tree_chat_resume_req",
@@ -1645,6 +1754,66 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
         "type": "int",
         "name": "resumed_prefix_token_count",
         "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_target_level",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_incoming_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_token_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_slot_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_repair_steps",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_demoted_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_checkpointed_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_removed_states",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_latency_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "admission_success",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "admission_victim_ids",
+        "isNullable": false
       }
     ]
   },
@@ -1683,6 +1852,66 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "str",
         "name": "message",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_target_level",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_incoming_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_token_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_slot_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_repair_steps",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_demoted_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_checkpointed_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_removed_states",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_latency_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "admission_success",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "admission_victim_ids",
         "isNullable": false
       }
     ]
@@ -1757,6 +1986,66 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "bool",
         "name": "rebuild_used",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_target_level",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_incoming_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_token_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_slot_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_repair_steps",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_demoted_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_checkpointed_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_removed_states",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_latency_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "admission_success",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "admission_victim_ids",
         "isNullable": false
       },
       {
@@ -1851,6 +2140,66 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
       {
         "type": "bool",
         "name": "rebuild_used",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_id",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_target_level",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_incoming_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_token_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_initial_slot_deficit",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_repair_steps",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_demoted_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_checkpointed_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_removed_states",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "admission_latency_ms",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "admission_success",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "admission_victim_ids",
         "isNullable": false
       },
       {
@@ -2312,6 +2661,8 @@ export interface GlueMsgTreeInitReq {
   tier_prune_l2_l3_token_threshold: number;
   tier_replacement_policy: string;
   tier_l3_path: string;
+  admission_policy: string;
+  admission_max_repair_steps: number;
 }
 
 // struct glue_msg_tree_init_res
@@ -2380,6 +2731,18 @@ export interface GlueMsgTreeStateRes {
   tier_slot_evict_l2: number;
   tier_slot_evict_l3: number;
   tier_fallback_replays: number;
+  admission_id: number;
+  admission_target_level: number;
+  admission_incoming_tokens: number;
+  admission_initial_token_deficit: number;
+  admission_initial_slot_deficit: number;
+  admission_repair_steps: number;
+  admission_demoted_tokens: number;
+  admission_checkpointed_tokens: number;
+  admission_removed_states: number;
+  admission_latency_ms: number;
+  admission_success: boolean;
+  admission_victim_ids: number[];
 }
 
 // struct glue_msg_tree_switch_req
@@ -2464,6 +2827,21 @@ export interface GlueMsgTreeCacheHintRes {
   message: string;
 }
 
+// struct glue_msg_tree_release_req
+export interface GlueMsgTreeReleaseReq {
+  _name: "trel_req";
+  node_ids: number[];
+}
+
+// struct glue_msg_tree_release_res
+export interface GlueMsgTreeReleaseRes {
+  _name: "trel_res";
+  success: boolean;
+  message: string;
+  released_slots: number;
+  released_tokens: number;
+}
+
 // struct glue_msg_tree_chat_resume_req
 export interface GlueMsgTreeChatResumeReq {
   _name: "tchr_req";
@@ -2478,6 +2856,18 @@ export interface GlueMsgTreeChatResumeRes {
   restore_cache_ms: number;
   rebuild_prompt_ms: number;
   resumed_prefix_token_count: number;
+  admission_id: number;
+  admission_target_level: number;
+  admission_incoming_tokens: number;
+  admission_initial_token_deficit: number;
+  admission_initial_slot_deficit: number;
+  admission_repair_steps: number;
+  admission_demoted_tokens: number;
+  admission_checkpointed_tokens: number;
+  admission_removed_states: number;
+  admission_latency_ms: number;
+  admission_success: boolean;
+  admission_victim_ids: number[];
 }
 
 // struct glue_msg_tree_chat_checkpoint_req
@@ -2493,6 +2883,18 @@ export interface GlueMsgTreeChatCheckpointRes {
   _name: "tchp_res";
   success: boolean;
   message: string;
+  admission_id: number;
+  admission_target_level: number;
+  admission_incoming_tokens: number;
+  admission_initial_token_deficit: number;
+  admission_initial_slot_deficit: number;
+  admission_repair_steps: number;
+  admission_demoted_tokens: number;
+  admission_checkpointed_tokens: number;
+  admission_removed_states: number;
+  admission_latency_ms: number;
+  admission_success: boolean;
+  admission_victim_ids: number[];
 }
 
 // struct glue_msg_tree_chat_start_req
@@ -2515,6 +2917,18 @@ export interface GlueMsgTreeChatStartRes {
   restore_attempted: boolean;
   restore_hit: boolean;
   rebuild_used: boolean;
+  admission_id: number;
+  admission_target_level: number;
+  admission_incoming_tokens: number;
+  admission_initial_token_deficit: number;
+  admission_initial_slot_deficit: number;
+  admission_repair_steps: number;
+  admission_demoted_tokens: number;
+  admission_checkpointed_tokens: number;
+  admission_removed_states: number;
+  admission_latency_ms: number;
+  admission_success: boolean;
+  admission_victim_ids: number[];
   roles: string[];
   contents: string[];
   formatted_chat: string;
@@ -2541,6 +2955,18 @@ export interface GlueMsgTreeChatStartHistRes {
   restore_attempted: boolean;
   restore_hit: boolean;
   rebuild_used: boolean;
+  admission_id: number;
+  admission_target_level: number;
+  admission_incoming_tokens: number;
+  admission_initial_token_deficit: number;
+  admission_initial_slot_deficit: number;
+  admission_repair_steps: number;
+  admission_demoted_tokens: number;
+  admission_checkpointed_tokens: number;
+  admission_removed_states: number;
+  admission_latency_ms: number;
+  admission_success: boolean;
+  admission_victim_ids: number[];
   roles: string[];
   contents: string[];
   formatted_chat: string;
@@ -2563,4 +2989,4 @@ export interface GlueMsgTreeChatFinishRes {
 }
 
 
-export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes | GlueMsgTreeInitReq | GlueMsgTreeInitRes | GlueMsgTreeStateReq | GlueMsgTreeStateRes | GlueMsgTreeSwitchReq | GlueMsgTreeSwitchRes | GlueMsgTreePrepareTurnReq | GlueMsgTreePrepareTurnRes | GlueMsgTreeFinishTurnReq | GlueMsgTreeFinishTurnRes | GlueMsgTreeDeleteReq | GlueMsgTreeDeleteRes | GlueMsgTreeResetReq | GlueMsgTreeResetRes | GlueMsgTreeCacheHintReq | GlueMsgTreeCacheHintRes | GlueMsgTreeChatResumeReq | GlueMsgTreeChatResumeRes | GlueMsgTreeChatCheckpointReq | GlueMsgTreeChatCheckpointRes | GlueMsgTreeChatStartReq | GlueMsgTreeChatStartRes | GlueMsgTreeChatStartHistReq | GlueMsgTreeChatStartHistRes | GlueMsgTreeChatFinishReq | GlueMsgTreeChatFinishRes;
+export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgSetOptionsReq | GlueMsgSetOptionsRes | GlueMsgSamplingInitReq | GlueMsgSamplingInitRes | GlueMsgGetVocabReq | GlueMsgGetVocabRes | GlueMsgLookupTokenReq | GlueMsgLookupTokenRes | GlueMsgTokenizeReq | GlueMsgTokenizeRes | GlueMsgDetokenizeReq | GlueMsgDetokenizeRes | GlueMsgDecodeReq | GlueMsgDecodeRes | GlueMsgEncodeReq | GlueMsgEncodeRes | GlueMsgSamplingSampleReq | GlueMsgSamplingSampleRes | GlueMsgSamplingAcceptReq | GlueMsgSamplingAcceptRes | GlueMsgGetLogitsReq | GlueMsgGetLogitsRes | GlueMsgGetEmbeddingsReq | GlueMsgGetEmbeddingsRes | GlueMsgGetKvRemoveReq | GlueMsgGetKvRemoveRes | GlueMsgGetKvClearReq | GlueMsgGetKvClearRes | GlueMsgSessionSaveReq | GlueMsgSessionSaveRes | GlueMsgSessionLoadReq | GlueMsgSessionLoadRes | GlueMsgStatusReq | GlueMsgStatusRes | GlueMsgPerfContextReq | GlueMsgPerfContextRes | GlueMsgPerfResetReq | GlueMsgPerfResetRes | GlueMsgTestBenchmarkReq | GlueMsgTestBenchmarkRes | GlueMsgTestPerplexityReq | GlueMsgTestPerplexityRes | GlueMsgChatFormatReq | GlueMsgChatFormatRes | GlueMsgTreeInitReq | GlueMsgTreeInitRes | GlueMsgTreeStateReq | GlueMsgTreeStateRes | GlueMsgTreeSwitchReq | GlueMsgTreeSwitchRes | GlueMsgTreePrepareTurnReq | GlueMsgTreePrepareTurnRes | GlueMsgTreeFinishTurnReq | GlueMsgTreeFinishTurnRes | GlueMsgTreeDeleteReq | GlueMsgTreeDeleteRes | GlueMsgTreeResetReq | GlueMsgTreeResetRes | GlueMsgTreeCacheHintReq | GlueMsgTreeCacheHintRes | GlueMsgTreeReleaseReq | GlueMsgTreeReleaseRes | GlueMsgTreeChatResumeReq | GlueMsgTreeChatResumeRes | GlueMsgTreeChatCheckpointReq | GlueMsgTreeChatCheckpointRes | GlueMsgTreeChatStartReq | GlueMsgTreeChatStartRes | GlueMsgTreeChatStartHistReq | GlueMsgTreeChatStartHistRes | GlueMsgTreeChatFinishReq | GlueMsgTreeChatFinishRes;

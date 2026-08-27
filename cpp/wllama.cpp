@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <atomic>
 #include <chrono>
+#include <cstring>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -187,6 +188,11 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
     else if (action == "chat_cache_hint")
     {
       auto res = action_tree_cache_hint(app, req_raw);
+      res.handler.serialize(output_buffer);
+    }
+    else if (action == "chat_release")
+    {
+      auto res = action_tree_release(app, req_raw);
       res.handler.serialize(output_buffer);
     }
     else if (action == "chat_resume")

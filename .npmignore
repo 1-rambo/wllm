@@ -5,5 +5,7 @@
 /models
 /build
 /cache
+/_tmp
+/artifacts/runs
 /.github
 /.vscode

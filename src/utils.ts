@@ -116,7 +116,12 @@ export const sortFileByShard = (blobs: Blob[]): void => {
 export const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const absoluteUrl = (relativePath: string) =>
-  new URL(relativePath, document.baseURI).href;
+  new URL(
+    relativePath,
+    typeof document !== 'undefined'
+      ? document.baseURI
+      : globalThis.location.href
+  ).href;
 
 export const padDigits = (number: number, digits: number) => {
   return (
