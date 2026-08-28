@@ -1,0 +1,36 @@
+{
+  "deviceId": "mac-m2pro-16gb-01",
+  "operator": "student-name",
+  "site": "lab-or-home",
+  "chassis": "laptop",
+  "os": {
+    "name": "macOS",
+    "version": "TBD",
+    "build": "TBD"
+  },
+  "cpu": {
+    "vendor": "Apple",
+    "model": "Apple M2 Pro"
+  },
+  "memoryGiB": 16,
+  "gpu": {
+    "vendor": "Apple",
+    "model": "Apple M2 Pro integrated GPU",
+    "driver": "OS-managed",
+    "dedicatedMemoryGiB": null
+  },
+  "browser": {
+    "channel": "Playwright Chromium",
+    "version": "auto-recorded"
+  },
+  "power": {
+    "pluggedIn": true,
+    "mode": "normal",
+    "batterySaver": false
+  },
+  "display": {
+    "externalDisplays": 0,
+    "refreshRateHz": 60
+  },
+  "notes": ""
+}

@@ -944,6 +944,7 @@ export class Wllama {
         undefined,
         {
           lifecycleState: update.lifecycleState,
+          changedAt,
           sessionHeadIds: this.sessionHeadIdsForClient(clientId),
         },
         clientId
@@ -954,6 +955,7 @@ export class Wllama {
         undefined,
         {
           lifecycleState: update.lifecycleState,
+          changedAt,
           sessionHeadIds: this.sessionHeadIdsForClient(clientId),
         },
         clientId
@@ -993,6 +995,18 @@ export class Wllama {
     await this.sendEngineChatCacheHint();
   }
 
+  async releaseEngineChatStates(
+    nodeIds: number[],
+    reason: string = 'explicit'
+  ): Promise<void> {
+    await this.treeReleaseNodes(
+      [...new Set(nodeIds.filter((nodeId) => nodeId >= 1))],
+      undefined,
+      reason
+    );
+    await this.sendEngineChatCacheHint();
+  }
+
   private sessionHeadIdsForClient(clientId: string): number[] {
     const ids: number[] = [];
     for (const [key, nodeId] of this.engineChatSessionHeads) {
@@ -1018,7 +1032,8 @@ export class Wllama {
     if (policy === 'evict-on-pause') {
       await this.treeReleaseNodes(
         this.sessionHeadIdsForClient(clientId),
-        clientId
+        clientId,
+        'retention'
       );
     } else if (policy === 'ttl' || policy === 'lifecycle-aware') {
       const ttl =
@@ -1036,7 +1051,8 @@ export class Wllama {
             if (!latest || latest.foreground) return;
             void this.treeReleaseNodes(
               this.sessionHeadIdsForClient(clientId),
-              clientId
+              clientId,
+              'retention'
             );
           }, ttl)
         );
@@ -4544,7 +4560,8 @@ export class Wllama {
 
   private async treeReleaseNodes(
     nodeIds: number[],
-    clientId?: string
+    clientId?: string,
+    reason: string = 'retention'
   ): Promise<void> {
     if (nodeIds.length === 0) return;
     const result = await this.proxy.wllamaAction<GlueMsgTreeReleaseRes>(
@@ -4564,6 +4581,7 @@ export class Wllama {
         nodeIds,
         releasedSlots: result.released_slots,
         releasedTokens: result.released_tokens,
+        reason,
       },
       clientId
     );

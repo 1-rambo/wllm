@@ -15,10 +15,11 @@ export interface BrowserClientLifecycle {
 }
 
 export interface BrowserServiceEvent {
-  schemaVersion: 'wllm.browser-service.v1';
+  schemaVersion: 'wllm.browser-service.v2';
   sequence: number;
   type: string;
   timestampMs: number;
+  wallTimeMs: number;
   clientId?: string;
   requestId?: number;
   data?: Record<string, unknown>;
@@ -29,6 +30,11 @@ export interface BrowserServiceStatus {
   modelKey: string | null;
   clientCount: number;
   lastError: string | null;
+  runtimeConfig: {
+    usingWebGPU: boolean;
+    multithread: boolean;
+    numThreads: number;
+  } | null;
 }
 
 export interface BrowserServiceInitPayload {
@@ -63,6 +69,11 @@ export type BrowserServiceRequest =
     }
   | { id: number; verb: 'session-reset'; payload?: undefined }
   | { id: number; verb: 'session-delete'; payload: { nodeId: number } }
+  | {
+      id: number;
+      verb: 'session-release';
+      payload: { nodeIds: number[]; reason?: string };
+    }
   | {
       id: number;
       verb: 'chat';

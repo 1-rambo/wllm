@@ -1,4 +1,4 @@
 claim_id,experiment_id,run_id,metric,artifact_path,status
-C1,E1,,,artifacts/runs/,pending
-C2,E2,,,artifacts/runs/,pending
-C3,E3,,,artifacts/runs/,pending
+C1,E-Retain,,sessionResumeToFirstTokenMs;resumedSessionSource;resumeRestoreMs;resumeRebuildMs,artifacts/runs/,pending
+C2,E-Admit,,requestSuccessRate;admissionLatencyP95Ms;admissionRepairStepsP95;admissionFallbackCount,artifacts/runs/,pending
+C3,E-Activate,,foregroundActivationMs;foregroundFirstTokenMs;inputToNextPaintP95Ms;backgroundTotalWallMs,artifacts/runs/,pending

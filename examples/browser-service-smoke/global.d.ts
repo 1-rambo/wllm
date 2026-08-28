@@ -7,5 +7,6 @@ declare global {
       import('../../src/browser-service-protocol').BrowserServiceStatus
     >;
     wllmMeasureInteraction: () => Promise<number>;
+    wllmBackgroundChunkCount: number;
   }
 }

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wllm.browser-service.device.v1",
+  "title": "wLLM browser-service experiment device metadata",
+  "type": "object",
+  "required": [
+    "deviceId",
+    "operator",
+    "chassis",
+    "os",
+    "cpu",
+    "memoryGiB",
+    "gpu",
+    "power"
+  ],
+  "properties": {
+    "deviceId": { "type": "string", "minLength": 1 },
+    "operator": { "type": "string", "minLength": 1 },
+    "site": { "type": "string" },
+    "chassis": {
+      "enum": ["desktop", "laptop", "mini-pc", "workstation", "other"]
+    },
+    "os": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "enum": ["Windows", "macOS", "Linux", "other"] },
+        "version": { "type": "string" },
+        "build": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "cpu": {
+      "type": "object",
+      "required": ["vendor", "model"],
+      "properties": {
+        "vendor": { "type": "string" },
+        "model": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "memoryGiB": { "type": "number", "exclusiveMinimum": 0 },
+    "gpu": {
+      "type": "object",
+      "required": ["vendor", "model"],
+      "properties": {
+        "vendor": { "type": "string" },
+        "model": { "type": "string" },
+        "driver": { "type": "string" },
+        "dedicatedMemoryGiB": {
+          "type": ["number", "null"],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "browser": {
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "power": {
+      "type": "object",
+      "required": ["pluggedIn", "mode", "batterySaver"],
+      "properties": {
+        "pluggedIn": { "type": "boolean" },
+        "mode": { "type": "string" },
+        "batterySaver": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "display": {
+      "type": "object",
+      "properties": {
+        "externalDisplays": { "type": "integer", "minimum": 0 },
+        "refreshRateHz": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

@@ -28,6 +28,8 @@
     "test:browser-service": "node examples/browser-service-smoke/run.mjs",
     "test:browser-service:model": "node examples/browser-service-smoke/run-model.mjs",
     "experiment:browser-service": "node examples/browser-service-smoke/run-experiment.mjs",
+    "experiment:browser-service:matrix": "node examples/browser-service-smoke/run-matrix.mjs",
+    "experiment:browser-service:collect": "node examples/browser-service-smoke/collect-results.mjs",
     "test:firefox": "BROWSER=firefox vitest",
     "test:safari": "BROWSER=safari vitest"
   },

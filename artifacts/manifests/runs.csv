@@ -1,1 +1,1 @@
-run_id,git_revision,scenario,browser,model,policy,raw_path,summary_path,status
+run_id,protocol_version,device_id,operator,trial,git_revision,llama_cpp_revision,scenario,case_id,execution_mode,browser,model_sha256,wasm_sha256,raw_path,summary_path,status

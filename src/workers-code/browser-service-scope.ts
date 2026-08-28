@@ -41,6 +41,10 @@ let eventSequence = 0;
 
 const now = (): number =>
   typeof performance !== 'undefined' ? performance.now() : Date.now();
+const wallNow = (): number =>
+  typeof performance !== 'undefined'
+    ? performance.timeOrigin + performance.now()
+    : Date.now();
 
 const emit = (
   type: string,
@@ -49,10 +53,11 @@ const emit = (
   data?: Record<string, unknown>
 ) => {
   const record: BrowserServiceEvent = {
-    schemaVersion: 'wllm.browser-service.v1',
+    schemaVersion: 'wllm.browser-service.v2',
     sequence: ++eventSequence,
     type,
     timestampMs: now(),
+    wallTimeMs: wallNow(),
     ...(clientId ? { clientId } : {}),
     ...(requestId !== undefined ? { requestId } : {}),
     ...(data ? { data } : {}),
@@ -204,6 +209,14 @@ const handleRequest = async (
         modelKey,
         clientCount: clients.size,
         lastError,
+        runtimeConfig:
+          runtime && status === 'ready'
+            ? {
+                usingWebGPU: runtime.usingWebGPU(),
+                multithread: runtime.isMultithread(),
+                numThreads: runtime.getNumThreads(),
+              }
+            : null,
       };
     case 'init':
       await initialize(payload);
@@ -248,6 +261,12 @@ const handleRequest = async (
       return await requireRuntime().chatReset();
     case 'session-delete':
       return await requireRuntime().chatDeleteNode(payload.nodeId);
+    case 'session-release':
+      await requireRuntime().releaseEngineChatStates(
+        payload.nodeIds,
+        payload.reason
+      );
+      return null;
     case 'lifecycle': {
       const update = payload as BrowserClientLifecycle;
       if (update.lifecycleEpoch >= client.lifecycle.lifecycleEpoch) {
@@ -311,6 +330,11 @@ const handleRequest = async (
             pendingRequests: item.requests.size,
           })),
           telemetry: telemetry.slice(-500),
+        },
+        runtimeConfig: {
+          usingWebGPU: requireRuntime().usingWebGPU(),
+          multithread: requireRuntime().isMultithread(),
+          numThreads: requireRuntime().getNumThreads(),
         },
         runtime: await requireRuntime()._getDebugInfo(),
       };

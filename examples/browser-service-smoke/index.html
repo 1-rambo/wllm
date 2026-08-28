@@ -29,6 +29,9 @@
           engineChatBackgroundSliceTokenBudget: Number(
             params.get('backgroundSlice') ?? 1
           ),
+          engineChatForegroundHandoffGraceMs: Number(
+            params.get('handoffGrace') ?? 16
+          ),
           engineChatYieldEnabled: params.get('yield') !== 'false',
           engineChatRetentionPolicy:
             params.get('retention') ?? 'lifecycle-aware',
@@ -41,7 +44,10 @@
       window.wllmBrowserClient = client;
       window.wllmMeasureInteraction = async () => {
         const startedAt = performance.now();
-        await client.recordEvent('input_dispatch');
+        void client.recordEvent('input_dispatch', {
+          clientTimestampMs: startedAt,
+          clientWallTimeMs: performance.timeOrigin + startedAt,
+        });
         return await new Promise((resolve) => {
           requestAnimationFrame(() => {
             requestAnimationFrame(async () => {

@@ -1,5 +1,11 @@
 # Browser Service Experiments
 
+中文完整执行手册：
+
+```text
+examples/browser-service-smoke/EXPERIMENT_PLAN.zh-CN.md
+```
+
 This directory exercises the same-origin multi-tab serving architecture:
 
 ```text
@@ -37,6 +43,22 @@ npm run experiment:browser-service -- \
   --output=artifacts/runs
 ```
 
+Run a predefined multi-device matrix:
+
+```bash
+npm run experiment:browser-service:matrix -- \
+  --suite=smoke \
+  --group=all \
+  --mode=webgpu \
+  --trials=1 \
+  --device-id=my-device \
+  --operator=my-name \
+  --device-file=/path/to/device.json \
+  --model-file=/path/to/model.gguf \
+  --wasm-build=/path/to/webgpu-wasm \
+  --output=artifacts/runs/my-device/smoke
+```
+
 Scenarios:
 
 - `activate`: transfer execution after a real tab focus change.
@@ -59,6 +81,14 @@ Useful switches:
 --n-ctx=<tokens> --n-batch=<tokens> --n-seq-max=<sequences>
 --background-predict=<tokens> --foreground-predict=<tokens>
 --session-predict=<tokens> --sessions=<count>
+--pressure-sessions=<count> --pressure-predict=<tokens>
+--warmup-runs=<count> --warmup-predict=<tokens>
+--interaction-samples=<count> --interaction-interval-ms=<milliseconds>
+--memory-cap-mb=<MiB> --seed=<integer>
+--device-id=<stable-device-id> --operator=<name> --trial=<index>
+--device-file=/path/to/device.json
+--gpu=true|false --require-webgpu=true|false
+--allow-dirty=true|false
 ```
 
 Each run writes:
@@ -68,4 +98,12 @@ Each run writes:
 <output>/<run-id>/summary.json
 ```
 
-The JSONL stream uses schema `wllm.browser-service.v1`.
+The JSONL stream uses schema `wllm.browser-service.v2`.
+
+Aggregate many run directories:
+
+```bash
+npm run experiment:browser-service:collect -- \
+  --input=artifacts/runs \
+  --output=artifacts/runs/aggregate.csv
+```

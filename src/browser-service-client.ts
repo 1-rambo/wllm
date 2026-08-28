@@ -26,6 +26,10 @@ import {
 
 const HEARTBEAT_MS = 1000;
 const CONNECT_TIMEOUT_MS = 5000;
+const wallNow = (): number =>
+  typeof performance !== 'undefined'
+    ? performance.timeOrigin + performance.now()
+    : Date.now();
 
 const hashCode = (text: string): string => {
   let hash = 5381;
@@ -296,6 +300,13 @@ export class BrowserLLMClient {
     return await this.rpc('session-delete', { nodeId });
   }
 
+  async releaseSessionStates(
+    nodeIds: number[],
+    reason: string = 'explicit'
+  ): Promise<void> {
+    await this.rpc('session-release', { nodeIds, reason });
+  }
+
   async chatFromNode(
     parentId: number,
     userText: string,
@@ -336,7 +347,7 @@ export class BrowserLLMClient {
       ...this.readLifecycle(),
       ...update,
       lifecycleEpoch: this.lifecycleEpoch,
-      changedAt: Date.now(),
+      changedAt: wallNow(),
     };
     if (this.port) {
       await this.rpc('lifecycle', this.lifecycle);
@@ -468,7 +479,7 @@ export class BrowserLLMClient {
       foreground: visible && focused,
       lifecycleState: !visible ? 'hidden' : focused ? 'active' : 'passive',
       lifecycleEpoch: this.lifecycleEpoch,
-      changedAt: Date.now(),
+      changedAt: wallNow(),
     };
   }
 
