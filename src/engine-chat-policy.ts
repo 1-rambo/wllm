@@ -20,6 +20,18 @@ export type EngineChatRetentionPolicy =
   | 'ttl'
   | 'lifecycle-aware';
 
+export interface EngineChatRetentionCandidate {
+  nodeId: number;
+  lifecycle:
+    | {
+        foreground: boolean;
+        lifecycleState: EngineChatLifecycleState;
+        changedAt: number;
+        lastForegroundAt: number;
+      }
+    | undefined;
+}
+
 export const shouldProtectSession = (
   policy: EngineChatRetentionPolicy,
   lifecycle:
@@ -44,6 +56,45 @@ export const shouldProtectSession = (
     lifecycle.lifecycleState === 'passive' ||
     now - lifecycle.lastForegroundAt <= ttlMs
   );
+};
+
+export const selectProtectedSessionNodeIds = (
+  policy: EngineChatRetentionPolicy,
+  candidates: EngineChatRetentionCandidate[],
+  now: number,
+  ttlMs: number,
+  limit: number
+): number[] => {
+  if (policy === 'lru' || policy === 'evict-on-pause' || limit <= 0) return [];
+  const eligible = candidates.filter((candidate) =>
+    shouldProtectSession(policy, candidate.lifecycle, now, ttlMs)
+  );
+  if (policy === 'retain-until-full') {
+    return eligible.map((candidate) => candidate.nodeId);
+  }
+  const lifecycleRank = (candidate: EngineChatRetentionCandidate): number => {
+    if (policy !== 'lifecycle-aware') return 0;
+    if (candidate.lifecycle?.foreground) return 4;
+    if (candidate.lifecycle?.lifecycleState === 'active') return 3;
+    if (candidate.lifecycle?.lifecycleState === 'passive') return 2;
+    if (candidate.lifecycle?.lifecycleState === 'hidden') return 1;
+    return 0;
+  };
+  return eligible
+    .sort((left, right) => {
+      const rankDelta = lifecycleRank(right) - lifecycleRank(left);
+      if (rankDelta !== 0) return rankDelta;
+      const foregroundDelta =
+        (right.lifecycle?.lastForegroundAt ?? 0) -
+        (left.lifecycle?.lastForegroundAt ?? 0);
+      if (foregroundDelta !== 0) return foregroundDelta;
+      const changedDelta =
+        (right.lifecycle?.changedAt ?? 0) - (left.lifecycle?.changedAt ?? 0);
+      if (changedDelta !== 0) return changedDelta;
+      return left.nodeId - right.nodeId;
+    })
+    .slice(0, limit)
+    .map((candidate) => candidate.nodeId);
 };
 
 export const decodeSliceBudget = (

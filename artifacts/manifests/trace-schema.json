@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wllm.browser-service.trace.v1",
+  "title": "wLLM browser-service workload trace",
+  "type": "object",
+  "required": ["schemaVersion", "traceId", "clients", "events"],
+  "properties": {
+    "schemaVersion": {
+      "const": "wllm.browser-service.trace.v1"
+    },
+    "traceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object"
+    },
+    "clients": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["atMs", "action", "client"],
+        "properties": {
+          "atMs": { "type": "number", "minimum": 0 },
+          "action": {
+            "enum": ["lifecycle", "request", "interaction"]
+          },
+          "client": { "type": "integer", "minimum": 0 },
+          "state": {
+            "enum": ["active", "passive", "hidden", "frozen"]
+          },
+          "session": { "type": "string" },
+          "parent": { "enum": ["root", "previous"] },
+          "prompt": { "type": "string" },
+          "nPredict": { "type": "integer", "minimum": 0 },
+          "samples": { "type": "integer", "minimum": 1 },
+          "intervalMs": { "type": "number", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

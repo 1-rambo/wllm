@@ -1,7 +1,13 @@
 export interface WebArenaTask {
   id: string;
   taskId: number;
-  site: 'shopping_admin' | 'shopping' | 'gitlab' | 'reddit' | 'wikipedia' | string;
+  site:
+    | 'shopping_admin'
+    | 'shopping'
+    | 'gitlab'
+    | 'reddit'
+    | 'wikipedia'
+    | string;
   sites: string[];
   startUrls: string[];
   renderedStartUrls?: string[];
@@ -10,6 +16,7 @@ export interface WebArenaTask {
   intentTemplate?: string;
   instantiationDict?: Record<string, unknown>;
   revision?: unknown;
+  evaluation?: unknown;
   pageContext?: string;
   pageContextKey?: string;
 }
@@ -21,6 +28,9 @@ export interface BenchConfig {
   backend: BenchBackend;
   webllmModelId: string;
   modelUrl: string;
+  wllamaModuleUrl?: string;
+  wllamaWasmUrl?: string;
+  useWebGPU: boolean;
   nCtx: number;
   nBatch: number;
   usePreloadedPageContext: boolean;
@@ -35,6 +45,7 @@ export interface BenchConfig {
   evalCount: number;
   maxOutputTokens: number;
   includeSites: string[];
+  seed: number;
 }
 
 export interface BenchLogEvent {
@@ -58,6 +69,8 @@ export interface BenchSampleMetric {
   tokenCount: number;
   promptChars: number;
   outputChars: number;
+  outputText: string;
+  referenceAnswers?: unknown;
 }
 
 export interface CdfPoint {
@@ -173,6 +186,10 @@ export interface BenchDiagnostics {
 export interface BenchReport {
   modelUrl: string;
   config: BenchConfig;
+  runtime?: {
+    usingWebGPU: boolean;
+    multithread: boolean;
+  };
   webarena?: BenchSummary;
   cacheProfile: CacheProfile;
   diagnostics: BenchDiagnostics;

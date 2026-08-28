@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   compareEngineChatPriority,
   decodeSliceBudget,
+  selectProtectedSessionNodeIds,
   shouldProtectSession,
 } from './engine-chat-policy';
 
@@ -74,5 +75,51 @@ describe('shouldProtectSession', () => {
     expect(shouldProtectSession('lifecycle-aware', lifecycle, 200, 10)).toBe(
       false
     );
+  });
+});
+
+describe('selectProtectedSessionNodeIds', () => {
+  const now = 1000;
+  const hidden = (nodeId: number, lastForegroundAt: number) => ({
+    nodeId,
+    lifecycle: {
+      foreground: false,
+      lifecycleState: 'hidden' as const,
+      changedAt: lastForegroundAt,
+      lastForegroundAt,
+    },
+  });
+
+  test('prioritizes passive sessions over newer hidden sessions', () => {
+    const selected = selectProtectedSessionNodeIds(
+      'lifecycle-aware',
+      [
+        hidden(1, 900),
+        {
+          nodeId: 2,
+          lifecycle: {
+            foreground: false,
+            lifecycleState: 'passive',
+            changedAt: 800,
+            lastForegroundAt: 800,
+          },
+        },
+      ],
+      now,
+      500,
+      1
+    );
+    expect(selected).toEqual([2]);
+  });
+
+  test('uses recency to choose among TTL-protected sessions', () => {
+    const selected = selectProtectedSessionNodeIds(
+      'ttl',
+      [hidden(1, 700), hidden(2, 950)],
+      now,
+      500,
+      1
+    );
+    expect(selected).toEqual([2]);
   });
 });

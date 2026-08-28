@@ -48,8 +48,8 @@ import type {
 import {
   compareEngineChatPriority,
   decodeSliceBudget,
+  selectProtectedSessionNodeIds,
   type EngineChatLifecycleState,
-  shouldProtectSession,
 } from './engine-chat-policy';
 import { LIBLLAMA_VERSION } from './workers-code/generated';
 
@@ -576,6 +576,11 @@ export interface WllamaChatFromNodeOptions extends ChatCompletionOptions {
   foreground?: boolean;
   lifecycleState?: EngineChatLifecycleState;
   lifecycleEpoch?: number;
+  /**
+   * Optional structured labels copied into request telemetry.
+   * This is intended for reproducible experiments and diagnostics only.
+   */
+  telemetryTags?: Record<string, string | number | boolean | null>;
 }
 
 export interface WllamaChatSessionOptions extends WllamaChatFromNodeOptions {}
@@ -2484,6 +2489,7 @@ export class Wllama {
         parentId: parentId ?? preparedPrompt.parentNodeId ?? null,
         foreground: req.foreground,
         lifecycleState: req.lifecycleState,
+        telemetryTags: req.options.telemetryTags ?? {},
       });
       this.emitEngineChatEvent('request_enqueue', req, {
         queue: req.queueType,
@@ -2511,10 +2517,20 @@ export class Wllama {
         await this.waitForForegroundHandoff();
         await this.sendEngineChatCacheHint();
 
+        const decisionStartedAt =
+          typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const pendingBeforePick = this.getEngineChatPendingCount();
         const req = await this.pickNextEngineChatRequest();
+        const decisionCompletedAt =
+          typeof performance !== 'undefined' ? performance.now() : Date.now();
         if (!req) {
           break;
         }
+        this.emitEngineChatEvent('scheduler_decision', req, {
+          policy: this.getEngineChatSchedulingPolicy(),
+          pendingBeforePick,
+          durationMs: Math.max(0, decisionCompletedAt - decisionStartedAt),
+        });
 
         if (req.options.abortSignal?.aborted) {
           req.cleanupAbort?.();
@@ -2560,9 +2576,25 @@ export class Wllama {
             this.traceEngineChat(
               `finish req=${req.id} serviceMs=${serviceMs} totalMs=${doneAt - req.createdAt} slices=${req.sliceCount} generatedTokens=${req.generatedTokens}`
             );
+            const ttftMs = req.runtime?.firstTokenAt
+              ? Math.max(0, req.runtime.firstTokenAt - req.createdAt)
+              : Math.max(0, doneAt - req.createdAt);
+            const lastQueueWaitMs = req.firstPickedAt
+              ? Math.max(0, req.firstPickedAt - req.createdAt)
+              : Math.max(0, doneAt - req.createdAt);
             this.emitEngineChatEvent('request_complete', req, {
               totalWallMs: doneAt - req.createdAt,
+              serviceMs,
+              ttftMs,
+              queueWaitMs: lastQueueWaitMs,
+              sliceCount: req.sliceCount,
+              promotedToOverdueCount: req.promotedToOverdueCount,
+              estimatedServiceMs: req.estimatedServiceMs,
               generatedTokens: req.generatedTokens,
+              foreground: req.foreground,
+              lifecycleState: req.lifecycleState,
+              telemetryTags: req.options.telemetryTags ?? {},
+              phases: slice.phases,
             });
             req.cleanupAbort?.();
             if (req.clientId) {
@@ -2570,12 +2602,6 @@ export class Wllama {
               this.engineChatSessionHeads.set(sessionKey, slice.result.nodeId);
               await this.applyEngineChatRetentionPolicy(req.clientId);
             }
-            const ttftMs = req.runtime?.firstTokenAt
-              ? Math.max(0, req.runtime.firstTokenAt - req.createdAt)
-              : Math.max(0, doneAt - req.createdAt);
-            const lastQueueWaitMs = req.firstPickedAt
-              ? Math.max(0, req.firstPickedAt - req.createdAt)
-              : Math.max(0, doneAt - req.createdAt);
             req.resolve({
               ...slice.result,
               debug: {
@@ -2707,10 +2733,21 @@ export class Wllama {
     const pending = this.getEngineChatPendingCount();
     const maxPending = Math.max(1, this.getEngineChatQueueMaxPending());
     const queuePressure = Math.max(0, Math.min(1, pending / maxPending));
+    const startedAt =
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
     try {
       await this.treeCacheHint(hotNodeIds, queuePressure);
     } catch {
       // Non-critical best-effort hint path.
+    } finally {
+      const completedAt =
+        typeof performance !== 'undefined' ? performance.now() : Date.now();
+      this.emitEngineChatEvent('cache_hint', undefined, {
+        hotNodeCount: hotNodeIds.length,
+        hotNodeIds,
+        queuePressure,
+        durationMs: Math.max(0, completedAt - startedAt),
+      });
     }
   }
 
@@ -2744,16 +2781,8 @@ export class Wllama {
         }
       }
     };
-    appendFrom(this.engineChatOverdueQueue);
-    appendFrom(this.engineChatNormalQueue);
-    if (this.engineChatActiveRequest) {
-      appendFrom([this.engineChatActiveRequest]);
-    }
     const retentionPolicy =
       this.config.engineChatRetentionPolicy ?? 'lifecycle-aware';
-    if (retentionPolicy === 'lru') {
-      return ids;
-    }
     const ttlMs =
       typeof this.config.engineChatRetentionTtlMs === 'number' &&
       Number.isFinite(this.config.engineChatRetentionTtlMs) &&
@@ -2761,21 +2790,31 @@ export class Wllama {
         ? this.config.engineChatRetentionTtlMs
         : 30000;
     const now = Date.now();
+    const sessionCandidates = [];
     for (const [sessionKey, nodeId] of this.engineChatSessionHeads) {
       const separator = sessionKey.indexOf('\u0000');
       const clientId =
         separator >= 0 ? sessionKey.slice(0, separator) : sessionKey;
       const lifecycle = this.engineChatClientState.get(clientId);
-      const protect = shouldProtectSession(
-        retentionPolicy,
-        lifecycle,
-        now,
-        ttlMs
-      );
-      if (protect && nodeId >= 1 && !seen.has(nodeId)) {
+      sessionCandidates.push({ nodeId, lifecycle });
+    }
+    const protectedNodeIds = selectProtectedSessionNodeIds(
+      retentionPolicy,
+      sessionCandidates,
+      now,
+      ttlMs,
+      Math.max(0, k - ids.length)
+    );
+    for (const nodeId of protectedNodeIds) {
+      if (nodeId >= 1 && !seen.has(nodeId)) {
         seen.add(nodeId);
         ids.push(nodeId);
       }
+    }
+    appendFrom(this.engineChatOverdueQueue);
+    appendFrom(this.engineChatNormalQueue);
+    if (this.engineChatActiveRequest) {
+      appendFrom([this.engineChatActiveRequest]);
     }
     return ids;
   }

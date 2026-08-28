@@ -8,8 +8,10 @@
   </head>
   <body>
     <output id="status">connecting</output>
+    <canvas id="ui-workload" width="960" height="540"></canvas>
     <script type="module">
       import { BrowserLLMClient } from '/esm/index.js';
+      import { createUiWorkload } from './ui-workload.js';
 
       const params = new URL(location.href).searchParams;
       const modulePath = params.get('module');
@@ -32,7 +34,29 @@
           engineChatForegroundHandoffGraceMs: Number(
             params.get('handoffGrace') ?? 16
           ),
+          engineChatForegroundSliceTokenBudget: Number(
+            params.get('foregroundSlice') ?? params.get('slice') ?? 4
+          ),
           engineChatYieldEnabled: params.get('yield') !== 'false',
+          engineChatQueueMaxPending: Number(
+            params.get('queueMaxPending') ?? 128
+          ),
+          engineChatPrefillSliceMaxMs: Number(
+            params.get('prefillSliceMaxMs') ?? 5000
+          ),
+          engineChatWaitBudgetScale: Number(params.get('waitBudgetScale') ?? 1),
+          engineChatWaitBudgetCapMs: params.has('waitBudgetCapMs')
+            ? Number(params.get('waitBudgetCapMs'))
+            : undefined,
+          engineChatCostWarmupRequests: Number(
+            params.get('costWarmupRequests') ?? 20
+          ),
+          engineChatCostSampleWindow: Number(
+            params.get('costSampleWindow') ?? 256
+          ),
+          engineChatEvictionHintTopK: Number(
+            params.get('evictionHintTopK') ?? 64
+          ),
           engineChatRetentionPolicy:
             params.get('retention') ?? 'lifecycle-aware',
           engineChatRetentionTtlMs: Number(params.get('retentionTtl') ?? 30000),
@@ -42,6 +66,13 @@
         runtimeAssets
       );
       window.wllmBrowserClient = client;
+      window.wllmExperimentEvents = [];
+      window.wllmClearExperimentEvents = () => {
+        window.wllmExperimentEvents = [];
+      };
+      client.onTelemetry((event) => {
+        window.wllmExperimentEvents.push(event);
+      });
       window.wllmMeasureInteraction = async () => {
         const startedAt = performance.now();
         void client.recordEvent('input_dispatch', {
@@ -58,6 +89,13 @@
           });
         });
       };
+      const uiCanvas = document.querySelector('#ui-workload');
+      const uiWorkload = await createUiWorkload(uiCanvas, (type, data) =>
+        client.recordEvent(type, data)
+      );
+      window.wllmStartUiMeasurement = (workItems = 0) =>
+        uiWorkload.start(workItems, params.get('gpu') === '1');
+      window.wllmStopUiMeasurement = () => uiWorkload.stop();
       window.wllmBrowserReady = client.connect().then(async () => {
         if (params.has('foreground')) {
           await client.updateLifecycle({

@@ -76,11 +76,14 @@ function buildCdf(values: number[]): CdfPoint[] {
 }
 
 function safeText(text: unknown): string {
-  return String(text ?? '').replace(/\s+/g, ' ').trim();
+  return String(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function buildSiteSharedPrefix(site: string, pageContext?: string): string {
-  const siteProfile = SITE_PROFILES[site] ?? 'This is a WebArena browser environment task.';
+  const siteProfile =
+    SITE_PROFILES[site] ?? 'This is a WebArena browser environment task.';
   const sections = [
     'You are solving a WebArena Verified information-seeking task.',
     `Current site: ${site}.`,
@@ -89,14 +92,14 @@ function buildSiteSharedPrefix(site: string, pageContext?: string): string {
   if (safeText(pageContext)) {
     sections.push(
       'The following page context was preloaded in the background before the user asked the question. Treat it as already-available page text extracted from the current site:',
-      safeText(pageContext),
+      safeText(pageContext)
     );
   }
   sections.push(
     'You are given WebArena task metadata rather than a live browser trace.',
     'Use the task description as the primary signal and produce a short final answer.',
     'If the task requests multiple named fields, answer with compact JSON and no explanation.',
-    'If the task asks for a count, return only the count or a compact JSON value.',
+    'If the task asks for a count, return only the count or a compact JSON value.'
   );
   return sections.join('\n');
 }
@@ -114,11 +117,16 @@ function buildTaskPrompt(task: WebArenaTask): string {
     lines.push('Intent Template:');
     lines.push(safeText(task.intentTemplate));
   }
-  if (task.instantiationDict && Object.keys(task.instantiationDict).length > 0) {
+  if (
+    task.instantiationDict &&
+    Object.keys(task.instantiationDict).length > 0
+  ) {
     lines.push('Instantiation Arguments:');
     lines.push(JSON.stringify(task.instantiationDict));
   }
-  lines.push('Return only the final answer in one concise line or compact JSON. Do not explain.');
+  lines.push(
+    'Return only the final answer in one concise line or compact JSON. Do not explain.'
+  );
   return lines.join('\n');
 }
 
@@ -127,10 +135,12 @@ function buildPromptChars(sharedPrefix: string, taskPrompt: string): number {
 }
 
 function getSharedContextKey(task: WebArenaTask): string {
-  return task.pageContextKey
-    ?? task.renderedStartUrls?.join(' | ')
-    ?? task.startUrls.join(' | ')
-    ?? task.site;
+  return (
+    task.pageContextKey ??
+    task.renderedStartUrls?.join(' | ') ??
+    task.startUrls.join(' | ') ??
+    task.site
+  );
 }
 
 type FailureCounterKey =
@@ -140,34 +150,63 @@ type FailureCounterKey =
   | 'otherFailureCount';
 
 function classifyFailure(err: unknown): FailureCounterKey {
-  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  const msg =
+    err instanceof Error
+      ? err.message.toLowerCase()
+      : String(err).toLowerCase();
   if (msg.includes('abort')) return 'abortFailureCount';
   if (msg.includes('timeout')) return 'timeoutFailureCount';
-  if (msg.includes('disposed') || msg.includes('terminated')) return 'disposedFailureCount';
+  if (msg.includes('disposed') || msg.includes('terminated'))
+    return 'disposedFailureCount';
   return 'otherFailureCount';
 }
 
-async function createLoadedWllama(config: BenchConfig, onLog?: (e: BenchLogEvent) => void): Promise<Wllama> {
+async function createLoadedWllama(
+  config: BenchConfig,
+  onLog?: (e: BenchLogEvent) => void
+): Promise<Wllama> {
   const logger = {
     debug: (...args: unknown[]) => console.debug(...args),
     log: (...args: unknown[]) => console.log(...args),
     warn: (...args: unknown[]) => console.warn(...args),
     error: (...args: unknown[]) => console.error(...args),
   };
-  const wllama = new Wllama(WLLAMA_CONFIG_PATHS, {
-    preferWebGPU: true,
-    noPerf: false,
-    suppressNativeLog: false,
-    logger,
-  });
+  const moduleCode = config.wllamaModuleUrl
+    ? await fetch(config.wllamaModuleUrl).then((response) => {
+        if (!response.ok) {
+          throw new Error(
+            `Cannot load wllama module (${response.status}): ${config.wllamaModuleUrl}`
+          );
+        }
+        return response.text();
+      })
+    : undefined;
+  const paths = config.wllamaWasmUrl
+    ? {
+        'single-thread/wllama.wasm': config.wllamaWasmUrl,
+        'multi-thread/wllama.wasm': config.wllamaWasmUrl,
+      }
+    : WLLAMA_CONFIG_PATHS;
+  const wllama = new Wllama(
+    paths,
+    {
+      preferWebGPU: config.useWebGPU,
+      noPerf: false,
+      suppressNativeLog: false,
+      logger,
+    },
+    moduleCode ? { moduleCode } : {}
+  );
   onLog?.({ text: '[Wllama] loading model...' });
   await wllama.loadModelFromUrl(config.modelUrl, {
     useCache: true,
     n_ctx: config.nCtx,
     n_batch: config.nBatch,
     embeddings: false,
-    offload_kqv: true,
-    flash_attn: true,
+    offload_kqv: config.useWebGPU,
+    flash_attn: config.useWebGPU,
+    n_threads: 1,
+    seed: config.seed,
   });
   onLog?.({ text: '[Wllama] model loaded.' });
   return wllama;
@@ -179,7 +218,13 @@ async function runWllamaPrompt(
   prompt: string,
   maxOutputTokens: number,
   startedAt?: number
-): Promise<{ assistantText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number; tokenCount: number }> {
+): Promise<{
+  assistantText: string;
+  latencyMs: number;
+  ttftMs: number;
+  tokensPerSecond: number;
+  tokenCount: number;
+}> {
   const t0 = startedAt ?? performance.now();
   let firstTokenAt = 0;
   const out = await runtime.chatFromNode(parentNodeId, prompt, {
@@ -194,16 +239,31 @@ async function runWllamaPrompt(
   const latencyMs = Math.max(0, performance.now() - t0);
   const ttftMs = Math.max(0, (firstTokenAt || performance.now()) - t0);
   const answerText = out.assistantText || '';
-  const tokenCount = Math.max(1, (await runtime.tokenize(answerText, true)).length);
+  const tokenCount = Math.max(
+    1,
+    (await runtime.tokenize(answerText, true)).length
+  );
   const tokensPerSecond = (tokenCount * 1000) / Math.max(latencyMs, 1e-6);
-  return { assistantText: answerText, latencyMs, ttftMs, tokensPerSecond, tokenCount };
+  return {
+    assistantText: answerText,
+    latencyMs,
+    ttftMs,
+    tokensPerSecond,
+    tokenCount,
+  };
 }
 
 async function runWebllmPrompt(
   engine: any,
   prompt: string,
   maxOutputTokens: number
-): Promise<{ assistantText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number; tokenCount: number }> {
+): Promise<{
+  assistantText: string;
+  latencyMs: number;
+  ttftMs: number;
+  tokensPerSecond: number;
+  tokenCount: number;
+}> {
   const t0 = performance.now();
   let firstTokenAt = 0;
   let assistantText = '';
@@ -239,7 +299,13 @@ async function runWebllmPrompt(
     completionTokens = Math.max(1, safeText(assistantText).length > 0 ? 1 : 0);
   }
   const tokensPerSecond = (completionTokens * 1000) / Math.max(latencyMs, 1e-6);
-  return { assistantText, latencyMs, ttftMs, tokensPerSecond, tokenCount: completionTokens };
+  return {
+    assistantText,
+    latencyMs,
+    ttftMs,
+    tokensPerSecond,
+    tokenCount: completionTokens,
+  };
 }
 
 function buildMetric(
@@ -247,7 +313,13 @@ function buildMetric(
   mode: 'flat' | 'tree' | 'web-llm',
   sharedPrefix: string,
   taskPrompt: string,
-  result: { assistantText: string; latencyMs: number; ttftMs: number; tokensPerSecond: number; tokenCount: number }
+  result: {
+    assistantText: string;
+    latencyMs: number;
+    ttftMs: number;
+    tokensPerSecond: number;
+    tokenCount: number;
+  }
 ): BenchSampleMetric {
   return {
     benchmark: 'WebArena',
@@ -260,10 +332,15 @@ function buildMetric(
     tokenCount: result.tokenCount,
     promptChars: buildPromptChars(sharedPrefix, taskPrompt),
     outputChars: result.assistantText.length,
+    outputText: result.assistantText,
+    referenceAnswers: task.evaluation,
   };
 }
 
-function logSampleMetric(onLog: ((e: BenchLogEvent) => void) | undefined, metric: BenchSampleMetric): void {
+function logSampleMetric(
+  onLog: ((e: BenchLogEvent) => void) | undefined,
+  metric: BenchSampleMetric
+): void {
   onLog?.({
     text: [
       `[Metric/${metric.benchmark}/${metric.mode}]`,
@@ -297,7 +374,11 @@ function summarizeSeries(metrics: BenchSampleMetric[]): BenchSeriesStats {
   };
 }
 
-function summarizeDualPath(tasks: WebArenaTask[], flatMetrics: BenchSampleMetric[], treeMetrics: BenchSampleMetric[]): BenchSummary {
+function summarizeDualPath(
+  tasks: WebArenaTask[],
+  flatMetrics: BenchSampleMetric[],
+  treeMetrics: BenchSampleMetric[]
+): BenchSummary {
   const flatStats = summarizeSeries(flatMetrics);
   const treeStats = summarizeSeries(treeMetrics);
   const siteBreakdown: Record<string, number> = {};
@@ -314,13 +395,27 @@ function summarizeDualPath(tasks: WebArenaTask[], flatMetrics: BenchSampleMetric
     siteBreakdown,
     avgTtftMsFlat: flatStats.avgTtftMs,
     avgTtftMsTree: treeStats.avgTtftMs,
-    ttftSpeedupPct: flatStats.avgTtftMs > 0 ? ((flatStats.avgTtftMs - treeStats.avgTtftMs) / flatStats.avgTtftMs) * 100 : 0,
+    ttftSpeedupPct:
+      flatStats.avgTtftMs > 0
+        ? ((flatStats.avgTtftMs - treeStats.avgTtftMs) / flatStats.avgTtftMs) *
+          100
+        : 0,
     avgTokensPerSecondFlat: flatStats.avgTokensPerSecond,
     avgTokensPerSecondTree: treeStats.avgTokensPerSecond,
-    tpsGainPct: flatStats.avgTokensPerSecond > 0 ? ((treeStats.avgTokensPerSecond - flatStats.avgTokensPerSecond) / flatStats.avgTokensPerSecond) * 100 : 0,
+    tpsGainPct:
+      flatStats.avgTokensPerSecond > 0
+        ? ((treeStats.avgTokensPerSecond - flatStats.avgTokensPerSecond) /
+            flatStats.avgTokensPerSecond) *
+          100
+        : 0,
     avgLatencyMsFlat: flatStats.avgLatencyMs,
     avgLatencyMsTree: treeStats.avgLatencyMs,
-    speedupPct: flatStats.avgLatencyMs > 0 ? ((flatStats.avgLatencyMs - treeStats.avgLatencyMs) / flatStats.avgLatencyMs) * 100 : 0,
+    speedupPct:
+      flatStats.avgLatencyMs > 0
+        ? ((flatStats.avgLatencyMs - treeStats.avgLatencyMs) /
+            flatStats.avgLatencyMs) *
+          100
+        : 0,
     sampleMetricsFlat: flatMetrics,
     sampleMetricsTree: treeMetrics,
     latencyCdfFlat: buildCdf(flatMetrics.map((m) => m.latencyMs)),
@@ -330,7 +425,10 @@ function summarizeDualPath(tasks: WebArenaTask[], flatMetrics: BenchSampleMetric
   };
 }
 
-function summarizeSinglePath(tasks: WebArenaTask[], metrics: BenchSampleMetric[]): BenchSummary {
+function summarizeSinglePath(
+  tasks: WebArenaTask[],
+  metrics: BenchSampleMetric[]
+): BenchSummary {
   const stats = summarizeSeries(metrics);
   const siteBreakdown: Record<string, number> = {};
   for (const task of tasks) {
@@ -409,7 +507,11 @@ function emptyDiagnostics(): BenchDiagnostics {
   };
 }
 
-type CacheMaintenanceCategory = 'sessionInit' | 'stateRead' | 'prefixSetup' | 'other';
+type CacheMaintenanceCategory =
+  | 'sessionInit'
+  | 'stateRead'
+  | 'prefixSetup'
+  | 'other';
 
 type CacheMaintenanceRecorder = {
   totalMs: number;
@@ -493,7 +595,10 @@ function observeCacheOccupancy(
   const l3Slots = state.tierStats?.l3Slots ?? 0;
   recorder.occupancySampleCount += 1;
   recorder.snapshotTokenBytesSum += snapshotTokenBytes;
-  recorder.snapshotTokenBytesPeak = Math.max(recorder.snapshotTokenBytesPeak, snapshotTokenBytes);
+  recorder.snapshotTokenBytesPeak = Math.max(
+    recorder.snapshotTokenBytesPeak,
+    snapshotTokenBytes
+  );
   recorder.tierL1TokensSum += l1Tokens;
   recorder.tierL2TokensSum += l2Tokens;
   recorder.tierL3TokensSum += l3Tokens;
@@ -579,15 +684,17 @@ function capToBytes(mb: number): number {
 }
 
 function tieredCacheOptions(config: BenchConfig) {
-  return config.trueTreeTieredCacheEnabled ? {
-    enabled: true,
-    l1TokenCap: config.trueTreeTierL1TokenCap,
-    l2TokenCap: config.trueTreeTierL2TokenCap,
-    l3TokenCap: config.trueTreeTierL3TokenCap,
-    pruneL1L2TokenThreshold: config.trueTreePruneL1L2TokenThreshold,
-    pruneL2L3TokenThreshold: config.trueTreePruneL2L3TokenThreshold,
-    replacementPolicy: config.trueTreeReplacementPolicy,
-  } : { enabled: false };
+  return config.trueTreeTieredCacheEnabled
+    ? {
+        enabled: true,
+        l1TokenCap: config.trueTreeTierL1TokenCap,
+        l2TokenCap: config.trueTreeTierL2TokenCap,
+        l3TokenCap: config.trueTreeTierL3TokenCap,
+        pruneL1L2TokenThreshold: config.trueTreePruneL1L2TokenThreshold,
+        pruneL2L3TokenThreshold: config.trueTreePruneL2L3TokenThreshold,
+        replacementPolicy: config.trueTreeReplacementPolicy,
+      }
+    : { enabled: false };
 }
 
 export async function runWebArenaBench(
@@ -597,7 +704,10 @@ export async function runWebArenaBench(
   onProgress?: (e: BenchProgressEvent) => void,
   signal?: AbortSignal
 ): Promise<BenchReport> {
-  const selectedTasks = tasks.slice(0, Math.min(config.evalCount, tasks.length));
+  const selectedTasks = tasks.slice(
+    0,
+    Math.min(config.evalCount, tasks.length)
+  );
   const diagnostics = emptyDiagnostics();
   const tRun0 = performance.now();
 
@@ -608,19 +718,33 @@ export async function runWebArenaBench(
     onLog?.({ text: '[web-llm] model loaded.' });
     try {
       const sampleMetrics: BenchSampleMetric[] = [];
-      onProgress?.({ current: 0, total: selectedTasks.length, label: 'WebArena web-llm' });
+      onProgress?.({
+        current: 0,
+        total: selectedTasks.length,
+        label: 'WebArena web-llm',
+      });
       for (let i = 0; i < selectedTasks.length; i += 1) {
         const task = selectedTasks[i];
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         const sharedPrefix = buildSiteSharedPrefix(
           task.site,
-          config.usePreloadedPageContext ? task.pageContext : '',
+          config.usePreloadedPageContext ? task.pageContext : ''
         );
         const taskPrompt = buildTaskPrompt(task);
         const prompt = `${sharedPrefix}\n\n${taskPrompt}`;
         try {
-          const result = await runWebllmPrompt(engine, prompt, config.maxOutputTokens);
-          const metric = buildMetric(task, 'web-llm', sharedPrefix, taskPrompt, result);
+          const result = await runWebllmPrompt(
+            engine,
+            prompt,
+            config.maxOutputTokens
+          );
+          const metric = buildMetric(
+            task,
+            'web-llm',
+            sharedPrefix,
+            taskPrompt,
+            result
+          );
           sampleMetrics.push(metric);
           logSampleMetric(onLog, metric);
         } catch (err) {
@@ -633,9 +757,15 @@ export async function runWebArenaBench(
             stage: 'taskRun',
             message: err instanceof Error ? err.message : String(err),
           });
-          onLog?.({ text: `[WebArena/web-llm] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
+          onLog?.({
+            text: `[WebArena/web-llm] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
-        onProgress?.({ current: i + 1, total: selectedTasks.length, label: 'WebArena web-llm' });
+        onProgress?.({
+          current: i + 1,
+          total: selectedTasks.length,
+          label: 'WebArena web-llm',
+        });
       }
       const summary = summarizeSinglePath(selectedTasks, sampleMetrics);
       return {
@@ -655,6 +785,10 @@ export async function runWebArenaBench(
   }
 
   const runtime = await createLoadedWllama(config, onLog);
+  const runtimeInfo = {
+    usingWebGPU: runtime.usingWebGPU(),
+    multithread: runtime.isMultithread(),
+  };
   const cacheRecorder = createCacheMaintenanceRecorder();
   const flatMetrics: BenchSampleMetric[] = [];
   const treeMetrics: BenchSampleMetric[] = [];
@@ -665,10 +799,16 @@ export async function runWebArenaBench(
     bucket.push(task);
     grouped.set(groupKey, bucket);
   }
-  const orderedGroups = [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const orderedGroups = [...grouped.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0])
+  );
 
   let progressCurrent = 0;
-  onProgress?.({ current: 0, total: selectedTasks.length * 2, label: 'WebArena flat' });
+  onProgress?.({
+    current: 0,
+    total: selectedTasks.length * 2,
+    label: 'WebArena flat',
+  });
   let finalState: MinimalTreeState | null = null;
 
   try {
@@ -676,9 +816,11 @@ export async function runWebArenaBench(
       const site = siteTasks[0]?.site ?? 'unknown';
       const sharedPrefix = buildSiteSharedPrefix(
         site,
-        config.usePreloadedPageContext ? siteTasks[0]?.pageContext : '',
+        config.usePreloadedPageContext ? siteTasks[0]?.pageContext : ''
       );
-      onLog?.({ text: `[WebArena/flat] site=${site} group=${groupKey} shared prefix chars=${sharedPrefix.length}` });
+      onLog?.({
+        text: `[WebArena/flat] site=${site} group=${groupKey} shared prefix chars=${sharedPrefix.length}`,
+      });
       for (const task of siteTasks) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         const taskPrompt = buildTaskPrompt(task);
@@ -686,10 +828,20 @@ export async function runWebArenaBench(
         let stage = 'sessionInit';
         try {
           const startSession = performance.now();
-          await runtime.chatSessionInit(capToBytes(config.trueTreeMemoryCapMB), tieredCacheOptions(config));
+          await runtime.chatSessionInit(
+            capToBytes(config.trueTreeMemoryCapMB),
+            tieredCacheOptions(config)
+          );
           const sessionMs = performance.now() - startSession;
           cacheRecorder.totalMs += sessionMs;
           cacheRecorder.breakdownMs.sessionInit += sessionMs;
+
+          stage = 'sessionReset';
+          const resetStart = performance.now();
+          await runtime.chatReset();
+          const resetMs = performance.now() - resetStart;
+          cacheRecorder.totalMs += resetMs;
+          cacheRecorder.breakdownMs.other += resetMs;
 
           stage = 'stateRead-before-setup';
           const stateReadStart = performance.now();
@@ -707,14 +859,28 @@ export async function runWebArenaBench(
 
           stage = 'prefixSetup';
           const setupStart = performance.now();
-          const setup = await runtime.chatFromNode(state.rootId, sharedPrefix, { nPredict: 0 });
+          const setup = await runtime.chatFromNode(state.rootId, sharedPrefix, {
+            nPredict: 0,
+          });
           const setupMs = performance.now() - setupStart;
           cacheRecorder.totalMs += setupMs;
           cacheRecorder.breakdownMs.prefixSetup += setupMs;
 
           stage = 'taskRun';
-          const result = await runWllamaPrompt(runtime, setup.nodeId, taskPrompt, config.maxOutputTokens, requestStart);
-          const metric = buildMetric(task, 'flat', sharedPrefix, taskPrompt, result);
+          const result = await runWllamaPrompt(
+            runtime,
+            setup.nodeId,
+            taskPrompt,
+            config.maxOutputTokens,
+            requestStart
+          );
+          const metric = buildMetric(
+            task,
+            'flat',
+            sharedPrefix,
+            taskPrompt,
+            result
+          );
           flatMetrics.push(metric);
           logSampleMetric(onLog, metric);
 
@@ -741,10 +907,16 @@ export async function runWebArenaBench(
             stage,
             message: err instanceof Error ? err.message : String(err),
           });
-          onLog?.({ text: `[WebArena/flat] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
+          onLog?.({
+            text: `[WebArena/flat] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
         progressCurrent += 1;
-        onProgress?.({ current: progressCurrent, total: selectedTasks.length * 2, label: 'WebArena flat' });
+        onProgress?.({
+          current: progressCurrent,
+          total: selectedTasks.length * 2,
+          label: 'WebArena flat',
+        });
       }
     }
 
@@ -752,17 +924,28 @@ export async function runWebArenaBench(
       const site = siteTasks[0]?.site ?? 'unknown';
       const sharedPrefix = buildSiteSharedPrefix(
         site,
-        config.usePreloadedPageContext ? siteTasks[0]?.pageContext : '',
+        config.usePreloadedPageContext ? siteTasks[0]?.pageContext : ''
       );
-      onLog?.({ text: `[WebArena/tree] site=${site} group=${groupKey} shared prefix chars=${sharedPrefix.length}` });
+      onLog?.({
+        text: `[WebArena/tree] site=${site} group=${groupKey} shared prefix chars=${sharedPrefix.length}`,
+      });
       let sharedNodeId = -1;
       let groupInitFailed = false;
       const sessionInitStart = performance.now();
       try {
-        await runtime.chatSessionInit(capToBytes(config.trueTreeMemoryCapMB), tieredCacheOptions(config));
+        await runtime.chatSessionInit(
+          capToBytes(config.trueTreeMemoryCapMB),
+          tieredCacheOptions(config)
+        );
         const sessionMs = performance.now() - sessionInitStart;
         cacheRecorder.totalMs += sessionMs;
         cacheRecorder.breakdownMs.sessionInit += sessionMs;
+
+        const resetStart = performance.now();
+        await runtime.chatReset();
+        const resetMs = performance.now() - resetStart;
+        cacheRecorder.totalMs += resetMs;
+        cacheRecorder.breakdownMs.other += resetMs;
 
         const stateReadStart = performance.now();
         const state = await runtime.chatGetState();
@@ -777,7 +960,9 @@ export async function runWebArenaBench(
         });
 
         const setupStart = performance.now();
-        const setup = await runtime.chatFromNode(state.rootId, sharedPrefix, { nPredict: 0 });
+        const setup = await runtime.chatFromNode(state.rootId, sharedPrefix, {
+          nPredict: 0,
+        });
         const setupMs = performance.now() - setupStart;
         cacheRecorder.totalMs += setupMs;
         cacheRecorder.breakdownMs.prefixSetup += setupMs;
@@ -793,9 +978,15 @@ export async function runWebArenaBench(
             stage: 'shared-prefix-setup',
             message: err instanceof Error ? err.message : String(err),
           });
-          onLog?.({ text: `[WebArena/tree] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
+          onLog?.({
+            text: `[WebArena/tree] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
           progressCurrent += 1;
-          onProgress?.({ current: progressCurrent, total: selectedTasks.length * 2, label: 'WebArena tree' });
+          onProgress?.({
+            current: progressCurrent,
+            total: selectedTasks.length * 2,
+            label: 'WebArena tree',
+          });
         }
         groupInitFailed = true;
       }
@@ -809,8 +1000,19 @@ export async function runWebArenaBench(
         const taskPrompt = buildTaskPrompt(task);
         let stage = 'taskRun';
         try {
-          const result = await runWllamaPrompt(runtime, sharedNodeId, taskPrompt, config.maxOutputTokens);
-          const metric = buildMetric(task, 'tree', sharedPrefix, taskPrompt, result);
+          const result = await runWllamaPrompt(
+            runtime,
+            sharedNodeId,
+            taskPrompt,
+            config.maxOutputTokens
+          );
+          const metric = buildMetric(
+            task,
+            'tree',
+            sharedPrefix,
+            taskPrompt,
+            result
+          );
           treeMetrics.push(metric);
           logSampleMetric(onLog, metric);
 
@@ -837,10 +1039,16 @@ export async function runWebArenaBench(
             stage,
             message: err instanceof Error ? err.message : String(err),
           });
-          onLog?.({ text: `[WebArena/tree] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}` });
+          onLog?.({
+            text: `[WebArena/tree] ${task.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
         progressCurrent += 1;
-        onProgress?.({ current: progressCurrent, total: selectedTasks.length * 2, label: 'WebArena tree' });
+        onProgress?.({
+          current: progressCurrent,
+          total: selectedTasks.length * 2,
+          label: 'WebArena tree',
+        });
       }
     }
   } finally {
@@ -864,6 +1072,7 @@ export async function runWebArenaBench(
   return {
     modelUrl: config.modelUrl,
     config,
+    runtime: runtimeInfo,
     webarena: summarizeDualPath(selectedTasks, flatMetrics, treeMetrics),
     cacheProfile,
     diagnostics,

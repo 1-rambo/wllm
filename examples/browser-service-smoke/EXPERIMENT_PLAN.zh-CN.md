@@ -1,1065 +1,937 @@
-# Retain–Admit–Activate 完整实验方案与跨设备执行手册
+# wLLM 论文完整实验方案
 
-本文档用于把浏览器多标签页实验分发给多位同学，在 Windows 和 macOS
-设备上并行执行。目标不是继续做功能调试，而是用统一代码、模型、Wasm
-产物和参数，收集能够支撑系统论文主张的真实设备结果。
-
-> 当前实验协议版本：`wllm.browser-service.experiment.v1`（事件 schema 为 `wllm.browser-service.v2`）
->
-> 主实验必须使用干净的 Git 工作区。实验脚本默认拒绝从 dirty worktree
-> 记录结果，以避免不同同学实际运行了不同代码。
-
-## 0. Review 时需要先确认的决定
-
-在把任务正式分给同学之前，请负责人确认以下项目。参数一旦冻结，不要让不同
-设备自行修改。
-
-| 决定 | 当前建议 | Review 重点 |
-| --- | --- | --- |
-| 正式模型 | `Llama-3.2-1B-Instruct-Q4_0.gguf` | 模型大小是否适合最低配置设备；是否与论文旧实验保持一致 |
-| 正式执行模式 | Playwright Chromium + WebGPU | 是否只做 Chrome-first；Safari/Edge 不混入主表 |
-| 设备数量 | 最少 6，建议 8–12 | Windows/macOS 是否各覆盖至少 3 类设备 |
-| Core 重复次数 | 每 case 10 次 | 时间预算是否允许；若不允许，至少 5 次并统一 |
-| Sensitivity 重复次数 | 每点 5 次 | 只在代表性设备上运行 |
-| Activate workload | background 256 tokens；foreground 32 tokens | 是否足以形成稳定的背景长任务 |
-| Retain workload | pause 5 秒；12 个 pressure sessions | 是否能在正式 1B 模型上制造可区分的 L1/L2/L3/rebuild |
-| Admit workload | 12 sessions；caps 128/128/128；monotonic budget 2 | 正式 1B/WebGPU pilot 是否能同时触发 repair、budget-bound reject 和 reactive completion |
-| 冷却与顺序 | case 间 15 秒；每轮轮换 case 顺序 | 是否适合实验室时间预算 |
-| Trace replay | 作为后续独立实验 | 是否已有可审计的 WebArena-derived trace |
-
-当前 Admit 参数来自 Linux CPU/Tiny Stories 的压力校准：较宽松的
-`256/1024/4096 + budget 16` 无法区分三个策略，而
-`128/128/128 + budget 2` 能同时观察 bounded repair、reactive 继续完成和
-reject baseline 的取舍。正式 1B/WebGPU 分发前仍须统一做一次 pilot；如果
-该模型下不能产生目标压力，应该由负责人统一调整矩阵并升级协议版本，而不是让
-同学各自改参数。
-
-## 1. 与论文结构的对应关系
-
-本方案直接对应当前论文
-`\sysname: Resumable and Responsive LLM Serving in the Browser` 的修订故事。
-论文把一次浏览器 foreground handoff 分成因果连续的三步：
+本文档定义能够直接支撑论文 Evaluation 章节的完整实验包。它不是 smoke
+说明书。Smoke 只负责排除环境和实现错误，不进入论文结果。Windows/macOS
+安装、命令和数据回收细节见同目录下的：
 
 ```text
-Retain paused state -> Admit resumed state -> Activate foreground request
+DEVICE_RUNBOOK.zh-CN.md
 ```
 
-它们不是三个互不相关的优化，而是用户返回一个本地助手标签页时依次可能支付的
-三类成本。
+本文的北极星是回答论文总问题：
 
-| 论文部分 | 论文问题或主张 | 本方案实验 | 主要证据 |
+> 浏览器内的共享 LLM 服务，能否在有限本地容量下保留有价值的暂停会话，
+> 以有限且可审计的代价恢复该会话，并在用户返回标签页时及时把执行权交给
+> 前台，同时避免不可接受的后台吞吐、内存、磁盘和 UI 代价？
+
+完整证据链为：
+
+```text
+真实 workload 中问题确实存在
+        ↓
+端到端 foreground handoff 得到改善
+        ↓
+Retain / Admit / Activate 分别解释改善来自哪里
+        ↓
+消融证明三个组件都不是装饰
+        ↓
+敏感性、扩展性和成本说明适用边界
+        ↓
+跨 Windows/macOS 设备证明结论不是单机偶然
+```
+
+---
+
+## 1. 先冻结 Methodology：论文到底实现了什么
+
+实验必须验证真实实现，而不是验证一个比代码更理想化的描述。当前实现应按
+下面四层写进 Methodology。
+
+### 1.1 Browser-resident shared service
+
+同源标签页通过 `BrowserLLMClient` 连接一个版本化 `SharedWorker`。该
+SharedWorker 只加载一份模型，并维护：
+
+- 所有客户端的 lifecycle 状态；
+- 一棵跨请求共享的 conversation tree；
+- 一个统一请求队列；
+- 一组有限的 live sequence slots；
+- L1/L2/L3 状态及其恢复路径；
+- 版本化事件流。
+
+这一层解决“每个标签页各自持有模型、彼此不知道谁在前台”的架构问题。它是
+三个机制能够联合工作的前提，但不是第四个复杂算法。
+
+### 1.2 Retain：lifecycle protection + tiered replacement
+
+代码中的 Retain 不是一个已经训练好的
+`p(resume) × avoided-cost` 预测器。真实实现是两阶段策略：
+
+1. TypeScript 控制面根据 active/passive/hidden、最近 foreground 时间以及
+   TTL，生成需要保护的 session-head 集合；
+2. native tier manager 在未被保护的候选中按照 replacement policy 选择
+   victim。完整系统使用 age、state size 和 access frequency 的 hybrid
+   score。
+
+状态具有四种恢复结果：
+
+- L1：live KV state，可直接继续；
+- L2：内存 token checkpoint，需要 replay；
+- L3：磁盘 checkpoint，需要读回再 replay；
+- rebuild：没有可用 checkpoint，从逻辑对话重建。
+
+因此论文中的价值函数应作为**设计动机**，不能声称当前系统显式学习了
+resume probability。正文应准确写成“lifecycle-defined protection set +
+cost-aware replacement among unprotected states”。
+
+### 1.3 Admit：budgeted monotonic repair
+
+恢复或 checkpoint 一个状态前，系统检查目标 tier 的 token 容量和 live slot
+容量。容量不足时逐步 demote、checkpoint 或 remove victim。每一步必须减少
+当前 deficit，且同一 victim 在一次 admission 中最多处理一次。
+
+完整策略设置 repair budget。达到 budget 仍无法满足容量时，操作被拒绝。
+该过程：
+
+- 保持每层 `usage <= capacity`；
+- 保证 repair decision 数有界；
+- 记录 initial deficit、repair steps、victims、demoted/checkpointed tokens、
+  removed states 和 latency；
+- 允许一次最终失败的 admission 已经产生部分有效 demotion。
+
+因此 Methodology 不应写成“先规划完整事务再原子提交”。当前实现是
+**online monotonic repair with bounded work and observable partial displacement**。
+
+### 1.4 Activate：foreground-aware cooperative slicing
+
+请求的 prefill 和 decode 被拆成 cooperative units。每个 unit 结束后重新调度：
+
+- foreground 请求优先；
+- background 请求在 foreground 等待时使用更小的 slice；
+- lifecycle 由 hidden 转为 active 时设置一个很短的 handoff grace，
+  让刚到达的 foreground request 有机会在后台任务被重新 dispatch 前入队；
+- 每个 yield 后显式让出浏览器 task queue；
+- overdue queue 保留等待年龄，避免后台任务永久饥饿；
+- service-cost estimate 用于同一优先级内的排序。
+
+关键不是“设置优先级”，而是缩短已经运行的 background unit 的 residual
+blocking time，并确保 lifecycle 消息能够进入 SharedWorker event loop。
+
+### 1.5 Methodology 与代码的审计结论
+
+| 论文机制 | 当前实现 | 可做论文主张 | 不应声称 |
 | --- | --- | --- | --- |
-| Abstract / Introduction 的 foreground-handoff 总体主张 | 浏览器生命周期需要贯穿状态保留、恢复准入和前台调度 | 三组 core experiment 的联合结果 | Resume TTFT、admission latency/churn、activation latency、background cost |
-| Introduction Challenge 1: selective resume retention | 暂停会话多于 live slots 时，不能简单 retain-all 或 evict-all | C1 Retain | lifecycle-aware 对比 LRU、TTL、evict-on-pause、retain-until-full |
-| Methodology: Resumable Session Store | 生命周期、近期前台状态和恢复代价是否能指导状态保留 | C1 Retain + pause sensitivity | 恢复来源分布、恢复时间、释放量、成功率 |
-| Introduction Challenge 2: disruptive resume admission | 恢复一个状态可能引发 demotion、checkpoint、prune 和 rejection | C2 Admit | monotonic 对比 reactive 和 reject |
-| Methodology / Analysis: Monotonic State Admission | repair 是否有进展、有界，并保持容量约束 | C2 Admit + repair-budget sensitivity | repair steps、deficit、victims、moved tokens、reject、success rate |
-| Introduction Challenge 3: delayed foreground activation | priority bit 不能中断已经发出的背景执行单元 | C3 Activate | foreground-aware 对比 dual-queue、FCFS/no-slice、no-yield |
-| Methodology / Analysis: Foreground-Aware Cooperative Slicing | bounded slice 是否缩短前台 handoff，同时控制后台代价 | C3 Activate + slice sensitivity | activation、foreground TTFT、next-paint、slice tail、background wall time |
-| Evaluation: controlled session graphs | 先隔离三个机制的因果效果 | `suite=core` | 三组受控 workload |
-| Evaluation: interactive co-runs | 同时测 serving 和浏览器交互 | Activate 组 | first-token 与 input-to-next-paint |
-| Evaluation: cross-platform robustness | 结论是否只在单一设备成立 | Windows/macOS 多设备矩阵 | per-device median/IQR 与跨设备趋势 |
+| Shared browser service | SharedWorker 单实例、统一模型和队列 | 多标签页共享一个模型服务；后续 client attach 无需重复加载模型 | 跨浏览器或跨 origin 共享 |
+| Retain | lifecycle protection、TTL、hybrid/LRU/LFU/size/random replacement | lifecycle 信息改变被保护状态，并影响恢复层级和恢复延迟 | 已学习精确 resume probability |
+| Admit | token/slot capacity check、monotonic repair、budget、telemetry | repair 有界、容量不越界、成功率与 displacement 可观测 | admission 原子回滚；任何压力下都不拒绝 |
+| Activate | foreground priority、prefill/decode slicing、background slice、grace、event-loop yield | 前台 activation 受 slice boundary 控制，可降低 handoff tail | GPU kernel 抢占或浏览器内核修改 |
+| Cost model/fairness | 在线时间估计、overdue promotion | 可报告预测误差、queue wait 和 overdue 行为 | 严格实时 deadline guarantee |
 
-当前 runner 覆盖的是论文 Evaluation 的第一层：
+---
 
-1. controlled session graph；
-2. concurrent browser interaction；
-3. cross-device robustness。
+## 2. Evaluation 的研究问题
 
-论文 Introduction 还提出了 auditable WebArena-derived traces，用于证明这些
-failure 在真实 agent 工作负载中是否频繁发生。该 trace-replay 实验不是本
-runner 的替代品，应作为后续独立实验补充。当前方案首先回答
-“机制是否有效、为什么有效、在哪些设备上有效”。
+### RQ0：端到端效果
 
-本文中的 `RQ1/RQ2/RQ3` 是为了组织实验而使用的子问题编号。论文当前正文
-仍以一个总 Research Question 加三个 challenges 来组织；后续写 Evaluation
-时可以保留一个总 RQ，再把三组实验写成 RQ1–RQ3，也可以继续称为
-Challenge 1–3，但全文必须保持一致。
+完整 Retain–Admit–Activate 路径能否改善一次真实的 tab-return handoff，而不
+只是分别优化三个内部指标？
 
-### 1.1 当前论文文本需要随后同步的地方
+主指标：
 
-本方案不直接修改 Overleaf 仓库，但实验完成后论文至少需要同步：
+- foreground resume-to-first-token；
+- foreground request P95 latency；
+- input-to-next-paint P95；
+- workload makespan；
+- aggregate tokens/s；
+- background P95 latency；
+- request success rate。
 
-1. Methodology 目前仍有“dedicated Worker”和“lifecycle integration remains”
-   一类过期描述；实际实现已经是完整 SharedWorker、lifecycle telemetry 和
-   foreground dispatch。
-2. Evaluation 当前仍标为 legacy results draft，且设备写成单台 Apple M4。
-   新结果应按本文第 15 节结构替换，不应与旧 MMLU/HellaSwag 数字混写。
-3. Abstract 中三个 `[TBD]` 分别应由 Retain、Admit、Activate 的正式结果填写。
-4. Introduction 中“controlled workloads + auditable trace replay + interactive
-   co-runs”的承诺，需要分别由 core、后续 trace replay 和 Activate UI 指标
-   闭环。
+### RQ1：Retain
 
-## 2. Research Questions 和判定逻辑
+在 paused-session working set 超过 hot-state capacity 时，lifecycle protection
+能否使即将返回的会话更常留在热层，降低 replay/rebuild 和 resume TTFT？
 
-### C1 / RQ1：Retain
+### RQ2：Admit
 
-对应论文：
+容量不足时，monotonic admission 能否把 repair work 限制在明确 budget 内，
+保持容量约束，并在成功率和 state displacement 之间形成可解释的取舍？
 
-- Introduction 的 `selective resume retention`。
-- Background 的 `Retain everything` 和 `Evict background sessions`
-  两类失败。
-- Methodology 的 `Resumable Session Store`。
+### RQ3：Activate
 
-研究问题：
+foreground transition 到达时，foreground-aware slicing 能否减少 residual
+background blocking、activation latency 和 TTFT，同时控制后台 slowdown？
 
-> 在 paused-session working set 超过 live-state capacity 时，
-> lifecycle-aware retention 能否减少用户返回时的冷恢复或重建成本，同时
-> 不把所有暂停状态都永久占在 live slots 中？
+### RQ4：真实 workload relevance
 
-实验目的：
+在可审计的 WebArena-derived 浏览器任务 replay 中，pause/resume、状态压力和
+foreground/background overlap 是否足够频繁；完整系统的收益是否仍然存在？
 
-1. 证明保留策略会真实改变恢复来源，而不只是改了一个策略名称。
-2. 量化从 L1、L2、L3 或 rebuild 恢复对 resume latency 的影响。
-3. 检查 lifecycle-aware 是否在不同 pause duration 和设备上优于简单基线。
-4. 量化保留收益所对应的资源代价。
+### RQ5：开销与扩展性
 
-必要比较：
+机制本身的 scheduler、cache hint、admission 和 telemetry 开销是否足够低；
+随着标签页数、队列深度、上下文长度和内存压力增长，系统是否稳定？
 
-- `lifecycle-aware`：完整 Retain。
-- `lru`：不使用浏览器生命周期语义。
-- `ttl`：只使用固定时间窗口。
-- `evict-on-pause`：暂停时立即释放。
-- `retain-until-full`：只等容量压力发生。
+---
 
-主要指标：
+## 3. Baseline 设计
 
-- `sessionResumeToDispatchMs`：标签页恢复到第一次执行。
-- `sessionResumeToFirstTokenMs`：标签页恢复到首 token。
-- `resumedSessionSource`：`l1`、`l2`、`l3` 或 `rebuild`。
-- `resumeRestoreMs`、`resumeRebuildMs`。
-- `stateReleaseCount`、`releasedTokens`。
-- `requestSuccessRate`。
+### 3.1 论文主表中的同栈 baseline
 
-支持论文主张的结果形态应是：
+主结论优先使用同一个 GGUF、同一个 Wasm build、同一个浏览器和同一套
+SharedWorker substrate，只替换待比较策略。这样可以避免不同模型格式和
+runtime implementation 混淆机制效果。
 
-- lifecycle-aware 更经常从更热的层恢复，或降低 resume-to-first-token；
-- 相比 retain-until-full，它不应通过无界 live-state 占用获得收益；
-- 相比 evict-on-pause，它应显著减少冷恢复；
-- 相比 LRU/TTL，它应在不同 pause duration 下表现更稳健。
+| 名称 | Retain | Admit | Activate | 回答的问题 |
+| --- | --- | --- | --- | --- |
+| **wLLM-Full** | lifecycle-aware + hybrid | monotonic bounded repair | foreground-aware slicing | 完整系统 |
+| **Shared-Default** | LRU | reactive repair | dual-queue fixed slicing | 一个合理但不使用本文三项设计的共享服务 |
+| **Cold-FCFS** | evict-on-pause | reactive | FCFS/no-slice | 用户返回时冷恢复且没有前台 handoff |
+| **w/o Retain** | LRU/hybrid without lifecycle protection | monotonic | foreground-aware | Retain 的端到端贡献 |
+| **w/o Bounded Admit** | lifecycle-aware | reactive | foreground-aware | Admit 的端到端贡献 |
+| **w/o Foreground Activate** | lifecycle-aware | monotonic | dual-queue | Activate 的端到端贡献 |
 
-如果 LRU 或 TTL 在所有设备和敏感性点上都与 lifecycle-aware 等价，则论文
-应收窄 Retain 的 novelty claim，而不是隐瞒该结果。
+`Shared-Default` 是主要系统 baseline。三个 `w/o` 版本是严格 component
+ablation。`Cold-FCFS` 给出最简单实现的下界。
 
-### C2 / RQ2：Admit
+### 3.2 外部系统 baseline
 
-对应论文：
+外部 baseline 只回答“与现有浏览器推理引擎相比，基础推理效率是否合理”，
+不用于证明 Retain、Admit 或 Activate，因为现有引擎没有相同的多标签页状态
+语义。
 
-- Introduction 的 `disruptive resume admission`。
-- Background 的 `Evict reactively until the request fits`。
-- Methodology 和 Analysis 的 `Monotonic State Admission`。
+| Baseline | 用法 | 公平性约束 | 报告位置 |
+| --- | --- | --- | --- |
+| wllama no-reuse path | 同一 fork runtime，每个请求前 reset，不跨请求复用 prefix | 同 GGUF、量化、浏览器、prompt、输出长度 | Appendix 或基础性能表 |
+| WebLLM | 主流 WebGPU browser LLM engine | 同模型家族和规模、相同 prompt/output；明确模型格式差异 | Appendix 或基础性能表 |
 
-研究问题：
+不得把 WebLLM 的单请求吞吐差异写成本文 foreground-handoff 机制的收益。
+如果无法获得足够接近的模型和量化，保留该结果为补充，不作为 headline。
 
-> 在 token 和 live-slot 都受限时，monotonic admission 能否用有限、
-> 可观测、持续缩小 deficit 的修复路径完成恢复，并避免无界 churn？
-
-实验目的：
-
-1. 证明准入压力确实触发 demotion、checkpoint、removal 或 fallback。
-2. 验证 repair steps 有界，并受 `repair-budget` 控制。
-3. 比较成功准入、修复代价和直接拒绝之间的权衡。
-4. 为论文的 capacity invariant 和 termination analysis 提供运行时证据。
-
-必要比较：
-
-- `monotonic`：完整 Admit。
-- `reactive`：不受 monotonic repair budget 约束的基线。
-- `reject`：容量不足直接拒绝。
-
-主要指标：
-
-- `requestSuccessRate`、`requestFailureCount`。
-- `admissionCommitCount`、`admissionFallbackCount`、
-  `admissionRejectCount`。
-- `admissionRepairStepsP95`、`admissionLatencyP95Ms`。
-- `admissionInitialTokenDeficitP95`、
-  `admissionInitialSlotDeficitP95`。
-- `admissionDemotedTokens`、`admissionCheckpointedTokens`、
-  `admissionRemovedStates`、`admissionVictimCount`。
-
-支持论文主张的结果形态应是：
-
-- monotonic 的 repair steps 不超过配置的 budget；
-- 没有容量越界或无界 repair；
-- 相比 reject，monotonic 可以通过有限 repair 完成一部分原本会被拒绝的恢复；
-- 相比 reactive，monotonic 用可预测的 tail repair cost 换取必要时的受控拒绝，
-  而 reactive 可能完成更多请求，但 repair chain 可以超过同一 budget。
-
-这里的目标不是证明 monotonic 在所有指标上都优于 reactive。核心主张是
-**bounded and auditable repair**：系统明确限制一次恢复愿意付出的修复工作，
-并把超预算结果表现为可观测的 reject，而不是继续产生无界 churn。
-
-`reject` 组出现请求失败是预期结果。紧 budget 的 monotonic 也可能在用完
-repair budget 后产生受控拒绝；这正是 bounded repair 的语义。只要每个失败
-都由 `admission_reject` 对应，且日志、events 和 summary 一致，就不是实验
-事故。
-
-### C3 / RQ3：Activate
-
-对应论文：
-
-- Introduction 的 `delayed foreground activation`。
-- Background 的 `Set a foreground priority bit` 失败。
-- Methodology 和 Analysis 的 `Foreground-Aware Cooperative Slicing`。
-
-研究问题：
-
-> 当前景标签页在背景 inference unit 执行期间到达时，
-> foreground-aware cooperative slicing 能否缩短 handoff 和 TTFT，
-> 同时把后台吞吐损失控制在可接受范围？
-
-实验目的：
-
-1. 区分“队列优先级正确”和“当前执行单元能及时到达 boundary”。
-2. 测量 slice size 对 foreground latency 和 background cost 的前沿。
-3. 验证主动让出浏览器事件循环对真实 lifecycle 信号传递的作用。
-4. 同时测 serving latency 和浏览器可见交互延迟。
-
-必要比较：
-
-- `foreground-aware`：完整 Activate。
-- `dual-queue`：有旧队列机制，但没有浏览器前台优先。
-- `fcfs-no-slice`：没有 cooperative boundary。
-- `foreground-aware + yield=false`：去掉浏览器 task-queue yield。
-
-主要指标：
-
-- `foregroundActivationMs`：前台 lifecycle 信号到第一次 slice dispatch。
-- `foregroundFirstTokenMs`：前台 lifecycle 信号到前台请求首 token。
-- `foregroundTotalWallMs`：前台请求端到端时间。
-- `inputToNextPaintP95Ms`：输入事件到下一次绘制。
-- `sliceDurationP95Ms`、`sliceDurationMaxMs`。
-- `backgroundTotalWallMs`。
-
-支持论文主张的结果形态应是：
-
-- foreground-aware 明显低于 dual-queue 和 FCFS 的 activation/TTFT；
-- 更小 background slice 降低 foreground delay；
-- 收益没有伴随不可接受的 background wall-time 膨胀；
-- no-yield 的结果说明事件循环 yield 是否必要。
-
-## 3. Claim–Evidence Matrix
-
-| Claim / RQ | Reviewer 会问什么 | 主实验 | 基线/消融 | 核心指标 | 论文落点 |
-| --- | --- | --- | --- | --- | --- |
-| C1 / RQ1 Retain | 生命周期信息是否真的改善恢复，而不是普通 recency 就够了？ | `core/retain` | LRU、TTL、evict-on-pause、retain-until-full | resume-to-first-token、restore/rebuild、residency source、released tokens | Evaluation: Retain；对应 Introduction Challenge 1 |
-| C2 / RQ2 Admit | 压力下是否能完成准入，并且 repair 有界、可解释？ | `core/admit` | reactive、reject | success rate、admission P95、repair steps、fallback/reject、churn | Evaluation: Admit；对应 Challenge 2 和 capacity/termination analysis |
-| C3 / RQ3 Activate | foreground priority 是否真的缩短 handoff，还是仍被当前长任务阻塞？ | `core/activate` | dual-queue、FCFS/no-slice、no-yield | activation、foreground TTFT、next-paint、slice tail、background wall | Evaluation: Activate；对应 Challenge 3 和 residual-bound analysis |
-| Cross-device robustness | 结果是否只在作者的一台 Mac 上成立？ | Windows/macOS 同协议复现 | 不同 CPU/GPU/内存档位 | per-device median/IQR、趋势一致性、失败率 | Experimental Setup + Cross-device subsection |
-| Workload importance | 三类 failure 在真实 agent trace 中是否常见？ | 后续 WebArena-derived trace replay | trace statistics | pause/resume frequency、working-set pressure、handoff overlap | Evaluation 中独立 workload-characterization subsection |
-
-这张表是审稿视角下的证据闭环。Core experiment 回答机制因果性；设备矩阵
-回答可移植性；trace replay 回答现实发生频率。三者不能互相替代。
-
-## 4. 实验包的层次
-
-| 层次 | 用途 | 是否进入论文结果 | 默认重复 |
-| --- | --- | --- | ---: |
-| Smoke | 验证环境、WebGPU、SharedWorker、遥测和错误路径 | 否 | 1 |
-| Core | 回答 RQ1/RQ2/RQ3 的主比较 | 是 | 10 |
-| Sensitivity | slice、pause duration、repair budget 敏感性 | 是，通常图或附录 | 5 |
-| Trace replay | 证明真实 web-agent workload 中 failure 的频率和重要性 | 后续独立补充 | TBD |
-
-Smoke 只验证关键路径，不能当作正式 evidence，也不能与 core 数据混合。
-
-### 4.1 全局固定参数
-
-除各 case 明确覆盖的参数外，矩阵默认使用：
-
-```text
-seed=42
-n_batch=128
-memory_cap_mb=1024（Smoke 为 128）
-warmup_runs=1
-warmup_predict=4
-interaction_samples=20（Smoke 为 1）
-interaction_interval_ms=20
-core trials=10
-sensitivity trials=5
-core/sensitivity cooldown=15000 ms
-case order=rotate
-```
-
-每个 run 都重新启动浏览器与 SharedWorker、重新初始化模型和会话。矩阵层在
-不同 run 之间保持固定冷却时间，并按 trial 轮换 case 顺序。
-
-压力会话在目标会话暂停后创建，用于形成容量竞争。压力会话在恢复目标会话
-前通过 `experiment_cleanup` 释放；这部分清理量单独记录在
-`cleanupReleaseCount` 和 `cleanupReleasedTokens`，不计入 Retain 策略本身的
-`stateReleaseCount`。
-
-完整预定义矩阵也保存在：
-
-```text
-artifacts/manifests/browser-service-experiment-matrix.csv
-```
-
-## 5. 负责人需要统一准备的材料
-
-不要让每位同学自行选择模型或重新编译不同版本的 Wasm。负责人应统一提供：
-
-1. 固定代码提交。
-2. 固定 GGUF 模型。
-3. 固定 WebGPU Wasm build 目录。
-4. 可选的 CPU Wasm build 目录，用于 smoke 和故障定位。
-5. 本文档以及设备元数据模板。
-
-建议正式模型固定为仓库现有实验所采用的：
-
-```text
-Llama-3.2-1B-Instruct-Q4_0.gguf
-```
-
-Tiny Stories 15M 模型只用于 smoke，不作为论文正式性能结果。实验 runner
-会自动记录模型大小和 SHA-256；汇总前必须检查所有正式结果的
-`model.sha256` 完全相同。
-
-建议分发目录：
-
-```text
-experiment-kit/
-├── model/
-│   └── Llama-3.2-1B-Instruct-Q4_0.gguf
-├── wasm-webgpu/
-│   ├── wllama.js
-│   └── wllama.wasm
-├── wasm-cpu/
-│   ├── wllama.js
-│   └── wllama.wasm
-└── device.json
-```
-
-正式 WebGPU 结果必须使用同一份 `wasm-webgpu`。脚本会记录
-`buildArtifacts.wllamaWasmSha256`，汇总时应检查一致性。
-
-## 6. 设备覆盖建议
-
-最小建议是 6 台机器，推荐 8–12 台：
-
-| 平台 | 最低数量 | 建议覆盖 |
-| --- | ---: | --- |
-| Windows 11 | 3 | Intel 核显、AMD 核显或 APU、NVIDIA/AMD 独显 |
-| macOS Apple Silicon | 3 | 至少两代芯片；8/16/24 GB 或更高内存档位 |
-| Intel Mac | 可选 1 | 如果实验室仍有设备，可作为兼容性补充 |
-
-同一物理设备只使用一个稳定的 `deviceId`。推荐命名：
-
-```text
-win-i7-irisxe-16gb-01
-win-r7-780m-32gb-01
-win-i7-rtx4060-32gb-01
-mac-m1-8gb-01
-mac-m2pro-16gb-01
-mac-m3max-36gb-01
-```
-
-不要把同一台机器重命名成多台设备，也不要把不同机器复用同一
-`deviceId`。
-
-## 7. 设备运行环境
-
-### 7.1 通用软件
-
-- Git。
-- Node.js 24；至少保证所有同学使用同一个 Node 主版本。
-- npm，使用仓库锁文件执行 `npm ci`。
-- Playwright Chromium。
-- 真实 WebGPU 实验需要图形桌面会话，不能通过无显示设备的普通
-  SSH 会话运行。
-- 如果同学只使用负责人分发的 Wasm 产物，不需要安装 CMake、
-  Emscripten 或 Docker。
-
-安装依赖：
+外部 baseline 的自动化入口为：
 
 ```bash
-git submodule update --init --recursive
-npm ci
-npx playwright install chromium
+npm run experiment:webarena:prepare -- \
+  --input=/path/to/webarena/config_files/test.raw.json
+
+npm run experiment:webarena:run -- \
+  --backend=wllama \
+  --model-file=<GGUF_FILE> \
+  --wasm-build=<SOURCE_BUILT_WASM_DIR> \
+  --eval-count=120 \
+  --output=<OUT>/wllama.json
+
+npm run experiment:webarena:run -- \
+  --backend=web-llm \
+  --webllm-model=Llama-3.2-1B-Instruct-q4f32_1-MLC \
+  --eval-count=120 \
+  --output=<OUT>/webllm.json
+
+npm run experiment:webarena:score -- \
+  --input=<OUT>/wllama.json \
+  --output=<OUT>/wllama-accuracy.json
 ```
 
-检查版本：
+本地 scorer 对 exact/must-include 提供确定性检查，对 fuzzy-match 仅提供
+normalized-contains proxy；最终 accuracy 必须使用 WebArena 官方 evaluator
+复核。这样可以检查系统优化没有通过输出为空或质量退化换取速度。
 
-```bash
-node --version
-npm --version
-npx playwright --version
-git rev-parse HEAD
-git status --short
-```
+### 3.3 各机制的强 baseline
 
-主实验开始前，`git status --short` 必须没有输出。
+**Retain**
 
-负责人应向所有同学给出固定的 `<EXPERIMENT_COMMIT>`。不要在实验当天
-直接执行不带提交号确认的 `git pull`。推荐流程：
+- lifecycle-aware + hybrid；
+- hybrid without lifecycle protection；
+- strict LRU；
+- TTL；
+- evict-on-pause；
+- retain-until-full。
 
-```bash
-git fetch --all
-git checkout dev
-git reset --hard <EXPERIMENT_COMMIT>
-git submodule update --init --recursive
-git status --short
-```
+**Admit**
 
-如果团队不希望同学执行 `reset --hard`，可以由负责人分发同一份代码压缩包。
-关键不是采用哪种分发方式，而是所有人的 Git revision、llama.cpp revision、
-模型和 Wasm 哈希都一致。
+- monotonic + hybrid；
+- reactive + hybrid；
+- reactive + global LRU；
+- immediate reject。
 
-### 7.2 Windows
+**Activate**
 
-建议使用 PowerShell，不要在 WSL 中运行正式 WebGPU 数据。WSL 的 GPU、
-窗口系统和原生 Windows Chrome 路径不同，不能与 Windows 原生结果混合。
+- foreground-aware；
+- dual-queue/static priority；
+- single-size-aware；
+- FCFS/no-slice；
+- foreground-aware without event-loop yield；
+- foreground-aware without handoff grace。
 
-准备工作：
+---
 
-1. 更新 Windows 11。
-2. 更新 Intel、AMD 或 NVIDIA 显卡驱动。
-3. 接通电源。
-4. 关闭节电模式。
-5. Windows 电源模式设为“最佳性能”或固定的团队约定模式。
-6. 暂停大型下载、游戏、视频会议和系统更新。
-7. 不要远程桌面到机器后再采正式数据；远程桌面可能改变 GPU adapter。
+## 4. 工作负载
 
-PowerShell 示例：
+### 4.1 Controlled handoff graph
 
-```powershell
-git fetch --all
-git checkout dev
-git reset --hard <EXPERIMENT_COMMIT>
-git submodule update --init --recursive
-npm ci
-npx playwright install chromium
+这是论文的主因果 workload，不是 smoke。一个 run 包含四个标签页：
 
-Copy-Item .\examples\browser-service-smoke\device.example.json .\device.json
-notepad .\device.json
-```
+1. 前台目标标签页建立一个较长的可恢复 session；
+2. 目标标签页进入 hidden；
+3. 其他标签页产生多个 competing sessions，制造 tier/slot 压力；
+4. 至少一个后台标签页开始长 generation；
+5. 用户切回目标标签页并立即提交 follow-up；
+6. 所有请求完成后记录最终状态和成本。
 
-### 7.3 macOS
+该 workload 在同一个 run 中连续触发 Retain、Admit 和 Activate，所以它是
+论文端到端主表的依据。
 
-准备工作：
-
-1. 接通电源。
-2. 关闭低电量模式。
-3. 固定外接显示器配置；不要一半实验接外屏、一半不接。
-4. 关闭大型编译、视频会议、云盘全量同步等后台任务。
-5. 实验期间不要合盖。
-
-Terminal 示例：
-
-```bash
-git fetch --all
-git checkout dev
-git reset --hard <EXPERIMENT_COMMIT>
-git submodule update --init --recursive
-npm ci
-npx playwright install chromium
-
-cp examples/browser-service-smoke/device.example.json device.json
-open -e device.json
-```
-
-### 7.4 device.json
-
-从 `device.example.json` 复制并填写。至少填：
-
-- 设备编号和操作者。
-- 操作系统版本。
-- CPU。
-- 内存容量。
-- GPU 型号和驱动版本。
-- 台式机或笔记本。
-- 是否接通电源、是否节电。
-- 外接显示器数量。
-
-runner 会自动记录浏览器版本、User-Agent、逻辑 CPU 数量、系统内存、
-WebGPU adapter 信息。手工文件用于补充浏览器无法可靠获取的信息。
-
-`device.json` 中的 `deviceId` 必须与命令行 `--device-id` 完全一致，否则
-runner 会拒绝运行。
-
-## 8. 运行前的统一条件
-
-每批正式实验都必须满足：
-
-1. 代码提交相同，并且使用负责人冻结的 `<EXPERIMENT_COMMIT>`。
-2. `git status --short` 为空。
-3. 模型 SHA-256 相同。
-4. Wasm SHA-256 相同。
-5. 使用 Playwright Chromium，不混入 Edge、Safari 或系统 Chrome。
-6. WebGPU 主实验使用 `--mode=webgpu`。该模式强制
-   `actualExecutionMode=webgpu`，如果回退 CPU 会直接失败。
-7. WebGPU 使用有窗口模式。运行期间会弹出 Chromium，不要关闭、
-   最小化或手工切换实验标签页。
-8. 同一设备整个实验期间保持相同电源和显示器条件。
-9. 先重启机器，静置约 3 分钟，再开始首批。
-10. 主矩阵默认每轮之间冷却 15 秒，并轮换 case 顺序，减少热节流和顺序偏差。
-11. 每个 case 在正式运行前自动执行 1 个短 warmup 请求；warmup 后重置会话并
-    清空 telemetry，因此不计入结果。
-12. 不同策略在每个 trial 中轮换执行顺序，避免某个策略永远吃到冷机或热机。
-13. Core Activate 每个 trial 记录 20 次 next-paint 样本；单次 smoke 的
-    `inputToNextPaintP95Ms` 只用于验证采集链路。
-
-## 9. Smoke：每台设备先跑
-
-Smoke 只验证环境和机制链路，不进入论文主表。
-
-### 9.1 macOS / Linux
-
-```bash
-npm run experiment:browser-service:matrix -- \
-  --suite=smoke \
-  --group=all \
-  --mode=webgpu \
-  --trials=1 \
-  --device-id=mac-m2pro-16gb-01 \
-  --operator=alice \
-  --device-file="$PWD/device.json" \
-  --model-file="/absolute/path/to/Llama-3.2-1B-Instruct-Q4_0.gguf" \
-  --wasm-build="/absolute/path/to/wasm-webgpu" \
-  --output="$PWD/artifacts/runs/mac-m2pro-16gb-01/smoke"
-```
-
-### 9.2 Windows PowerShell
-
-```powershell
-npm run experiment:browser-service:matrix -- `
-  --suite=smoke `
-  --group=all `
-  --mode=webgpu `
-  --trials=1 `
-  --device-id=win-i7-rtx4060-32gb-01 `
-  --operator=alice `
-  --device-file="$PWD\device.json" `
-  --model-file="D:\wllm-kit\model\Llama-3.2-1B-Instruct-Q4_0.gguf" `
-  --wasm-build="D:\wllm-kit\wasm-webgpu" `
-  --output="$PWD\artifacts\runs\win-i7-rtx4060-32gb-01\smoke"
-```
-
-Smoke 通过条件：
-
-- Matrix 命令退出码为 0。
-- 每个 run 目录都有 `summary.json` 和 `events.jsonl`。
-- `actualExecutionMode` 为 `webgpu`。
-- `gitDirty=false`。
-- `deviceMetadata.deviceId` 与命令行设备编号一致。
-- `operationErrors` 为空；`admit-reject-tight` 除外，它应出现受控
-  `admissionRejectCount > 0`，且错误数与请求失败数一致。
-- Activate 两个方法都有非空 activation 和 TTFT。
-- lifecycle-aware Retain 恢复成功。
-- evict-on-pause 至少出现一次策略释放。
-- monotonic Admit 有成功请求；紧容量 smoke 中通常应看到 repair 或
-  fallback。
-
-同一个输出目录和 run ID 默认不允许覆盖。需要重跑时使用新的输出目录。
-只有明确保留旧目录后，才可以传 `--overwrite=true`。
-
-Smoke 完成后，负责人先检查 `matrix.json` 和每个 `summary.json`，确认
-模型/Wasm 哈希、实际执行模式和错误路径正确，再允许该设备进入 core。
-
-## 10. 正式核心实验
-
-正式结果默认每个 case 跑 10 次。若设备特别慢，可先跑 3 次做 pilot，
-确认参数后再补足 10 次。论文数据不要把 pilot 和 final 混在一起。
-
-单台设备全部 core 包含：
+默认参数：
 
 ```text
-Activate: 4 cases × 10 trials = 40 runs
-Retain:   5 cases × 10 trials = 50 runs
-Admit:    3 cases × 10 trials = 30 runs
-Total:                             120 runs
-```
-
-如果按 group 分工，每位同学只运行自己负责的 30–50 个 core runs。实际耗时
-由模型和 GPU 决定，应先执行 `--trials=1` pilot，据此估算，不要在文档里用
-Tiny Stories smoke 的耗时推测 1B 模型正式耗时。
-
-为了便于分工，一个同学可以只负责一个 group：
-
-### 10.1 Activate 组
-
-```bash
-npm run experiment:browser-service:matrix -- \
-  --suite=core \
-  --group=activate \
-  --mode=webgpu \
-  --trials=10 \
-  --device-id=<DEVICE_ID> \
-  --operator=<NAME> \
-  --device-file=<DEVICE_JSON> \
-  --model-file=<MODEL_GGUF> \
-  --wasm-build=<WEBGPU_WASM_DIR> \
-  --output=<OUTPUT_DIR>
-```
-
-固定 workload：
-
-```text
-n_ctx=8192
-n_seq_max=8
-n_batch=128
-background_predict=256
+clients=4
+pause=5 s
+pressure_sessions=8
+target_prompt_repeats=16
+pressure_prompt_repeats=12
+background_predict=128
 foreground_predict=32
-seed=42
-warmup_runs=1
-```
-
-比较：
-
-```text
-activate-full
-activate-dual-queue
-activate-fcfs-no-slice
-activate-no-yield
-```
-
-### 10.2 Retain 组
-
-```bash
-npm run experiment:browser-service:matrix -- \
-  --suite=core \
-  --group=retain \
-  --mode=webgpu \
-  --trials=10 \
-  --device-id=<DEVICE_ID> \
-  --operator=<NAME> \
-  --device-file=<DEVICE_JSON> \
-  --model-file=<MODEL_GGUF> \
-  --wasm-build=<WEBGPU_WASM_DIR> \
-  --output=<OUTPUT_DIR>
-```
-
-固定 workload：
-
-```text
 n_ctx=8192
 n_seq_max=8
-pause_ms=5000
-pressure_sessions=12
-pressure_predict=16
-session_predict=16
-L1/L2/L3 token caps=512/2048/8192
-retention_ttl=30000 ms
+L1/L2/L3=512/2048/8192 tokens
+```
+
+正式模型上先用 1 trial 校准，使 Full、Shared-Default 和 Cold-FCFS 都能完成
+大多数请求，同时至少一部分 run 出现非 L1 restore 或 admission repair。
+
+### 4.2 Controlled mechanism workloads
+
+三个 microbenchmark 分别只改变一个阶段：
+
+- Retain：固定恢复目标和压力过程，只替换 retention policy；
+- Admit：固定 `retention=lru` 以关闭 lifecycle protection，固定状态集合、容量和
+  恢复目标，只替换 admission policy；
+- Activate：固定后台长任务和前台到达时刻，只替换 scheduler/yield/grace。
+
+### 4.3 WebArena-derived replay
+
+真实 workload 由公开 WebArena task configuration 生成，必须保存：
+
+- 上游仓库 revision；
+- 原始 `test.raw.json` 的 hash；
+- 选中的 task IDs；
+- 过滤规则；
+- 可选 page-context sidecar；
+- 最终 trace JSON。
+
+默认选择单站点、`string_match`、只读 retrieve tasks，排除会修改站点状态的
+post/delete/edit/purchase 等任务。按 site 映射到四个逻辑标签页，任务到达时
+切换相应 tab 的 lifecycle，并在该 tab 的 session 上继续请求。
+
+生成命令：
+
+```bash
+npm run experiment:browser-service:prepare-trace -- \
+  --input=/path/to/webarena/config_files/test.raw.json \
+  --contexts=/path/to/task_page_contexts.json \
+  --output=/path/to/traces/webarena-readonly.json \
+  --task-count=80 \
+  --client-count=4 \
+  --switch-interval-ms=750 \
+  --output-tokens=32
+```
+
+若没有 page-context sidecar，可以先做 workload-characterization，但不得把只有
+task intent 的 replay 表述成完整 WebArena agent execution。主论文最好使用
+真实页面提取的 context；完整环境准备方法见已有
+`examples/webarena-latency-bench/scripts/`。
+
+### 4.4 UI co-run
+
+在真实 WebGPU 页面中同时运行持续动画/输入任务和 LLM workload。采集：
+
+- average FPS；
+- P95/P99 frame time；
+- long-frame ratio；
+- input-to-next-paint P50/P95/P99；
+- foreground TTFT；
+- inference makespan。
+
+已有 `ui-stability-bench` 可作为基础，但正式版本必须加入
+`Shared-Default` 与 `wLLM-Full`，不能只比较 “No-Tech/Full-Tech”。
+
+---
+
+## 5. 必做实验总表
+
+### E0：Motivation characterization
+
+**目的：** 证明公开 browser-agent tasks 包含可复用的页面/会话状态，并在公开、
+确定性的多标签页 replay 中量化 pause、resume、容量压力和前后台重叠。
+
+输入：WebArena-derived trace 和真实 page context。
+
+输出：
+
+- 同时存活的 logical sessions 分布；
+- pause duration CDF；
+- resume fraction；
+- reuse distance；
+- resume 时 working-set/capacity 比；
+- foreground arrival 与 background execution overlap 比例；
+- 若不做 slicing，foreground 遇到的 residual unit time 分布。
+
+论文产物：
+
+- Figure 2：pause duration 和 reuse distance CDF；
+- Table 1：trace 数量、站点、session 数、resume 比例、overlap 比例；
+- 一个代表性 timeline。
+
+E0 支撑“该问题会在代表性 browser-agent workload 中出现”，但构造的 tab
+schedule 不能证明自然用户行为中的发生频率。若论文要主张 prevalence，还需另行
+采集匿名化真实浏览器 lifecycle trace。
+
+### E1：端到端 foreground handoff
+
+**目的：** 回答 RQ0，作为论文最重要的结果。
+
+运行：
+
+```bash
+npm run experiment:browser-service:matrix -- \
+  --suite=e2e --group=e2e --mode=webgpu --trials=10 \
+  --device-id=<ID> --operator=<NAME> --device-file=<DEVICE_JSON> \
+  --model-file=<MODEL> --wasm-build=<WASM> --output=<OUT>
+```
+
+方法：
+
+- wLLM-Full；
+- Shared-Default；
+- Cold-FCFS；
+- 三个单组件 ablation。
+
+主指标：
+
+- foreground resume-to-first-token；
+- foreground completion latency；
+- input-to-next-paint P95；
+- request success rate；
+- workload makespan 和 aggregate tokens/s；
+- background P95 latency；
+- peak tier occupancy 和 snapshot bytes。
+
+论文产物：
+
+- Table 2：三种完整系统的主要延迟、成功率和吞吐；
+- Figure 3：foreground latency CDF；
+- Figure 4：foreground latency 与 background slowdown 的 Pareto 图；
+- Figure 5：三个 component ablation。
+
+### E2：真实 trace replay
+
+**目的：** 回答 RQ4，证明收益不限于人工构造的单个 case。
+
+运行：
+
+```bash
+npm run experiment:browser-service:matrix -- \
+  --suite=trace --group=e2e --mode=webgpu --trials=5 \
+  --trace-file=<TRACE_JSON> \
+  --device-id=<ID> --operator=<NAME> --device-file=<DEVICE_JSON> \
+  --model-file=<MODEL> --wasm-build=<WASM> --output=<OUT>
 ```
 
 比较：
 
-```text
-retain-lifecycle-aware
-retain-lru
-retain-ttl
-retain-evict-on-pause
-retain-until-full
-```
+- trace-full；
+- trace-shared-default；
+- trace-cold-fcfs。
 
-### 10.3 Admit 组
+报告：
+
+- request TTFT P50/P95/P99；
+- request latency P50/P95/P99；
+- completion rate；
+- throughput；
+- L1/L2/L3/rebuild 比例；
+- admission repair/reject；
+- peak state footprint；
+- per-site breakdown。
+
+论文产物：Table 3 和按 site 分组的 CDF/box plot。
+
+### E3：Retain mechanism
+
+**目的：** 回答 RQ1。
+
+运行 `suite=core, group=retain`，每 case 10 次。
+
+变量：
+
+- policy；
+- pause duration；
+- working-set pressure；
+- target prefix length。
+
+指标：
+
+- resume-to-first-token；
+- L1/L2/L3/rebuild distribution；
+- replayed/rebuilt work；
+- released states/tokens；
+- peak snapshot bytes；
+- disk reads/writes；
+- success rate。
+
+主表至少包含生命周期策略、去掉 lifecycle 的 hybrid、LRU、TTL、
+evict-on-pause 和 retain-until-full。若 lifecycle-aware 与
+hybrid-no-lifecycle 没有稳定差异，应收窄 Retain novelty，而不是只挑有利设备。
+
+### E4：Admit mechanism
+
+**目的：** 回答 RQ2。
+
+运行 `suite=core, group=admit`，每 case 10 次。
+
+指标：
+
+- completion/rejection rate；
+- admission latency P50/P95；
+- repair steps P50/P95/max；
+- initial token/slot deficit；
+- demoted/checkpointed tokens；
+- victim count；
+- removed states；
+- capacity violation count。
+
+核心判据：
+
+1. monotonic 的每次 repair steps 不得超过 budget；
+2. 所有 state snapshot 中 `usage <= cap`；
+3. 相比 reject，monotonic 完成更多可修复请求；
+4. 相比 reactive，monotonic 限制 tail repair cost，但可能牺牲部分成功率。
+
+### E5：Activate mechanism
+
+**目的：** 回答 RQ3。
+
+运行 `suite=core, group=activate`，每 case 10 次。
+
+指标：
+
+- foreground activation P50/P95/P99；
+- foreground TTFT；
+- residual background slice P95/max；
+- foreground completion；
+- background completion slowdown；
+- UI next-paint P95；
+- makespan 和 throughput；
+- overdue promotion count。
+
+必须比较 fixed sliced priority，而不能只与 FCFS/no-slice 比。否则无法说明收益
+来自 foreground-aware handoff，而不是仅仅来自“用了 slicing”。
+
+### E6：Sensitivity
+
+主文保留三个最直接的 tradeoff：
+
+1. Retain：pause duration `0/1/5/30/60 s`；
+2. Admit：repair budget `1/2/4/8/16/32`；
+3. Activate：slice `4/8/16/32/64 tokens`。
+
+附录：
+
+- Admit sessions `4/8/12/16`；
+- background generation `64/128/256/512 tokens`；
+- equal per-tier capacity `128/256/512 tokens`；
+- target prompt repeats `4/8/16`，作为 prefix-length sensitivity。
+
+每点 5 次，在四台代表性设备上运行。
+
+### E7：Scaling and saturation
+
+**目的：** 回答 RQ5 中的扩展性。
+
+运行 `suite=scaling, group=system`：
+
+- clients `2/4/8`；
+- requests 为 `4 × clients`；
+- wLLM-Full 与 FCFS baseline；
+- 每点 5 次。
+
+报告：
+
+- foreground/background request latency P95；
+- aggregate tokens/s；
+- completion rate；
+- queue-wait P95；
+- makespan；
+- peak state footprint；
+- overdue promotions。
+
+如果 8 tabs 已经超过最低配置设备能力，不隐藏失败，应报告饱和点。
+
+### E8：成本和控制面开销
+
+**目的：** 回答“收益是否来自大量额外资源”。
+
+需要分解：
+
+- 首次 model load 时间；
+- 2/4/8 个总标签页下，额外 `N-1` 个标签页的总 attach 时间；
+- scheduler decision 总时间和 P95；
+- cache-hint 总时间和 P95；
+- admission planning/repair latency；
+- restore/rebuild/prefill/decode/post 时间；
+- control-plane time / workload makespan；
+- peak L1/L2/L3 tokens；
+- snapshot bytes；
+- disk reads/writes；
+- foreground 获益对应的 background slowdown。
+
+运行：
 
 ```bash
 npm run experiment:browser-service:matrix -- \
-  --suite=core \
-  --group=admit \
+  --suite=overhead --group=system --mode=webgpu --trials=10 ...
+```
+
+注意：`modelLoadMs` 与 `additionalClientAttachMs` 证明 SharedWorker 复用模型加载，
+但当前浏览器自动化不能可靠给出跨平台 GPU allocation bytes。论文中应报告
+runtime state footprint，而不是把 JS heap 或操作系统 RSS 冒充 GPU memory。
+
+### E9：Case study 与 failure analysis
+
+从正式 trace 中按预先规则选择四类 case：
+
+1. **Hot return**：短暂停后从 L1 恢复；
+2. **Cold but recoverable**：从 L2/L3 replay；
+3. **Repair-bound rejection**：monotonic 达到 budget；
+4. **Foreground interruption**：长背景任务中途发生 tab return。
+
+每个 case 画一条事件 timeline：
+
+```text
+lifecycle → resume → admission steps → slice boundary → first token → complete
+```
+
+选择规则必须由事件字段决定，而不是看完结果后挑最好看的样例。另列真实失败：
+
+- incoming state 本身大于 tier cap；
+- WebGPU adapter 不可用；
+- 内存压力导致浏览器终止；
+- 长 prefill unit 仍造成较高 activation tail；
+- background starvation 或大量 overdue promotion。
+
+---
+
+## 6. 实验矩阵与运行规模
+
+### 6.1 主论文设备
+
+最低 6 台，建议 8 台：
+
+- Windows 11：Intel iGPU、AMD APU、NVIDIA/AMD discrete GPU；
+- macOS：至少两代 Apple Silicon，覆盖 8/16/24 GB 或以上；
+- Linux 只用于开发和 CPU sanity，不进入 Chrome-first 跨设备主结论。
+
+### 6.2 重复次数
+
+| 实验 | 默认重复 |
+| --- | ---: |
+| Smoke | 1，不进论文 |
+| E1 controlled end-to-end | 10 |
+| E2 trace replay | 5 |
+| E3/E4/E5 mechanism | 10 |
+| E6 sensitivity | 5 |
+| E7 scaling | 5 |
+| E8 overhead | 10 |
+
+每个设备内部按 trial 配对比较，case 顺序轮换，case 间冷却 15 秒。报告 median、
+IQR 和 P95；跨设备先求 device-level median，再汇总，不能把所有 run 直接混成
+一个平均数。
+
+### 6.3 正式模型
+
+主实验固定一个约 1B 的 instruction-tuned Q4 模型。可以使用当前建议的
+Llama-3.2-1B-Instruct-Q4_0，但正式分发前必须确认：
+
+- 许可允许实验和 artifact 分发；
+- 所有设备可稳定加载；
+- tokenizer、chat template 和 GGUF 完全相同；
+- WebLLM 外部 baseline 使用尽可能接近的模型家族与规模。
+
+Tiny Stories 15M 只允许 smoke 和 runner 调试。
+
+### 6.4 分工方式
+
+两台 anchor 设备各运行一次完整论文矩阵：
+
+```bash
+npm run experiment:browser-service:paper -- \
+  --profile=primary \
   --mode=webgpu \
-  --trials=10 \
-  --device-id=<DEVICE_ID> \
+  --device-id=<ID> \
   --operator=<NAME> \
   --device-file=<DEVICE_JSON> \
-  --model-file=<MODEL_GGUF> \
-  --wasm-build=<WEBGPU_WASM_DIR> \
-  --output=<OUTPUT_DIR>
+  --model-file=<MODEL> \
+  --wasm-build=<WASM> \
+  --trace-file=<TRACE_JSON> \
+  --output=<OUT>
 ```
 
-固定 workload：
-
-```text
-n_ctx=8192
-n_seq_max=8
-sessions=12
-session_predict=16
-foreground_predict=16
-L1/L2/L3 token caps=128/128/128
-monotonic repair_budget=2
-```
-
-比较：
-
-```text
-admit-monotonic
-admit-reactive
-admit-reject
-```
-
-`admit-reject` 出现受控失败是基线语义，不要删除该 run。`admit-monotonic`
-在 budget 用尽后出现受控失败也属于有效结果，不应为了提高 success rate
-删除。
-
-`admit-reactive` 使用相同容量、workload 和记录用 budget 值，但其语义是不受
-monotonic budget 约束地继续 repair；该字段不作为 reactive 的终止界限。
-`admit-reject` 也不执行 repair。因此，正式结果应把三者解释为：
-
-- monotonic：有限修复，必要时受控拒绝；
-- reactive：更积极完成，但可能付出更长 repair chain；
-- reject：不修复，容量不足立即失败。
-
-## 11. 参数敏感性实验
-
-敏感性实验默认每个点 5 次：
+其余设备运行 replication profile，覆盖端到端主 baseline 和三个核心机制的
+代表性比较：
 
 ```bash
-npm run experiment:browser-service:matrix -- \
-  --suite=sensitivity \
-  --group=all \
+npm run experiment:browser-service:paper -- \
+  --profile=replication \
   --mode=webgpu \
-  --trials=5 \
-  --device-id=<DEVICE_ID> \
+  --device-id=<ID> \
   --operator=<NAME> \
   --device-file=<DEVICE_JSON> \
-  --model-file=<MODEL_GGUF> \
-  --wasm-build=<WEBGPU_WASM_DIR> \
-  --output=<OUTPUT_DIR>
+  --model-file=<MODEL> \
+  --wasm-build=<WASM> \
+  --output=<OUT>
 ```
 
-当前矩阵：
+建议：
 
-- Activate slice：`4, 8, 16, 32, 64`。
-- Retain pause：`0, 1, 5, 30, 60` 秒；TTL 固定 30 秒。
-- Admit repair budget：`1, 2, 4, 8, 16, 32`；固定 caps 为
-  `128/128/128`，用于画出 success rate 与 repair bound 的取舍曲线。
+- Anchor A：一台中高端 Windows；
+- Anchor B：一台 Apple Silicon Mac；
+- Replication：至少再增加两台 Windows 和两台 Mac；
+- 外部 WebLLM baseline、完整 sensitivity 和 trace replay 只要求 anchor
+  设备执行；
+- 其余设备只验证主要结论的方向和跨设备稳定性。
 
-敏感性实验不要求每台设备都跑。建议选择：
+---
 
-- 一台中档 Windows 笔记本。
-- 一台 Windows 独显设备。
-- 一台 Apple Silicon 基础款。
-- 一台 Apple Silicon Pro/Max。
+## 7. 论文表格和图
 
-## 12. CPU 模式的用途
+### Table 1：Workload characterization
 
-CPU 模式用于：
+| Workload | Tasks | Tabs | Sessions | Resume fraction | Median/P95 pause | P95 live working set | FG/BG overlap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Controlled | TBD | 4 | TBD | TBD | TBD | TBD | TBD |
+| WebArena-derived | TBD | 4 | TBD | TBD | TBD | TBD | TBD |
 
-- CI 或服务器 smoke。
-- 排除 WebGPU 驱动问题。
-- 验证事件和文件格式。
+### Table 2：End-to-end handoff
 
-CPU 模式不与 WebGPU 主实验混在同一个图或表中：
+| System | Resume TTFT P50/P95 ↓ | FG latency P95 ↓ | Next-paint P95 ↓ | Success ↑ | Throughput ↑ | BG slowdown ↓ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Cold-FCFS | TBD | TBD | TBD | TBD | TBD | TBD |
+| Shared-Default | TBD | TBD | TBD | TBD | TBD | TBD |
+| wLLM-Full | TBD | TBD | TBD | TBD | TBD | TBD |
 
-```bash
-npm run experiment:browser-service:matrix -- \
-  --suite=smoke \
-  --group=all \
-  --mode=cpu \
-  --trials=1 \
-  --device-id=<DEVICE_ID>-cpu-check \
-  --operator=<NAME> \
-  --device-file=<DEVICE_JSON> \
-  --model-file=<SMOKE_MODEL> \
-  --wasm-build=<CPU_WASM_DIR> \
-  --output=<OUTPUT_DIR>
-```
+### Table 3：WebArena-derived replay
 
-## 13. 输出文件
+| System | TTFT P50/P95 ↓ | Latency P50/P95 ↓ | Completion ↑ | Throughput ↑ | L1/L2/L3/Rebuild | Peak state |
+| --- | ---: | ---: | ---: | ---: | --- | ---: |
+| Cold-FCFS | TBD | TBD | TBD | TBD | TBD | TBD |
+| Shared-Default | TBD | TBD | TBD | TBD | TBD | TBD |
+| wLLM-Full | TBD | TBD | TBD | TBD | TBD | TBD |
 
-每个矩阵目录包含：
+### Table 4：Retain
 
-```text
-<output>/
-├── matrix.json
-├── <run-id-1>/
-│   ├── events.jsonl
-│   └── summary.json
-├── <run-id-2>/
-│   ├── events.jsonl
-│   └── summary.json
-└── ...
-```
+| Policy | Resume TTFT P50/P95 ↓ | L1 hit ↑ | Rebuild ↓ | Released tokens | Peak state bytes | Disk reads/writes |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Lifecycle + Hybrid | TBD | TBD | TBD | TBD | TBD | TBD |
+| Hybrid, no lifecycle | TBD | TBD | TBD | TBD | TBD | TBD |
+| LRU | TBD | TBD | TBD | TBD | TBD | TBD |
+| TTL | TBD | TBD | TBD | TBD | TBD | TBD |
+| Evict on pause | TBD | TBD | TBD | TBD | TBD | TBD |
+| Retain until full | TBD | TBD | TBD | TBD | TBD | TBD |
 
-`summary.json` 自动记录：
+### Table 5：Admit
 
-- Git 和 llama.cpp revision。
-- dirty-worktree 标记。
-- 模型和 Wasm SHA-256。
-- 操作系统、CPU、内存。
-- 浏览器版本和 User-Agent。
-- WebGPU adapter。
-- 实际启用的 CPU/WebGPU 模式。
-- 完整命令参数。
-- 核心指标和错误。
+| Policy | Success ↑ | Admission P95 ↓ | Repair P95/max ↓ | Victims | Tokens moved | Rejects | Violations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Monotonic + Hybrid | TBD | TBD | TBD | TBD | TBD | TBD | 0 required |
+| Reactive + Hybrid | TBD | TBD | TBD | TBD | TBD | TBD | 0 required |
+| Reactive + LRU | TBD | TBD | TBD | TBD | TBD | TBD | 0 required |
+| Immediate reject | TBD | TBD | 0 | 0 | 0 | TBD | 0 required |
 
-`events.jsonl` 是原始事件证据，不允许只上传 summary 而丢弃 events。
+### Table 6：Activate
 
-## 14. 汇总
+| Scheduler | Activation P50/P95 ↓ | FG TTFT P95 ↓ | Next-paint P95 ↓ | Slice max ↓ | BG slowdown ↓ | Throughput |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Foreground-aware | TBD | TBD | TBD | TBD | TBD | TBD |
+| Dual queue | TBD | TBD | TBD | TBD | TBD | TBD |
+| Size-aware | TBD | TBD | TBD | TBD | TBD | TBD |
+| FCFS/no-slice | TBD | TBD | TBD | TBD | TBD | TBD |
+| No yield | TBD | TBD | TBD | TBD | TBD | TBD |
+| No grace | TBD | TBD | TBD | TBD | TBD | TBD |
 
-将多台设备的目录放到同一个总目录后执行：
+### Table 7：Overhead
+
+| Device | Model load | Extra-tab attach | Scheduler P95 | Cache-hint P95 | Control-plane % | Peak state bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+### Figures
+
+1. Motivation CDF：pause duration、reuse distance、foreground overlap。
+2. End-to-end foreground latency CDF。
+3. Foreground latency vs background slowdown Pareto。
+4. 三组件消融柱状图。
+5. Retain pause-duration 曲线。
+6. Admit budget-success/churn 曲线。
+7. Activate slice-latency/throughput 曲线。
+8. Client scaling 曲线。
+9. 代表性 event timeline。
+
+---
+
+## 8. 统计规则
+
+- 延迟报告 P50、P95，必要时报告 P99；
+- 每个配置至少 5 个有效 trial，主表默认 10；
+- 同设备、同 trial 做配对比较；
+- 报告绝对差和百分比差；
+- 设备是 random effect，不把不同设备的 raw runs 当独立同分布样本；
+- 关键比较提供 bootstrap 95% confidence interval；
+- 不因结果不符合预期而删除 run；
+- controlled admission rejection 是结果，不是 crash；
+- timeout、浏览器退出、adapter 丢失等基础设施错误保留原始目录并标无效；
+- accuracy 不是本文核心指标，但 baseline 必须使用相同 prompt、sampling 和
+  output cap，避免用质量下降换取性能。
+
+---
+
+## 9. 数据收集与直接生成论文统计
+
+汇总：
 
 ```bash
 npm run experiment:browser-service:collect -- \
-  --input=/path/to/all-runs \
-  --output=/path/to/all-runs/aggregate.csv \
-  --expected-git=<EXPERIMENT_COMMIT> \
+  --input=<ALL_RUNS> \
+  --output=<ALL_RUNS>/aggregate.csv \
+  --expected-git=<COMMIT> \
   --expected-model-sha256=<MODEL_SHA256> \
-  --expected-wasm-sha256=<WASM_SHA256>
+  --expected-wasm-sha256=<WASM_SHA256> \
+  --expected-trace-sha256=<TRACE_SHA256>
 ```
 
-collector 会展开每个 `summary.json`，并生成统一 CSV。`valid=false`
-通常表示：
-
-- dirty worktree。
-- 请求模式和实际模式不一致。
-- 出现非预期错误。
-- Git、模型或 Wasm 与负责人给出的 expected 值不一致。
-
-具体原因会写入 `invalidReasons`。汇总前，负责人必须提供 expected Git、
-model SHA-256 和 Wasm SHA-256；不满足者保留原始文件，但不进入论文统计。
-
-汇总时先按以下键分组：
-
-```text
-deviceId
-actualExecutionMode
-case_id / runId 中的 case 部分
-```
-
-报告每个设备、每个 case 的：
-
-- median。
-- P25 和 P75。
-- 最小值和最大值作为诊断信息。
-- 成功率。
-
-不要只把所有设备混在一起求一个平均值。设备是系统环境的一部分，应先展示
-per-device 结果，再报告跨设备总体趋势。
-
-### 14.1 统计和作图规则
-
-- 单设备单 case：报告 10 次 trial 的 median、P25、P75。
-- 跨设备：先计算每台设备的 median，再报告设备 median 的分布。
-- 方法比较：在同一设备内按 trial 配对，报告绝对差和相对变化。
-- 延迟指标方向为越低越好；success rate 越高越好。
-- `resumedSessionSource` 报告各来源比例，而不是把字符串强行转成一个平均值。
-- `reject` 基线同时报告 success rate 和 rejection rate。
-- 合法极值不删除；环境事故按第 16 节规则排除。
-- Smoke、pilot、CPU check、WebGPU final 必须分目录，不能混合。
-
-## 15. 论文结果表和 Evaluation 组织建议
-
-建议把论文最终 Evaluation 组织成以下结构：
-
-1. **Experimental Setup**：设备矩阵、模型、统一 Wasm、浏览器版本、重复次数。
-2. **RQ1 / Retain**：恢复来源、resume TTFT 和状态占用代价。
-3. **RQ2 / Admit**：成功率、repair chain、churn 和 rejection。
-4. **RQ3 / Activate**：activation、foreground TTFT、UI tail 与后台代价。
-5. **Sensitivity**：pause duration、repair budget、slice size。
-6. **Cross-device robustness**：Windows/macOS 分设备结果和总体趋势。
-7. **Auditable trace replay**：后续补充 WebArena-derived workload 的发生频率。
-8. **Overhead and limitations**：控制面开销、浏览器/驱动限制和不支持设备。
-
-
-### 15.1 Activate 主表
-
-| Device | Method | Activation ms ↓ | Foreground TTFT ms ↓ | Next-paint P95 ms ↓ | Foreground wall ms ↓ | Background wall ms |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| TBD | Foreground-aware | TBD | TBD | TBD | TBD | TBD |
-| TBD | Dual queue | TBD | TBD | TBD | TBD | TBD |
-| TBD | FCFS/no-slice | TBD | TBD | TBD | TBD | TBD |
-| TBD | No-yield | TBD | TBD | TBD | TBD | TBD |
-
-### 15.2 Retain 主表
-
-| Device | Policy | Resume-to-first-token ms ↓ | Restore ms ↓ | Rebuild ms ↓ | L1/L2/L3/Rebuild distribution | Released tokens | Success rate ↑ |
-| --- | --- | ---: | ---: | ---: | --- | ---: | ---: |
-| TBD | Lifecycle-aware | TBD | TBD | TBD | TBD | TBD | TBD |
-| TBD | LRU | TBD | TBD | TBD | TBD | TBD | TBD |
-| TBD | TTL | TBD | TBD | TBD | TBD | TBD | TBD |
-| TBD | Evict-on-pause | TBD | TBD | TBD | TBD | TBD | TBD |
-| TBD | Retain-until-full | TBD | TBD | TBD | TBD | TBD | TBD |
-
-### 15.3 Admit 主表
-
-| Device | Policy | Success rate ↑ | Admission latency P95 ms ↓ | Repair steps P95 ↓ | Fallbacks | Rejects | Demoted tokens | Removed states |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| TBD | Monotonic | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| TBD | Reactive | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| TBD | Reject | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-
-## 16. 有效性和排除规则
-
-预先固定规则，避免看到结果后再挑数据。
-
-有效 run：
-
-- `gitDirty=false`。
-- Git、llama.cpp、模型和 Wasm 哈希符合统一版本。
-- `requestedExecutionMode == actualExecutionMode`。
-- Activate/Retain：`operationErrors=[]` 且 `requestFailureCount=0`。
-- Admit：允许受控 admission failure，但
-  `operationErrors.length == requestFailureCount`，且必须伴随
-  `admissionRejectCount>0`；其他运行时异常仍无效。
-- 输出文件完整。
-- `protocolVersion` 与冻结协议一致。
-
-允许重跑但必须保留原始失败目录的情况：
-
-- 同学手工关闭浏览器。
-- 机器休眠、断电或系统自动重启。
-- 端口、磁盘空间、模型路径等环境错误。
-- WebGPU adapter 不可用。
-- 出现不能由 `admission_reject` 一一解释的运行时异常。
-
-不能作为排除理由：
-
-- 结果“太慢”。
-- 与预期趋势不一致。
-- 某次结果是合法运行中的极值。
-
-在最终统计脚本中必须保留 `valid` 和 `invalidReasons` 两列，不能在 Excel
-中手工删行后丢失排除原因。
-
-## 17. 运行纪律
-
-- 每次只运行一个矩阵进程。
-- 不并行开多个实验 runner。
-- 浏览器弹出后不要手动操作实验页面。
-- 不要在实验过程中插拔显示器或切换显卡模式。
-- 保留冷却时间。
-- 每个设备完成一个 group 后再开始下一个 group。
-- 记录异常，但不要自行修改参数。
-
-## 18. 常见问题
-
-### 18.1 `WebGPU was required but ... did not activate`
-
-说明实际回退到了 CPU。处理：
-
-1. 确认不是 SSH/远程桌面环境。
-2. 更新图形驱动和操作系统。
-3. 确认使用 `--mode=webgpu`，浏览器应为有窗口模式。
-4. 重新执行 smoke。
-5. 仍失败则把该设备标记为“不支持正式 WebGPU 实验”，保留日志。
-
-### 18.2 Playwright 找不到 Chromium
+生成按设备、suite、case 聚合的论文数据和配对比较：
 
 ```bash
-npx playwright install chromium
+npm run experiment:browser-service:summarize -- \
+  --input=<ALL_RUNS>/aggregate.csv \
+  --output=<ALL_RUNS>/paper-summary
 ```
 
-也可显式设置 `CHROMIUM_EXECUTABLE_PATH`，但正式结果应尽量统一使用
-Playwright 下载的 Chromium。
+输出：
 
-### 18.3 `dirty worktree`
+```text
+paper-summary.csv
+paired-comparisons.csv
+paper-results.json
+paper-tables.md
+```
+
+提取 request/admission/state/UI/timeline 级别的画图数据：
 
 ```bash
-git status --short
+npm run experiment:browser-service:extract-events -- \
+  --input=<ALL_RUNS> \
+  --output=<ALL_RUNS>/paper-events
 ```
 
-提交、还原或 stash 本地修改。`--allow-dirty=true` 只允许用于开发 smoke，
-不得用于正式数据。
-
-### 18.4 内存不足或浏览器被系统终止
-
-- 关闭其他大型应用。
-- 确认模型是统一的 1B Q4 模型，而不是更大的模型。
-- 不要擅自降低 `n_ctx` 或容量参数。
-- 把日志交给负责人决定是否调整全体协议。
-
-### 18.5 Admit case 显示失败
-
-`reject` baseline 的失败是预期行为；紧 budget 的 monotonic 也可能发生受控
-失败。检查：
+输出：
 
 ```text
-admissionRejectCount > 0
-requestFailureCount > 0
-operationErrors.length == requestFailureCount
+request-level.csv
+admission-level.csv
+state-snapshots.csv
+ui-measurements.csv
+timelines.csv
 ```
 
-若是其他异常，或三者不能对应，则不是有效数据。
+这些文件直接对应第 7 节的表格、CDF、tradeoff 图和 case timeline。原始
+`events.jsonl` 仍须保留用于审计。
 
-## 19. 同学提交给负责人的内容
+---
 
-每台设备最终提交：
+## 10. 执行顺序与停止条件
+
+### P0：正式实验前必须完成
+
+1. 冻结 Methodology 表述，删除 dedicated Worker、尚未接 lifecycle 等过期描述；
+2. 冻结代码 commit、模型和 WebGPU Wasm；
+3. 在一台 Windows 和一台 macOS 上分别完成 smoke；
+4. 在正式 1B/WebGPU 上各跑一轮 E1/E3/E4/E5 pilot；
+5. 校准 capacity，使 Retain 出现至少两种恢复层级，Admit 出现非零 repair，
+   Activate 的后台任务在 foreground arrival 时仍在运行；
+6. 生成并审计 WebArena-derived trace。
+
+### P1：主文数据
+
+1. E0 workload characterization；
+2. E1 end-to-end；
+3. E2 trace replay；
+4. E3 Retain；
+5. E4 Admit；
+6. E5 Activate；
+7. E8 overhead。
+
+### P2：完整性和附录
+
+1. E6 sensitivity；
+2. E7 scaling；
+3. E9 case study/failure analysis；
+4. 外部 WebLLM 和 wllama no-reuse 基础性能比较。
+
+能够开始写完整 Evaluation 的最低停止条件：
+
+- Table 1–7 的所有主指标有真实数据；
+- 每个 headline claim 至少有主实验和一个机制实验支持；
+- 至少 Windows/macOS 各三台设备；
+- WebArena-derived trace 的来源、筛选和 event sequence 可审计；
+- 所有主实验 run 来自同一干净 commit、模型和 Wasm；
+- capacity violation 为 0；
+- 不再用 Tiny Stories smoke 数字填写论文。
+
+---
+
+## 11. 当前实现状态
+
+已经具备：
+
+- SharedWorker 多标签页共享模型；
+- Retain、Admit、Activate 三个机制；
+- `smoke/core/e2e/sensitivity/scaling/overhead/trace` suites；
+- 版本化事件、wall-clock 时间和 lifecycle 时间；
+- request、slice、admission、state、UI 事件；
+- model load、client attach、scheduler/cache-hint/control-plane 开销；
+- state footprint 和 capacity violation 检查；
+- WebArena task config 到 replay trace 的转换器；
+- 跨设备 metadata、结果 collector 和论文统计 summarizer。
+
+仍需要外部准备：
+
+1. 正式 1B Q4 模型；
+2. 统一 WebGPU Wasm build；
+3. 6–12 台 Windows/macOS 设备；
+4. WebArena `test.raw.json`；
+5. 最好提供真实 page-context sidecar；
+6. 外部 WebLLM baseline 所需的模型缓存。
+
+当前 Linux CPU/Tiny Stories 结果只证明基础设施可执行，不属于论文 evidence。
+
+---
+
+## 12. 论文 Evaluation 可直接采用的结构
 
 ```text
-<device-id>/
-├── device.json
-├── smoke/
-├── core-activate/       # 若负责 Activate
-├── core-retain/         # 若负责 Retain
-├── core-admit/          # 若负责 Admit
-└── sensitivity/         # 若被分配
+6.1 Experimental Setup
+    Hardware, browser, model, workloads, baselines, metrics, statistics
+
+6.2 Are browser foreground handoffs a material workload?
+    WebArena-derived characterization (E0)
+
+6.3 End-to-end foreground handoff
+    Controlled graph + trace replay (E1, E2)
+
+6.4 Why does Retain work?
+    Policy comparison + pause/pressure sensitivity (E3, E6)
+
+6.5 Is admission bounded under pressure?
+    Success/repair/churn/capacity invariant (E4, E6)
+
+6.6 How quickly can execution move to the foreground?
+    Scheduler comparison + slice tradeoff + UI co-run (E5, E6)
+
+6.7 Overhead, scaling, and resource cost
+    Control-plane, state footprint, disk I/O, clients and saturation (E7, E8)
+
+6.8 Case studies and limitations
+    Four event timelines and observed failure cases (E9)
 ```
 
-同时提交一段文字：
-
-```text
-deviceId:
-operator:
-Git revision:
-model SHA-256:
-Wasm SHA-256:
-OS:
-GPU:
-driver:
-power mode:
-external display:
-smoke passed: yes/no
-assigned group:
-abnormal events:
-```
-
-不要只提交截图。真正需要的是完整的 `matrix.json`、`summary.json` 和
-`events.jsonl`。
-
-## 20. 当前 Linux CPU smoke 参考
-
-2026-08-28 在 Linux CPU source-built Wasm、Tiny Stories 15M 模型上，
-一次 smoke 得到：
-
-| Case | 关键结果 |
-| --- | --- |
-| Activate / foreground-aware | activation 约 55 ms；foreground TTFT 约 145 ms |
-| Activate / dual-queue | activation 约 596 ms；foreground TTFT 约 686 ms |
-| Retain / lifecycle-aware | 恢复来源 L1；resume-to-first-token 约 128 ms；无策略释放 |
-| Retain / evict-on-pause | 释放 40 tokens；恢复来源 L2；resume-to-first-token 约 230 ms |
-| Admit / monotonic tight | 2 次 fallback；repair-step P95 为 3；成功率 100% |
-| Admit / reject tight | 2 次 admission reject；请求成功率 60%，属于预期拒绝基线 |
-
-这些数值只说明机制和采集链路工作正常，不是正式论文结果，也不能替代
-Windows/macOS WebGPU 数据。
-
-这里的 `inputToNextPaintP95Ms` 每个 smoke run 只有一次交互样本，因此只能验证
-采集链路。正式论文中的 UI tail 必须依赖 core 的多 trial，或后续交互压力
-实验中的多次输入样本。
-
-### 20.1 Admit 参数校准记录
-
-同一 Linux CPU/Tiny Stories 环境下，最初的 core 参数
-`caps=256/1024/4096, budget=16` 几乎不产生容量压力，无法区分 monotonic、
-reactive 和 reject。将三层 token cap 统一收紧为 `128/128/128`，并把
-monotonic budget 设为 2 后，一次开发校准得到：
-
-| Policy | Success rate | Repair-step P95 | Fallbacks | Rejects | 解释 |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Monotonic | 92.3% | 2 | 7 | 1 | repair 严格停在 budget，超预算时受控拒绝 |
-| Reactive | 100% | 3 | 7 | 0 | 完成更多请求，但 repair chain 超过同一 budget |
-| Reject | 75.0% | 0 | 0 | 2 | 不执行 repair，容量不足直接拒绝 |
-
-这组校准说明新矩阵能够测出论文真正要讨论的 tradeoff，因此方案将
-`128/128/128 + budget 2` 作为正式 pilot 的起点。它仍然不是论文结果：
-运行时工作区为 dirty，模型也只是 15M。正式 1B/WebGPU pilot 必须再次确认
-三个策略都处于有区分度、但不会让绝大多数请求失败的压力区间。
-
-## 21. 分工建议
-
-推荐按设备和 group 双维度分工：
-
-| 同学 | 设备 | 任务 |
-| --- | --- | --- |
-| A | Windows Intel 核显 | smoke + core activate |
-| B | Windows AMD APU | smoke + core retain |
-| C | Windows NVIDIA 独显 | smoke + core admit |
-| D | MacBook Air Apple Silicon | smoke + core activate |
-| E | MacBook Pro Apple Silicon Pro | smoke + core retain |
-| F | MacBook Pro Apple Silicon Max | smoke + core admit |
-| G/H | 代表性设备 | sensitivity |
-
-如果人手允许，让每台设备都跑全部 core 矩阵最好；如果时间有限，至少确保
-每个机制在 Windows 和 macOS 上各有两台设备。
+按这套方案跑完后，结果可以直接落入论文的 Evaluation 章节，而不是再从 smoke
+数据临时拼故事。

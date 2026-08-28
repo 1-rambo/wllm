@@ -2221,17 +2221,13 @@ inline static bool tier_release_one_from_level(
     return true;
   }
 
-  const int32_t victim = tier_pick_victim_slot(app, level, protected_slot);
-  const int32_t candidate = victim >= 1
-      ? victim
-      : tier_pick_victim_slot(app, level, -1);
-  if (candidate < 1)
+  const int32_t victim_node_id = tier_pick_victim_slot(app, level, protected_slot);
+  if (victim_node_id < 1)
   {
     err = "no evictable victim in tier=" + std::to_string(level);
     return false;
   }
 
-  const int32_t victim_node_id = candidate;
   const auto *victim_node = app.tree->find_node(victim_node_id);
   const int32_t victim_tokens = std::max(0, tier_slot_token_count(app, victim_node_id));
   admission_note_victim(app, victim_node_id);
@@ -2394,7 +2390,7 @@ inline static bool tier_ensure_space_for_level(
     if (after_tokens >= before_tokens)
     {
       // Emergency fallback: hard-remove one slot to enforce progress.
-      const int32_t forced = tier_pick_victim_slot(app, level, -1);
+      const int32_t forced = tier_pick_victim_slot(app, level, protected_slot);
       if (forced >= 1)
       {
         tree_remove_slot(app, forced);
@@ -2537,7 +2533,10 @@ inline static int32_t tier_pick_victim_slot(const app_t &app, int32_t tier, int3
       fallback = node.id;
     }
   }
-  return fallback >= 1 ? fallback : preferred;
+  // A lifecycle/queue hint is a protection contract, not a soft score. If all
+  // candidates are protected, let admission fail or use its colder fallback
+  // instead of silently evicting the state the browser asked us to retain.
+  return fallback;
 }
 
 inline static void tier_apply_capacity_limits(app_t &app, int32_t protected_slot)

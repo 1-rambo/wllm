@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const PROTOCOL_VERSION = 'wllm.browser-service.experiment.v1';
+const PROTOCOL_VERSION = 'wllm.browser-service.experiment.v2';
 const args = Object.fromEntries(
   process.argv.slice(2).map((arg) => {
     const [key, ...rest] = arg.replace(/^--/, '').split('=');
@@ -60,13 +60,54 @@ const backgroundPredict = Number(args['background-predict'] ?? 64);
 const foregroundPredict = Number(args['foreground-predict'] ?? 8);
 const sessionPredict = Number(args['session-predict'] ?? 8);
 const pressureSessions = Number(args['pressure-sessions'] ?? 0);
+const retentionDecoys = Math.max(0, Number(args['retention-decoys'] ?? 0));
 const pressurePredict = Number(args['pressure-predict'] ?? sessionPredict);
+const targetPromptRepeats = Math.max(
+  1,
+  Number(args['target-prompt-repeats'] ?? 1)
+);
+const pressurePromptRepeats = Math.max(
+  1,
+  Number(args['pressure-prompt-repeats'] ?? 1)
+);
+const backgroundPromptRepeats = Math.max(
+  1,
+  Number(args['background-prompt-repeats'] ?? 1)
+);
+const foregroundPromptRepeats = Math.max(
+  1,
+  Number(args['foreground-prompt-repeats'] ?? 1)
+);
+const requestCount = Math.max(1, Number(args.requests ?? 16));
+const requestPredict =
+  args['request-predict'] === undefined
+    ? null
+    : Math.max(1, Number(args['request-predict']));
+const foregroundEvery = Math.max(1, Number(args['foreground-every'] ?? 4));
+const arrivalGapMs = Math.max(0, Number(args['arrival-gap-ms'] ?? 0));
 const seed = Number(args.seed ?? 42);
 const memoryCapMb = Number(args['memory-cap-mb'] ?? 128);
 const warmupRuns = Number(args['warmup-runs'] ?? 1);
 const warmupPredict = Number(args['warmup-predict'] ?? 4);
 const interactionSamples = Number(args['interaction-samples'] ?? 1);
 const interactionIntervalMs = Number(args['interaction-interval-ms'] ?? 0);
+const uiWorkItems = Math.max(0, Number(args['ui-work-items'] ?? 0));
+const traceFile = args['trace-file'] ?? process.env.WLLM_TRACE_FILE;
+const trace = traceFile
+  ? JSON.parse(await readFile(path.resolve(traceFile), 'utf8'))
+  : null;
+if (trace && trace.schemaVersion !== 'wllm.browser-service.trace.v1') {
+  throw new Error(
+    `Unsupported trace schema: ${trace.schemaVersion ?? 'missing'}`
+  );
+}
+const traceClientCount = Array.isArray(trace?.clients)
+  ? trace.clients.length
+  : 0;
+const clientCount = Math.max(
+  2,
+  Number(args['client-count'] ?? traceClientCount ?? 2)
+);
 const deviceId =
   args['device-id'] ?? process.env.WLLM_DEVICE_ID ?? 'unassigned';
 const operator = args.operator ?? process.env.WLLM_OPERATOR ?? 'unassigned';
@@ -140,6 +181,9 @@ const [modelSha256, wasmJsSha256, wasmBinarySha256] = await Promise.all([
     ? Promise.resolve(args['wasm-sha256'])
     : sha256File(path.join(wasmBuild, 'wllama.wasm')),
 ]);
+const traceSha256 = traceFile
+  ? await sha256File(path.resolve(traceFile))
+  : null;
 
 await mkdir(scratchDir, { recursive: true });
 await copyFile(
@@ -208,16 +252,23 @@ const focusClient = async (page, observer, clientId) => {
   );
 };
 
-const demoteClient = async (page, observer, clientId) => {
+const demoteClient = async (
+  page,
+  observer,
+  clientId,
+  lifecycleState = 'hidden'
+) => {
   const before = await observer.evaluate(() =>
     window.wllmBrowserClient.getTelemetry()
   );
   const beforeSequence = before.at(-1)?.sequence ?? 0;
-  await page.evaluate(() =>
-    window.wllmBrowserClient.updateLifecycle({
-      foreground: false,
-      lifecycleState: 'hidden',
-    })
+  await page.evaluate(
+    (state) =>
+      window.wllmBrowserClient.updateLifecycle({
+        foreground: false,
+        lifecycleState: state,
+      }),
+    lifecycleState
   );
   await waitFor(
     () => observer.evaluate(() => window.wllmBrowserClient.getTelemetry()),
@@ -248,16 +299,90 @@ const demoteClientWithoutAck = async (page) => {
   });
 };
 
+const markMeasurement = async (page, type, data = {}) => {
+  await page.evaluate(
+    ({ type, data }) => window.wllmBrowserClient.recordEvent(type, data),
+    { type, data }
+  );
+};
+
+const makePrompt = (label, repeats) =>
+  Array.from(
+    { length: Math.max(1, Math.floor(repeats)) },
+    (_, index) =>
+      `${label} segment ${index}: preserve concrete page facts, compare alternatives, and keep the reasoning state available for a later follow-up.`
+  ).join(' ');
+
+const recordStateSnapshot = async (page, label, caps) => {
+  await page.evaluate(
+    async ({ label, caps }) => {
+      const state = await window.wllmBrowserClient.chatGetState();
+      const usage = [
+        state.tierStats.l1Tokens,
+        state.tierStats.l2Tokens,
+        state.tierStats.l3Tokens,
+      ];
+      await window.wllmBrowserClient.recordEvent('state_snapshot', {
+        label,
+        totalSnapshotTokenBytes: state.totalSnapshotTokenBytes,
+        contextMemoryBytes: state.contextMemoryBytes,
+        memoryCapBytes: state.memoryCapBytes,
+        nodeCount: state.nodes.size,
+        capacityViolationCount: usage.filter(
+          (value, index) => caps[index] > 0 && value > caps[index]
+        ).length,
+        ...state.tierStats,
+      });
+    },
+    { label, caps }
+  );
+};
+
 const quantile = (values, q) => {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[
-    Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1)))
-  ];
+  const position = Math.min(
+    sorted.length - 1,
+    Math.max(0, (sorted.length - 1) * q)
+  );
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  const weight = position - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
 };
 
 const summarize = (events, clientIds, scenarioName) => {
-  const foregroundChange = [...events]
+  const measurementStart = events.find(
+    (event) => event.type === 'measurement_start'
+  );
+  const measurementEnd = [...events]
+    .reverse()
+    .find((event) => event.type === 'measurement_end');
+  const measuredEvents = measurementStart
+    ? events.filter(
+        (event) =>
+          event.sequence >= measurementStart.sequence &&
+          (!measurementEnd || event.sequence <= measurementEnd.sequence)
+      )
+    : events;
+  const measurementStartSequence = measurementStart?.sequence ?? 0;
+  const lastForegroundChangeBeforeMeasurement = [...events]
+    .reverse()
+    .find(
+      (event) =>
+        event.sequence < measurementStartSequence &&
+        event.type === 'foreground_change' &&
+        event.clientId === clientIds.foreground &&
+        event.data?.foreground === true
+    );
+  const foregroundChanges = measuredEvents.filter(
+    (event) =>
+      event.type === 'foreground_change' &&
+      event.data?.foreground === true &&
+      (scenarioName === 'trace' || event.clientId === clientIds.foreground)
+  );
+  const foregroundChange = [...measuredEvents]
     .reverse()
     .find(
       (event) =>
@@ -265,85 +390,96 @@ const summarize = (events, clientIds, scenarioName) => {
         event.clientId === clientIds.foreground &&
         event.data?.foreground === true
     );
+  const foregroundReference =
+    foregroundChange ??
+    (scenarioName === 'load'
+      ? lastForegroundChangeBeforeMeasurement
+      : undefined);
   const foregroundChangedAt = Number(
-    foregroundChange?.data?.changedAt ?? foregroundChange?.wallTimeMs ?? 0
+    foregroundReference?.data?.changedAt ?? foregroundReference?.wallTimeMs ?? 0
   );
-  const firstDispatch = events.find(
+  const firstDispatch = measuredEvents.find(
     (event) =>
       event.type === 'slice_dispatch' &&
       event.clientId === clientIds.foreground &&
-      (!foregroundChange || event.timestampMs >= foregroundChange.timestampMs)
+      (!foregroundReference ||
+        event.timestampMs >= foregroundReference.timestampMs)
   );
-  const firstToken = events.find(
+  const firstToken = measuredEvents.find(
     (event) =>
       event.type === 'first_token' &&
       event.clientId === clientIds.foreground &&
-      (!foregroundChange || event.timestampMs >= foregroundChange.timestampMs)
+      (!foregroundReference ||
+        event.timestampMs >= foregroundReference.timestampMs)
   );
-  const admissions = events.filter((event) =>
+  const admissions = measuredEvents.filter((event) =>
     ['admission_commit', 'admission_fallback', 'admission_reject'].includes(
       event.type
     )
   );
-  const count = (type) => events.filter((event) => event.type === type).length;
-  const released = events.filter(
+  const count = (type) =>
+    measuredEvents.filter((event) => event.type === type).length;
+  const released = measuredEvents.filter(
     (event) =>
       event.type === 'state_release' &&
       event.data?.reason !== 'experiment_cleanup'
   );
-  const cleanupReleased = events.filter(
+  const cleanupReleased = measuredEvents.filter(
     (event) =>
       event.type === 'state_release' &&
       event.data?.reason === 'experiment_cleanup'
   );
   const resumedClientId =
-    scenarioName === 'retain' ? clientIds.background : clientIds.foreground;
-  const resumedSession = [...events]
-    .reverse()
-    .find(
-      (event) =>
-        (event.type === 'state_restore' || event.type === 'state_rebuild') &&
-        event.clientId === resumedClientId &&
-        typeof event.data?.restoreSource === 'string'
-    );
-  const paintLatencies = events
+    scenarioName === 'retain'
+      ? clientIds.background
+      : scenarioName === 'handoff'
+        ? clientIds.foreground
+        : undefined;
+  const sessionResume =
+    scenarioName === 'retain' || scenarioName === 'handoff'
+      ? [...measuredEvents]
+          .reverse()
+          .find(
+            (event) =>
+              event.type === 'session_resume' &&
+              event.clientId === resumedClientId
+          )
+      : undefined;
+  const resumedSession = measuredEvents.find(
+    (event) =>
+      (event.type === 'state_restore' || event.type === 'state_rebuild') &&
+      (resumedClientId === undefined || event.clientId === resumedClientId) &&
+      (!sessionResume || event.sequence >= sessionResume.sequence) &&
+      typeof event.data?.restoreSource === 'string'
+  );
+  const paintLatencies = measuredEvents
     .filter(
       (event) =>
         event.type === 'next_paint' && event.clientId === clientIds.foreground
     )
     .map((event) => Number(event.data?.latencyMs ?? 0));
-  const sliceDurationsMs = events
+  const sliceDurationsMs = measuredEvents
     .filter((event) => event.type === 'slice_complete')
     .map((event) => Number(event.data?.durationMs ?? 0));
-  const foregroundComplete = [...events]
+  const foregroundComplete = [...measuredEvents]
     .reverse()
     .find(
       (event) =>
         event.type === 'request_complete' &&
         event.clientId === clientIds.foreground
     );
-  const backgroundComplete = [...events]
+  const backgroundComplete = [...measuredEvents]
     .reverse()
     .find(
       (event) =>
         event.type === 'request_complete' &&
         event.clientId === clientIds.background
     );
-  const sessionResume =
-    scenarioName === 'retain'
-      ? [...events]
-          .reverse()
-          .find(
-            (event) =>
-              event.type === 'session_resume' &&
-              event.clientId === clientIds.background
-          )
-      : undefined;
   const sessionResumedAt = Number(
     sessionResume?.data?.changedAt ?? sessionResume?.wallTimeMs ?? 0
   );
   const resumeDispatch = sessionResume
-    ? events.find(
+    ? measuredEvents.find(
         (event) =>
           event.type === 'slice_dispatch' &&
           event.clientId === clientIds.background &&
@@ -351,7 +487,7 @@ const summarize = (events, clientIds, scenarioName) => {
       )
     : undefined;
   const resumeFirstToken = sessionResume
-    ? events.find(
+    ? measuredEvents.find(
         (event) =>
           event.type === 'first_token' &&
           event.clientId === clientIds.background &&
@@ -360,14 +496,171 @@ const summarize = (events, clientIds, scenarioName) => {
     : undefined;
   const completedRequests = count('request_complete');
   const failedRequests = count('request_fail');
+  const measuredCompleted = measuredEvents.filter(
+    (event) => event.type === 'request_complete'
+  );
+  const measuredFailed = measuredEvents.filter(
+    (event) => event.type === 'request_fail'
+  );
+  const requestArrivals = measuredEvents.filter(
+    (event) => event.type === 'request_arrive'
+  );
+  const workloadStartedAt = measurementStart
+    ? Number(measurementStart.wallTimeMs)
+    : requestArrivals.length
+      ? Math.min(...requestArrivals.map((event) => Number(event.wallTimeMs)))
+      : 0;
+  const terminalEvents = [...measuredCompleted, ...measuredFailed];
+  const workloadCompletedAt = measurementEnd
+    ? Number(measurementEnd.wallTimeMs)
+    : terminalEvents.length
+      ? Math.max(...terminalEvents.map((event) => Number(event.wallTimeMs)))
+      : workloadStartedAt;
+  const completedTokens = measuredCompleted.reduce(
+    (sum, event) => sum + Number(event.data?.generatedTokens ?? 0),
+    0
+  );
+  const schedulerDecisions = measuredEvents
+    .filter((event) => event.type === 'scheduler_decision')
+    .map((event) => Number(event.data?.durationMs ?? 0));
+  const cacheHints = measuredEvents
+    .filter((event) => event.type === 'cache_hint')
+    .map((event) => Number(event.data?.durationMs ?? 0));
+  const requestWallTimes = measuredCompleted.map((event) =>
+    Number(event.data?.totalWallMs ?? 0)
+  );
+  const requestTtfts = measuredCompleted.map((event) =>
+    Number(event.data?.ttftMs ?? 0)
+  );
+  const requestQueueWaits = measuredCompleted.map((event) =>
+    Number(event.data?.queueWaitMs ?? 0)
+  );
+  const foregroundRequestWallTimes = measuredCompleted
+    .filter((event) => event.data?.foreground === true)
+    .map((event) => Number(event.data?.totalWallMs ?? 0));
+  const backgroundRequestWallTimes = measuredCompleted
+    .filter((event) => event.data?.foreground !== true)
+    .map((event) => Number(event.data?.totalWallMs ?? 0));
+  const phaseTotal = (name) =>
+    measuredCompleted.reduce(
+      (sum, event) => sum + Number(event.data?.phases?.[name] ?? 0),
+      0
+    );
+  const totalControlPlaneMs =
+    schedulerDecisions.reduce((sum, value) => sum + value, 0) +
+    cacheHints.reduce((sum, value) => sum + value, 0);
+  const admissionTotalMs = admissions.reduce(
+    (sum, event) => sum + Number(event.data?.latencyMs ?? 0),
+    0
+  );
+  const workloadMakespanMs = Math.max(
+    0,
+    workloadCompletedAt - workloadStartedAt
+  );
+  const stateSnapshots = events.filter(
+    (event) => event.type === 'state_snapshot'
+  );
+  const peakSnapshotTokenBytes = stateSnapshots.length
+    ? Math.max(
+        ...stateSnapshots.map((event) =>
+          Number(event.data?.totalSnapshotTokenBytes ?? 0)
+        )
+      )
+    : 0;
+  const peakL1Tokens = stateSnapshots.length
+    ? Math.max(
+        ...stateSnapshots.map((event) => Number(event.data?.l1Tokens ?? 0))
+      )
+    : 0;
+  const peakL2Tokens = stateSnapshots.length
+    ? Math.max(
+        ...stateSnapshots.map((event) => Number(event.data?.l2Tokens ?? 0))
+      )
+    : 0;
+  const peakL3Tokens = stateSnapshots.length
+    ? Math.max(
+        ...stateSnapshots.map((event) => Number(event.data?.l3Tokens ?? 0))
+      )
+    : 0;
+  const overduePromotionCount = measuredCompleted.reduce(
+    (sum, event) => sum + Number(event.data?.promotedToOverdueCount ?? 0),
+    0
+  );
+  const configuredCaps = [
+    Number(args['l1-cap'] ?? 512),
+    Number(args['l2-cap'] ?? 2048),
+    Number(args['l3-cap'] ?? 8192),
+  ];
+  const capacityViolationCount = stateSnapshots.filter((event) => {
+    const usage = [
+      Number(event.data?.l1Tokens ?? 0),
+      Number(event.data?.l2Tokens ?? 0),
+      Number(event.data?.l3Tokens ?? 0),
+    ];
+    return usage.some(
+      (value, index) =>
+        configuredCaps[index] > 0 && value > configuredCaps[index]
+    );
+  }).length;
+  const admissionRepairSteps = admissions.map((event) =>
+    Number(event.data?.repairSteps ?? 0)
+  );
+  const configuredRepairBudget = Number(args['repair-budget'] ?? 32);
+  const admissionBudgetViolationCount =
+    args.admission === 'monotonic'
+      ? admissionRepairSteps.filter((steps) => steps > configuredRepairBudget)
+          .length
+      : 0;
+  const activationLatenciesMs = foregroundChanges
+    .map((change) => {
+      const dispatch = measuredEvents.find(
+        (event) =>
+          event.type === 'slice_dispatch' &&
+          event.clientId === change.clientId &&
+          event.timestampMs >= change.timestampMs
+      );
+      const changedAt = Number(
+        change.data?.changedAt ?? change.wallTimeMs ?? 0
+      );
+      return dispatch ? Number(dispatch.wallTimeMs) - changedAt : null;
+    })
+    .filter((value) => value !== null);
+  const foregroundResumeTtftsMs = foregroundChanges
+    .map((change) => {
+      const token = measuredEvents.find(
+        (event) =>
+          event.type === 'first_token' &&
+          event.clientId === change.clientId &&
+          event.timestampMs >= change.timestampMs
+      );
+      const changedAt = Number(
+        change.data?.changedAt ?? change.wallTimeMs ?? 0
+      );
+      return token ? Number(token.wallTimeMs) - changedAt : null;
+    })
+    .filter((value) => value !== null);
+  const restoreSourceCounts = measuredEvents
+    .filter(
+      (event) =>
+        (event.type === 'state_restore' || event.type === 'state_rebuild') &&
+        typeof event.data?.restoreSource === 'string'
+    )
+    .reduce((counts, event) => {
+      const source = String(event.data.restoreSource);
+      counts[source] = (counts[source] ?? 0) + 1;
+      return counts;
+    }, {});
+  const uiMeasurement = [...events]
+    .reverse()
+    .find((event) => event.type === 'ui_measurement')?.data;
   return {
     eventCount: events.length,
     foregroundActivationMs:
-      foregroundChange && firstDispatch
+      foregroundReference && firstDispatch
         ? Number(firstDispatch.wallTimeMs) - foregroundChangedAt
         : null,
     foregroundFirstTokenMs:
-      foregroundChange && firstToken
+      foregroundReference && firstToken
         ? Number(firstToken.wallTimeMs) - foregroundChangedAt
         : null,
     foregroundTotalWallMs:
@@ -397,10 +690,11 @@ const summarize = (events, clientIds, scenarioName) => {
     admissionCommitCount: count('admission_commit'),
     admissionFallbackCount: count('admission_fallback'),
     admissionRejectCount: count('admission_reject'),
-    admissionRepairStepsP95: quantile(
-      admissions.map((event) => Number(event.data?.repairSteps ?? 0)),
-      0.95
-    ),
+    admissionRepairStepsP95: quantile(admissionRepairSteps, 0.95),
+    admissionRepairStepsMax: admissionRepairSteps.length
+      ? Math.max(...admissionRepairSteps)
+      : 0,
+    admissionBudgetViolationCount,
     admissionLatencyP95Ms: quantile(
       admissions.map((event) => Number(event.data?.latencyMs ?? 0)),
       0.95
@@ -451,6 +745,67 @@ const summarize = (events, clientIds, scenarioName) => {
       completedRequests + failedRequests > 0
         ? completedRequests / (completedRequests + failedRequests)
         : 0,
+    measuredCompletedRequestCount: measuredCompleted.length,
+    measuredRequestFailureCount: measuredFailed.length,
+    measuredRequestSuccessRate:
+      measuredCompleted.length + measuredFailed.length > 0
+        ? measuredCompleted.length /
+          (measuredCompleted.length + measuredFailed.length)
+        : 0,
+    foregroundSwitchCount: foregroundChanges.length,
+    foregroundActivationP50Ms: quantile(activationLatenciesMs, 0.5),
+    foregroundActivationP95Ms: quantile(activationLatenciesMs, 0.95),
+    foregroundResumeTtftP50Ms: quantile(foregroundResumeTtftsMs, 0.5),
+    foregroundResumeTtftP95Ms: quantile(foregroundResumeTtftsMs, 0.95),
+    restoreSourceCounts,
+    workloadMakespanMs,
+    aggregateThroughputTokensPerSecond:
+      workloadMakespanMs > 0
+        ? (completedTokens * 1000) / workloadMakespanMs
+        : 0,
+    requestWallTimeP50Ms: quantile(requestWallTimes, 0.5),
+    requestWallTimeP95Ms: quantile(requestWallTimes, 0.95),
+    requestTtftP50Ms: quantile(requestTtfts, 0.5),
+    requestTtftP95Ms: quantile(requestTtfts, 0.95),
+    requestQueueWaitP95Ms: quantile(requestQueueWaits, 0.95),
+    foregroundRequestWallTimeP95Ms: quantile(foregroundRequestWallTimes, 0.95),
+    backgroundRequestWallTimeP95Ms: quantile(backgroundRequestWallTimes, 0.95),
+    overduePromotionCount,
+    totalPrefillMs: phaseTotal('prefillMs'),
+    totalDecodeMs: phaseTotal('decodeMs'),
+    totalCacheLoadMs: phaseTotal('cacheLoadMs'),
+    totalRebuildMs: phaseTotal('rebuildMs'),
+    totalParentRecoverMs: phaseTotal('parentRecoverMs'),
+    totalPostMs: phaseTotal('postMs'),
+    schedulerDecisionCount: schedulerDecisions.length,
+    schedulerDecisionTotalMs: schedulerDecisions.reduce(
+      (sum, value) => sum + value,
+      0
+    ),
+    schedulerDecisionP95Ms: quantile(schedulerDecisions, 0.95),
+    cacheHintCount: cacheHints.length,
+    cacheHintTotalMs: cacheHints.reduce((sum, value) => sum + value, 0),
+    cacheHintP95Ms: quantile(cacheHints, 0.95),
+    admissionTotalMs,
+    controlPlaneTotalMs: totalControlPlaneMs,
+    controlPlanePct:
+      workloadMakespanMs > 0
+        ? (totalControlPlaneMs / workloadMakespanMs) * 100
+        : 0,
+    stateSnapshotCount: stateSnapshots.length,
+    peakSnapshotTokenBytes,
+    peakL1Tokens,
+    peakL2Tokens,
+    peakL3Tokens,
+    capacityViolationCount,
+    uiFrameSampleCount: Number(uiMeasurement?.sampleCount ?? 0),
+    uiWorkloadBackend: String(uiMeasurement?.backend ?? 'disabled'),
+    uiAverageFps: Number(uiMeasurement?.averageFps ?? 0),
+    uiFrameTimeP50Ms: Number(uiMeasurement?.frameTimeP50Ms ?? 0),
+    uiFrameTimeP95Ms: Number(uiMeasurement?.frameTimeP95Ms ?? 0),
+    uiFrameTimeP99Ms: Number(uiMeasurement?.frameTimeP99Ms ?? 0),
+    uiMaxFrameTimeMs: Number(uiMeasurement?.maxFrameTimeMs ?? 0),
+    uiLongFrameRatio: Number(uiMeasurement?.longFrameRatio ?? 0),
     inputToNextPaintP95Ms: quantile(paintLatencies, 0.95),
   };
 };
@@ -465,6 +820,12 @@ try {
   const context = await browser.newContext();
   const background = await context.newPage();
   const foreground = await context.newPage();
+  const extraPages = await Promise.all(
+    Array.from({ length: Math.max(0, clientCount - 2) }, () =>
+      context.newPage()
+    )
+  );
+  const pages = [background, foreground, ...extraPages];
   const base = new URL(
     `http://127.0.0.1:${port}/examples/browser-service-smoke/`
   );
@@ -473,17 +834,45 @@ try {
   base.searchParams.set('gpu', args.gpu === 'true' ? '1' : '0');
   base.searchParams.set('scheduler', args.scheduler ?? 'foreground-aware');
   base.searchParams.set('slice', args.slice ?? '32');
+  base.searchParams.set(
+    'foregroundSlice',
+    args['foreground-slice'] ?? args.slice ?? '32'
+  );
   base.searchParams.set('backgroundSlice', args['background-slice'] ?? '4');
   base.searchParams.set('handoffGrace', args['handoff-grace'] ?? '16');
   base.searchParams.set('yield', args.yield ?? 'true');
+  base.searchParams.set('queueMaxPending', args['queue-max-pending'] ?? '128');
+  base.searchParams.set(
+    'prefillSliceMaxMs',
+    args['prefill-slice-max-ms'] ?? '5000'
+  );
+  base.searchParams.set('waitBudgetScale', args['wait-budget-scale'] ?? '1');
+  if (args['wait-budget-cap-ms'] !== undefined) {
+    base.searchParams.set('waitBudgetCapMs', args['wait-budget-cap-ms']);
+  }
+  base.searchParams.set(
+    'costWarmupRequests',
+    args['cost-warmup-requests'] ?? '20'
+  );
+  base.searchParams.set(
+    'costSampleWindow',
+    args['cost-sample-window'] ?? '256'
+  );
+  base.searchParams.set(
+    'evictionHintTopK',
+    args['eviction-hint-top-k'] ?? '64'
+  );
   base.searchParams.set('retention', args.retention ?? 'lifecycle-aware');
   base.searchParams.set('retentionTtl', args['retention-ttl'] ?? '30000');
+  // Establish the first SharedWorker before attaching the remaining tabs.
+  // Starting several blob-backed SharedWorkers concurrently can race through
+  // the localStorage registry on slower browsers.
   await background.goto(base.href);
-  await foreground.goto(base.href);
-  await Promise.all([
-    background.evaluate(() => window.wllmBrowserReady),
-    foreground.evaluate(() => window.wllmBrowserReady),
-  ]);
+  await background.evaluate(() => window.wllmBrowserReady);
+  for (const page of pages.slice(1)) {
+    await page.goto(base.href);
+    await page.evaluate(() => window.wllmBrowserReady);
+  }
   const browserRuntime = await foreground.evaluate(async () => {
     const runtime = {
       userAgent: navigator.userAgent,
@@ -516,6 +905,7 @@ try {
     return runtime;
   });
 
+  const modelLoadStartedAt = performance.now();
   await background.evaluate(
     ({ modelUrl, useWebGPU, nCtx, nBatch, nSeqMax, seed }) =>
       window.wllmBrowserClient.loadModelFromUrl(modelUrl, {
@@ -534,24 +924,31 @@ try {
       seed,
     }
   );
-  await foreground.evaluate(
-    ({ modelUrl, useWebGPU, nCtx, nBatch, nSeqMax, seed }) =>
-      window.wllmBrowserClient.loadModelFromUrl(modelUrl, {
-        seed,
-        n_ctx: nCtx,
-        n_batch: nBatch,
-        n_seq_max: nSeqMax,
-        offload_kqv: useWebGPU,
-      }),
-    {
-      modelUrl,
-      useWebGPU: args.gpu === 'true',
-      nCtx: Number(args['n-ctx'] ?? 8192),
-      nBatch: Number(args['n-batch'] ?? 128),
-      nSeqMax: Number(args['n-seq-max'] ?? 8),
-      seed,
-    }
+  const modelLoadMs = performance.now() - modelLoadStartedAt;
+  const clientAttachStartedAt = performance.now();
+  await Promise.all(
+    pages.slice(1).map((page) =>
+      page.evaluate(
+        ({ modelUrl, useWebGPU, nCtx, nBatch, nSeqMax, seed }) =>
+          window.wllmBrowserClient.loadModelFromUrl(modelUrl, {
+            seed,
+            n_ctx: nCtx,
+            n_batch: nBatch,
+            n_seq_max: nSeqMax,
+            offload_kqv: useWebGPU,
+          }),
+        {
+          modelUrl,
+          useWebGPU: args.gpu === 'true',
+          nCtx: Number(args['n-ctx'] ?? 8192),
+          nBatch: Number(args['n-batch'] ?? 128),
+          nSeqMax: Number(args['n-seq-max'] ?? 8),
+          seed,
+        }
+      )
+    )
   );
+  const additionalClientAttachMs = performance.now() - clientAttachStartedAt;
   if (modelFile && args['keep-model-cache'] !== 'true') {
     await background.evaluate(() =>
       window.wllmBrowserClient.cacheManager.clear()
@@ -569,7 +966,7 @@ try {
     );
   }
   const tieredCache = {
-    enabled: true,
+    enabled: args['tiered-cache'] !== 'false',
     l1TokenCap: Number(args['l1-cap'] ?? 512),
     l2TokenCap: Number(args['l2-cap'] ?? 2048),
     l3TokenCap: Number(args['l3-cap'] ?? 8192),
@@ -577,6 +974,11 @@ try {
     admissionPolicy: args.admission ?? 'monotonic',
     admissionMaxRepairSteps: Number(args['repair-budget'] ?? 32),
   };
+  const tierCaps = [
+    tieredCache.l1TokenCap,
+    tieredCache.l2TokenCap,
+    tieredCache.l3TokenCap,
+  ];
   await background.evaluate(
     ({ tieredCache, memoryCapBytes }) =>
       window.wllmBrowserClient.chatSessionInit(memoryCapBytes, tieredCache),
@@ -605,6 +1007,7 @@ try {
     await foreground.evaluate(() => window.wllmBrowserClient.chatReset());
   }
   await foreground.evaluate(() => window.wllmBrowserClient.getTelemetry(true));
+  await foreground.evaluate(() => window.wllmClearExperimentEvents());
 
   const clientIds = {
     background: await background.evaluate(
@@ -613,29 +1016,51 @@ try {
     foreground: await foreground.evaluate(
       () => window.wllmBrowserClient.clientId
     ),
+    competitors: await Promise.all(
+      extraPages.map((page) =>
+        page.evaluate(() => window.wllmBrowserClient.clientId)
+      )
+    ),
   };
   const operationErrors = [];
   const pressureNodeIds = [];
+  const startUiMeasurement = async () => {
+    if (uiWorkItems > 0) {
+      await foreground.evaluate(
+        (workItems) => window.wllmStartUiMeasurement(workItems),
+        uiWorkItems
+      );
+    }
+  };
+  const stopUiMeasurement = async () => {
+    if (uiWorkItems > 0) {
+      await foreground.evaluate(() => window.wllmStopUiMeasurement());
+    }
+  };
 
   if (scenario === 'activate') {
+    await startUiMeasurement();
+    await markMeasurement(foreground, 'measurement_start', { scenario });
     await focusClient(background, foreground, clientIds.background);
     await demoteClient(foreground, foreground, clientIds.foreground);
     const backgroundRequest = background.evaluate(
-      (nPredict) => (
+      ({ nPredict, prompt }) => (
         (window.wllmBackgroundChunkCount = 0),
-        window.wllmBrowserClient.chatFromNode(
-          0,
-          'Continue this background analysis in detail.',
-          {
-            nPredict,
-            logicalSessionId: 'background',
-            onChunk: () => {
-              window.wllmBackgroundChunkCount += 1;
-            },
-          }
-        )
+        window.wllmBrowserClient.chatFromNode(0, prompt, {
+          nPredict,
+          logicalSessionId: 'background',
+          onChunk: () => {
+            window.wllmBackgroundChunkCount += 1;
+          },
+        })
       ),
-      backgroundPredict
+      {
+        nPredict: backgroundPredict,
+        prompt: makePrompt(
+          'Continue this background analysis in detail',
+          backgroundPromptRepeats
+        ),
+      }
     );
     await waitFor(
       () => background.evaluate(() => window.wllmBackgroundChunkCount ?? 0),
@@ -658,44 +1083,142 @@ try {
     );
     const [foregroundRequest] = await Promise.all([
       foreground.evaluate(
-        (nPredict) =>
-          window.wllmBrowserClient.chatFromNode(0, 'Respond now.', {
+        ({ nPredict, prompt }) =>
+          window.wllmBrowserClient.chatFromNode(0, prompt, {
             nPredict,
             logicalSessionId: 'foreground',
           }),
-        foregroundPredict
+        {
+          nPredict: foregroundPredict,
+          prompt: makePrompt(
+            'Answer the newly foreground browser request now',
+            foregroundPromptRepeats
+          ),
+        }
       ),
       interaction,
     ]);
     await Promise.all([backgroundRequest, foregroundRequest]);
+    await stopUiMeasurement();
+    await markMeasurement(foreground, 'measurement_end', { scenario });
   } else if (scenario === 'retain') {
+    await markMeasurement(foreground, 'measurement_start', { scenario });
+    const pressurePages = extraPages.length > 0 ? extraPages : [foreground];
+    for (let i = 0; i < retentionDecoys; i++) {
+      const decoyPage = pressurePages[i % pressurePages.length];
+      const decoyClientId =
+        extraPages.length > 0
+          ? clientIds.competitors[i % pressurePages.length]
+          : clientIds.foreground;
+      await focusClient(decoyPage, foreground, decoyClientId);
+      const decoyState = await decoyPage.evaluate(
+        ({ index, nPredict, prompt }) =>
+          window.wllmBrowserClient.chatFromNode(
+            0,
+            `${prompt} Initial decoy ${index}.`,
+            {
+              nPredict,
+              logicalSessionId: `retention-decoy-${index}`,
+            }
+          ),
+        {
+          index: i,
+          nPredict: pressurePredict,
+          prompt: makePrompt(
+            'Create an initially resident competing session',
+            pressurePromptRepeats
+          ),
+        }
+      );
+      pressureNodeIds.push(decoyState.nodeId);
+      await demoteClient(decoyPage, foreground, decoyClientId, 'frozen');
+    }
     await focusClient(background, foreground, clientIds.background);
     await demoteClient(foreground, foreground, clientIds.foreground);
     const state = await background.evaluate(
-      (nPredict) =>
-        window.wllmBrowserClient.chatFromNode(0, 'Remember this session.', {
+      ({ nPredict, prompt }) =>
+        window.wllmBrowserClient.chatFromNode(0, prompt, {
           nPredict,
           logicalSessionId: 'resume-target',
         }),
-      sessionPredict
+      {
+        nPredict: sessionPredict,
+        prompt: makePrompt(
+          'Remember the facts and intermediate reasoning for this browser session',
+          targetPromptRepeats
+        ),
+      }
     );
-    await demoteClient(background, foreground, clientIds.background);
     await focusClient(foreground, foreground, clientIds.foreground);
+    await demoteClient(
+      background,
+      foreground,
+      clientIds.background,
+      args['pause-state'] ?? 'hidden'
+    );
+    for (let i = 0; i < pressurePages.length; i++) {
+      const pressureClientId =
+        extraPages.length > 0 ? clientIds.competitors[i] : clientIds.foreground;
+      await demoteClient(
+        pressurePages[i],
+        foreground,
+        pressureClientId,
+        'hidden'
+      );
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, Number(args['pause-ms'] ?? 1000))
+    );
     for (let i = 0; i < pressureSessions; i++) {
-      const pressureState = await foreground.evaluate(
-        ({ index, nPredict }) =>
+      const pressurePage = pressurePages[i % pressurePages.length];
+      const pressureState = await pressurePage.evaluate(
+        ({ index, nPredict, prompt }) =>
           window.wllmBrowserClient.chatFromNode(
             0,
-            `Create competing foreground state ${index}.`,
+            `${prompt} Session ${index}.`,
             {
               nPredict,
               logicalSessionId: 'pressure',
             }
           ),
-        { index: i, nPredict: pressurePredict }
+        {
+          index: i,
+          nPredict: pressurePredict,
+          prompt: makePrompt(
+            'Create a competing browser-session state',
+            pressurePromptRepeats
+          ),
+        }
       );
       pressureNodeIds.push(pressureState.nodeId);
+      await demoteClient(
+        pressurePage,
+        foreground,
+        extraPages.length > 0
+          ? clientIds.competitors[i % pressurePages.length]
+          : clientIds.foreground,
+        'frozen'
+      );
     }
+    await demoteClient(foreground, foreground, clientIds.foreground);
+    await focusClient(background, foreground, clientIds.background);
+    await background.evaluate(
+      ({ parentId, nPredict, prompt }) =>
+        window.wllmBrowserClient.chatFromNode(parentId, prompt, {
+          nPredict,
+          logicalSessionId: 'resume-target',
+        }),
+      {
+        parentId: state.nodeId,
+        nPredict: sessionPredict,
+        prompt: makePrompt(
+          'Resume the task using the retained context',
+          foregroundPromptRepeats
+        ),
+      }
+    );
+    await recordStateSnapshot(foreground, 'after-resume', tierCaps);
+    await markMeasurement(foreground, 'measurement_end', { scenario });
     if (args['release-pressure'] !== 'false' && pressureNodeIds.length > 0) {
       await foreground.evaluate(
         (nodeIds) =>
@@ -706,20 +1229,8 @@ try {
         pressureNodeIds
       );
     }
-    await new Promise((resolve) =>
-      setTimeout(resolve, Number(args['pause-ms'] ?? 1000))
-    );
-    await demoteClient(foreground, foreground, clientIds.foreground);
-    await focusClient(background, foreground, clientIds.background);
-    await background.evaluate(
-      ({ parentId, nPredict }) =>
-        window.wllmBrowserClient.chatFromNode(parentId, 'Resume it.', {
-          nPredict,
-          logicalSessionId: 'resume-target',
-        }),
-      { parentId: state.nodeId, nPredict: sessionPredict }
-    );
   } else if (scenario === 'admit') {
+    await markMeasurement(foreground, 'measurement_start', { scenario });
     await focusClient(background, foreground, clientIds.background);
     await demoteClient(foreground, foreground, clientIds.foreground);
     const nodes = [];
@@ -727,16 +1238,23 @@ try {
       try {
         nodes.push(
           await background.evaluate(
-            ({ index, nPredict }) =>
+            ({ index, nPredict, prompt }) =>
               window.wllmBrowserClient.chatFromNode(
                 0,
-                `Create resumable state ${index}.`,
+                `${prompt} Session ${index}.`,
                 {
                   nPredict,
                   logicalSessionId: `state-${index}`,
                 }
               ),
-            { index: i, nPredict: sessionPredict }
+            {
+              index: i,
+              nPredict: sessionPredict,
+              prompt: makePrompt(
+                'Create a resumable state under finite capacity',
+                pressurePromptRepeats
+              ),
+            }
           )
         );
       } catch (error) {
@@ -751,16 +1269,19 @@ try {
       await focusClient(foreground, foreground, clientIds.foreground);
       try {
         await foreground.evaluate(
-          ({ parentId, nPredict }) =>
-            window.wllmBrowserClient.chatFromNode(
-              parentId,
-              'Resume under pressure.',
-              {
-                nPredict,
-                logicalSessionId: 'admission-target',
-              }
+          ({ parentId, nPredict, prompt }) =>
+            window.wllmBrowserClient.chatFromNode(parentId, prompt, {
+              nPredict,
+              logicalSessionId: 'admission-target',
+            }),
+          {
+            parentId: nodes[0].nodeId,
+            nPredict: foregroundPredict,
+            prompt: makePrompt(
+              'Resume the selected state under capacity pressure',
+              foregroundPromptRepeats
             ),
-          { parentId: nodes[0].nodeId, nPredict: foregroundPredict }
+          }
         );
       } catch (error) {
         operationErrors.push(
@@ -770,13 +1291,435 @@ try {
     } else {
       operationErrors.push('no resumable state was admitted');
     }
+    await recordStateSnapshot(foreground, 'after-admission', tierCaps);
+    await markMeasurement(foreground, 'measurement_end', { scenario });
+  } else if (scenario === 'handoff') {
+    const competitors = [background, ...extraPages];
+    await focusClient(foreground, foreground, clientIds.foreground);
+    for (let i = 0; i < competitors.length; i++) {
+      const clientId =
+        i === 0 ? clientIds.background : clientIds.competitors[i - 1];
+      await demoteClient(competitors[i], foreground, clientId);
+    }
+    const targetState = await foreground.evaluate(
+      ({ nPredict, prompt }) =>
+        window.wllmBrowserClient.chatFromNode(0, prompt, {
+          nPredict,
+          logicalSessionId: 'handoff-target',
+        }),
+      {
+        nPredict: sessionPredict,
+        prompt: makePrompt(
+          'Build and retain the context for this interactive browser task',
+          targetPromptRepeats
+        ),
+      }
+    );
+    await demoteClient(foreground, foreground, clientIds.foreground);
+    await focusClient(background, foreground, clientIds.background);
+
+    const competingStates = [];
+    for (let i = 0; i < pressureSessions; i++) {
+      const page = competitors[i % competitors.length];
+      try {
+        const state = await page.evaluate(
+          ({ index, nPredict, prompt }) =>
+            window.wllmBrowserClient.chatFromNode(
+              0,
+              `${prompt} Task ${index}.`,
+              {
+                nPredict,
+                logicalSessionId: `handoff-pressure-${index}`,
+              }
+            ),
+          {
+            index: i,
+            nPredict: pressurePredict,
+            prompt: makePrompt(
+              'Prepare a competing background browser task',
+              pressurePromptRepeats
+            ),
+          }
+        );
+        competingStates.push({ pageIndex: i % competitors.length, ...state });
+        pressureNodeIds.push(state.nodeId);
+      } catch (error) {
+        operationErrors.push(
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
+    for (let i = 0; i < competitors.length; i++) {
+      const clientId =
+        i === 0 ? clientIds.background : clientIds.competitors[i - 1];
+      await demoteClient(competitors[i], foreground, clientId, 'frozen');
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, Number(args['pause-ms'] ?? 5000))
+    );
+    await recordStateSnapshot(foreground, 'before-handoff', tierCaps);
+    await startUiMeasurement();
+    await markMeasurement(foreground, 'measurement_start', { scenario });
+    const backgroundRequests = competitors.map((page, index) => {
+      const parent =
+        [...competingStates]
+          .reverse()
+          .find((state) => state.pageIndex === index)?.nodeId ?? 0;
+      return page
+        .evaluate(
+          ({ parentId, nPredict, index, prompt }) => (
+            (window.wllmBackgroundChunkCount = 0),
+            window.wllmBrowserClient.chatFromNode(
+              parentId,
+              `${prompt} Task ${index}.`,
+              {
+                nPredict,
+                logicalSessionId: `handoff-background-${index}`,
+                onChunk: () => {
+                  window.wllmBackgroundChunkCount += 1;
+                },
+              }
+            )
+          ),
+          {
+            parentId: parent,
+            nPredict: backgroundPredict,
+            index,
+            prompt: makePrompt(
+              'Continue this background browser task in detail',
+              backgroundPromptRepeats
+            ),
+          }
+        )
+        .catch((error) => {
+          operationErrors.push(
+            error instanceof Error ? error.message : String(error)
+          );
+          return null;
+        });
+    });
+    await waitFor(
+      () => background.evaluate(() => window.wllmBackgroundChunkCount ?? 0),
+      (chunkCount) => chunkCount > 0
+    );
+    await demoteClientWithoutAck(background);
+    await focusClientWithoutAck(foreground);
+    const interaction = foreground.evaluate(
+      async ({ samples, intervalMs }) => {
+        const latencies = [];
+        for (let i = 0; i < samples; i++) {
+          latencies.push(await window.wllmMeasureInteraction());
+          if (intervalMs > 0 && i + 1 < samples) {
+            await new Promise((resolve) => setTimeout(resolve, intervalMs));
+          }
+        }
+        return latencies;
+      },
+      { samples: interactionSamples, intervalMs: interactionIntervalMs }
+    );
+    try {
+      await Promise.all([
+        foreground.evaluate(
+          ({ parentId, nPredict, prompt }) =>
+            window.wllmBrowserClient.chatFromNode(parentId, prompt, {
+              nPredict,
+              logicalSessionId: 'handoff-target',
+            }),
+          {
+            parentId: targetState.nodeId,
+            nPredict: foregroundPredict,
+            prompt: makePrompt(
+              'Resume this browser task and answer immediately',
+              foregroundPromptRepeats
+            ),
+          }
+        ),
+        interaction,
+      ]);
+    } catch (error) {
+      operationErrors.push(
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    await Promise.all(backgroundRequests);
+    await recordStateSnapshot(foreground, 'after-handoff', tierCaps);
+    await stopUiMeasurement();
+    await markMeasurement(foreground, 'measurement_end', { scenario });
+    if (args['release-pressure'] !== 'false' && pressureNodeIds.length > 0) {
+      await background.evaluate(
+        (nodeIds) =>
+          window.wllmBrowserClient.releaseSessionStates(
+            nodeIds,
+            'experiment_cleanup'
+          ),
+        pressureNodeIds
+      );
+    }
+  } else if (scenario === 'load') {
+    const allPages = [foreground, background, ...extraPages];
+    await focusClient(foreground, foreground, clientIds.foreground);
+    for (let i = 1; i < allPages.length; i++) {
+      const clientId =
+        i === 1 ? clientIds.background : clientIds.competitors[i - 2];
+      await demoteClient(allPages[i], foreground, clientId);
+    }
+    await startUiMeasurement();
+    await markMeasurement(foreground, 'measurement_start', { scenario });
+    const requests = [];
+    for (let i = 0; i < requestCount; i++) {
+      const isForeground = i % foregroundEvery === 0;
+      const page = isForeground
+        ? foreground
+        : allPages[1 + ((i - 1) % Math.max(1, allPages.length - 1))];
+      const promise = page
+        .evaluate(
+          ({ index, nPredict, prompt, isForeground }) =>
+            window.wllmBrowserClient.chatFromNode(
+              0,
+              `${prompt} Request ${index}.`,
+              {
+                nPredict,
+                logicalSessionId: `${isForeground ? 'foreground' : 'background'}-load-${index}`,
+              }
+            ),
+          {
+            index: i,
+            nPredict:
+              requestPredict ??
+              (isForeground ? foregroundPredict : backgroundPredict),
+            prompt: makePrompt(
+              isForeground
+                ? 'Serve this short foreground interaction'
+                : 'Process this longer background browser task',
+              isForeground ? foregroundPromptRepeats : backgroundPromptRepeats
+            ),
+            isForeground,
+          }
+        )
+        .catch((error) => {
+          operationErrors.push(
+            error instanceof Error ? error.message : String(error)
+          );
+          return null;
+        });
+      requests.push(promise);
+      if (arrivalGapMs > 0 && i + 1 < requestCount) {
+        await new Promise((resolve) => setTimeout(resolve, arrivalGapMs));
+      }
+    }
+    const interaction = foreground.evaluate(
+      async ({ samples, intervalMs }) => {
+        const latencies = [];
+        for (let i = 0; i < samples; i++) {
+          latencies.push(await window.wllmMeasureInteraction());
+          if (intervalMs > 0 && i + 1 < samples) {
+            await new Promise((resolve) => setTimeout(resolve, intervalMs));
+          }
+        }
+        return latencies;
+      },
+      { samples: interactionSamples, intervalMs: interactionIntervalMs }
+    );
+    await Promise.all([...requests, interaction]);
+    await recordStateSnapshot(foreground, 'after-load', tierCaps);
+    await stopUiMeasurement();
+    await markMeasurement(foreground, 'measurement_end', { scenario });
+  } else if (scenario === 'trace') {
+    if (!trace || !Array.isArray(trace.events)) {
+      throw new Error('--trace-file is required for scenario=trace');
+    }
+    const tracePages = pages.slice(0, traceClientCount || pages.length);
+    const sessionChains = new Map();
+    const orderedTraceEvents = [...trace.events].sort(
+      (left, right) => Number(left.atMs ?? 0) - Number(right.atMs ?? 0)
+    );
+    const initialLifecycleEvents = orderedTraceEvents.filter(
+      (event) =>
+        event.action === 'lifecycle' &&
+        Number(event.atMs ?? 0) === 0 &&
+        event.state !== 'active'
+    );
+    for (const event of initialLifecycleEvents) {
+      const page = tracePages[Number(event.client ?? 0)];
+      if (!page) {
+        throw new Error(
+          `trace references missing client index ${event.client}`
+        );
+      }
+      await page.evaluate(
+        ({ foreground, lifecycleState }) =>
+          window.wllmBrowserClient.updateLifecycle({
+            foreground,
+            lifecycleState,
+          }),
+        { foreground: false, lifecycleState: event.state ?? 'hidden' }
+      );
+    }
+    const preloadEvents = orderedTraceEvents.filter(
+      (event) =>
+        event.action === 'request' && event.phase === 'background-preload'
+    );
+    for (const event of preloadEvents) {
+      const page = tracePages[Number(event.client ?? 0)];
+      if (!page) {
+        throw new Error(
+          `trace references missing client index ${event.client}`
+        );
+      }
+      const sessionId = String(event.session ?? `trace-${event.client}`);
+      const key = `${event.client}\u0000${sessionId}`;
+      try {
+        const state = await page.evaluate(
+          ({ prompt, nPredict, sessionId }) =>
+            window.wllmBrowserClient.chatFromNode(0, prompt, {
+              nPredict,
+              logicalSessionId: sessionId,
+            }),
+          {
+            prompt: String(event.prompt ?? ''),
+            nPredict: Number(event.nPredict ?? 0),
+            sessionId,
+          }
+        );
+        sessionChains.set(key, Promise.resolve(state));
+      } catch (error) {
+        operationErrors.push(
+          error instanceof Error ? error.message : String(error)
+        );
+        sessionChains.set(key, Promise.resolve(null));
+      }
+    }
+    await recordStateSnapshot(foreground, 'before-trace', tierCaps);
+    const pending = [];
+    await startUiMeasurement();
+    const traceStartedAt = performance.now();
+    await markMeasurement(foreground, 'measurement_start', {
+      scenario,
+      traceId: trace.traceId ?? path.basename(traceFile),
+    });
+    const replayEvents = orderedTraceEvents.filter(
+      (event) =>
+        event.phase !== 'background-preload' &&
+        !initialLifecycleEvents.includes(event)
+    );
+    const replayOriginMs = replayEvents.length
+      ? Number(replayEvents[0].atMs ?? 0)
+      : 0;
+    for (const event of replayEvents) {
+      const targetAt = Math.max(0, Number(event.atMs ?? 0) - replayOriginMs);
+      const remainingMs = targetAt - (performance.now() - traceStartedAt);
+      if (remainingMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remainingMs));
+      }
+      const page = tracePages[Number(event.client ?? 0)];
+      if (!page) {
+        throw new Error(
+          `trace references missing client index ${event.client}`
+        );
+      }
+      if (event.action === 'lifecycle') {
+        const lifecycleState = event.state ?? 'hidden';
+        const foregroundState = lifecycleState === 'active';
+        if (foregroundState) {
+          await page.bringToFront();
+        }
+        await page.evaluate(
+          ({ foreground, lifecycleState }) =>
+            window.wllmBrowserClient.updateLifecycle({
+              foreground,
+              lifecycleState,
+            }),
+          { foreground: foregroundState, lifecycleState }
+        );
+        continue;
+      }
+      if (event.action === 'interaction') {
+        pending.push(
+          page
+            .evaluate(
+              async ({ samples, intervalMs }) => {
+                for (let i = 0; i < samples; i++) {
+                  await window.wllmMeasureInteraction();
+                  if (intervalMs > 0 && i + 1 < samples) {
+                    await new Promise((resolve) =>
+                      setTimeout(resolve, intervalMs)
+                    );
+                  }
+                }
+              },
+              {
+                samples: Number(event.samples ?? 1),
+                intervalMs: Number(event.intervalMs ?? 0),
+              }
+            )
+            .catch((error) => {
+              operationErrors.push(
+                error instanceof Error ? error.message : String(error)
+              );
+            })
+        );
+        continue;
+      }
+      if (event.action !== 'request') {
+        throw new Error(`unknown trace action: ${event.action}`);
+      }
+      const sessionId = String(event.session ?? `trace-${event.client}`);
+      const key = `${event.client}\u0000${sessionId}`;
+      const predecessor =
+        event.parent === 'root'
+          ? Promise.resolve({ nodeId: 0 })
+          : (sessionChains.get(key) ?? Promise.resolve({ nodeId: 0 }));
+      const request = predecessor
+        .then((parentState) =>
+          page.evaluate(
+            ({ parentId, prompt, nPredict, sessionId, telemetryTags }) =>
+              window.wllmBrowserClient.chatFromNode(parentId, prompt, {
+                nPredict,
+                logicalSessionId: sessionId,
+                telemetryTags,
+              }),
+            {
+              parentId: parentState?.nodeId ?? 0,
+              prompt: String(event.prompt ?? ''),
+              nPredict: Number(event.nPredict ?? foregroundPredict),
+              sessionId,
+              telemetryTags: {
+                traceId: trace.traceId ?? path.basename(traceFile),
+                phase: event.phase ?? 'request',
+                sourceTaskId: event.sourceTaskId ?? '',
+                site: event.site ?? '',
+                traceClient: Number(event.client ?? 0),
+              },
+            }
+          )
+        )
+        .catch((error) => {
+          operationErrors.push(
+            error instanceof Error ? error.message : String(error)
+          );
+          return null;
+        });
+      sessionChains.set(key, request);
+      pending.push(request);
+    }
+    await Promise.all(pending);
+    await recordStateSnapshot(foreground, 'after-trace', tierCaps);
+    await stopUiMeasurement();
+    await markMeasurement(foreground, 'measurement_end', {
+      scenario,
+      traceId: trace.traceId ?? path.basename(traceFile),
+    });
   } else {
     throw new Error(`unknown scenario ${scenario}`);
   }
 
-  const rawEvents = await foreground.evaluate(() =>
-    window.wllmBrowserClient.getTelemetry()
-  );
+  const finalTreeState = await foreground
+    .evaluate(() => window.wllmBrowserClient.chatGetState())
+    .catch(() => null);
+  const rawEvents = await foreground.evaluate(() => [
+    ...window.wllmExperimentEvents,
+  ]);
   const events = rawEvents.map((event) => ({ runId, ...event }));
   const summary = {
     protocolVersion: PROTOCOL_VERSION,
@@ -795,6 +1738,14 @@ try {
       sizeBytes: modelFileStat?.size ?? null,
       sha256: modelSha256,
     },
+    trace: trace
+      ? {
+          traceId: trace.traceId ?? path.basename(traceFile),
+          source: path.basename(traceFile),
+          sha256: traceSha256,
+          eventCount: Array.isArray(trace.events) ? trace.events.length : 0,
+        }
+      : null,
     buildArtifacts: {
       wllamaJsSha256: wasmJsSha256,
       wllamaWasmSha256: wasmBinarySha256,
@@ -812,6 +1763,18 @@ try {
     },
     deviceMetadata,
     runtimeConfig,
+    modelLoadMs,
+    additionalClientAttachMs,
+    clientCount,
+    finalState: finalTreeState
+      ? {
+          nodeCount: finalTreeState.nodes.size,
+          contextMemoryBytes: finalTreeState.contextMemoryBytes,
+          memoryCapBytes: finalTreeState.memoryCapBytes,
+          totalSnapshotTokenBytes: finalTreeState.totalSnapshotTokenBytes,
+          tierStats: finalTreeState.tierStats,
+        }
+      : null,
     arguments: args,
     clientIds,
     tieredCache,
@@ -832,6 +1795,13 @@ try {
 
   await background.evaluate(() => window.wllmBrowserClient.exit());
   await foreground.evaluate(() => window.wllmBrowserClient.destroyService());
+  const controlledAdmissionFailure =
+    summary.requestFailureCount > 0 &&
+    summary.admissionRejectCount >= summary.requestFailureCount &&
+    summary.operationErrors.length === summary.requestFailureCount;
+  if (summary.operationErrors.length > 0 && !controlledAdmissionFailure) {
+    process.exitCode = 1;
+  }
 } finally {
   await browser?.close().catch(() => {});
   if (server.exitCode === null && server.signalCode === null) {
