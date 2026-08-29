@@ -68,6 +68,10 @@ const columns = [
   'modelSha256',
   'traceId',
   'traceSha256',
+  'traceScoredCount',
+  'traceCorrectCount',
+  'traceAccuracy',
+  'traceUnsupportedCount',
   'wasmSha256',
   'modelLoadMs',
   'additionalClientAttachMs',
@@ -101,6 +105,8 @@ const columns = [
   'admissionRepairStepsP95',
   'admissionRepairStepsMax',
   'admissionBudgetViolationCount',
+  'protectedVictimViolationCount',
+  'cacheHintFailureCount',
   'admissionLatencyP95Ms',
   'admissionDemotedTokens',
   'admissionCheckpointedTokens',
@@ -182,6 +188,18 @@ for (const summaryPath of summaries.sort()) {
   if (operationErrorCount > 0 && !controlledAdmissionFailure) {
     invalidReasons.push('unexpected-operation-error');
   }
+  if (Number(summary.cacheHintFailureCount ?? 0) > 0) {
+    invalidReasons.push('cache-hint-failure');
+  }
+  if (Number(summary.protectedVictimViolationCount ?? 0) > 0) {
+    invalidReasons.push('protected-victim-violation');
+  }
+  if (Number(summary.admissionBudgetViolationCount ?? 0) > 0) {
+    invalidReasons.push('admission-budget-violation');
+  }
+  if (Number(summary.capacityViolationCount ?? 0) > 0) {
+    invalidReasons.push('capacity-violation');
+  }
   if (summary.requestFailureCount > 0 && !controlledAdmissionFailure) {
     invalidReasons.push('unexpected-request-failure');
   }
@@ -244,6 +262,10 @@ for (const summaryPath of summaries.sort()) {
     modelSha256: summary.model?.sha256,
     traceId: summary.trace?.traceId,
     traceSha256: summary.trace?.sha256,
+    traceScoredCount: summary.traceScoredCount,
+    traceCorrectCount: summary.traceCorrectCount,
+    traceAccuracy: summary.traceAccuracy,
+    traceUnsupportedCount: summary.traceUnsupportedCount,
     wasmSha256: summary.buildArtifacts?.wllamaWasmSha256,
     modelLoadMs: summary.modelLoadMs,
     additionalClientAttachMs: summary.additionalClientAttachMs,
@@ -277,6 +299,8 @@ for (const summaryPath of summaries.sort()) {
     admissionRepairStepsP95: summary.admissionRepairStepsP95,
     admissionRepairStepsMax: summary.admissionRepairStepsMax,
     admissionBudgetViolationCount: summary.admissionBudgetViolationCount,
+    protectedVictimViolationCount: summary.protectedVictimViolationCount,
+    cacheHintFailureCount: summary.cacheHintFailureCount,
     admissionLatencyP95Ms: summary.admissionLatencyP95Ms,
     admissionDemotedTokens: summary.admissionDemotedTokens,
     admissionCheckpointedTokens: summary.admissionCheckpointedTokens,

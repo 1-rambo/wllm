@@ -97,6 +97,20 @@ export const selectProtectedSessionNodeIds = (
     .map((candidate) => candidate.nodeId);
 };
 
+export const combineHotNodeIds = (
+  lifecycleNodeIds: number[],
+  requestParentNodeIds: number[]
+): number[] => {
+  const result: number[] = [];
+  const seen = new Set<number>();
+  for (const nodeId of [...lifecycleNodeIds, ...requestParentNodeIds]) {
+    if (nodeId < 1 || seen.has(nodeId)) continue;
+    seen.add(nodeId);
+    result.push(nodeId);
+  }
+  return result;
+};
+
 export const decodeSliceBudget = (
   baseBudget: number,
   remainingTokens: number,

@@ -17,7 +17,7 @@ trace,e2e,trace-cold-fcfs,cold-resume replay baseline,"trace-file;evict-on-pause
 core,retain,retain-lifecycle-aware,full Retain,"retention=lifecycle-aware;replacement=hybrid;ttl_ms=30000;pressure_sessions=12",10,C1,main Table 4
 core,retain,retain-hybrid-no-lifecycle,lifecycle ablation,"retention=lru;replacement=hybrid;pressure_sessions=12",10,C1,main Table 4
 core,retain,retain-lru,strong simple baseline,"retention=lru;replacement=lru;pressure_sessions=12",10,C1,main Table 4
-core,retain,retain-ttl,time-only baseline,"retention=ttl;replacement=hybrid;ttl_ms=1000;pause_ms=2000;pressure_sessions=12",10,C1,main Table 4
+core,retain,retain-ttl,tuned time-only baseline,"retention=ttl;replacement=hybrid;ttl_ms selected on anchor calibration and frozen;pause_ms=2000;pressure_sessions=12",10,C1,main Table 4
 core,retain,retain-evict-on-pause,cold-resume baseline,"retention=evict-on-pause;replacement=hybrid;pressure_sessions=12",10,C1,main Table 4
 core,retain,retain-until-full,capacity-only baseline,"retention=retain-until-full;replacement=hybrid;pressure_sessions=12",10,C1,main Table 4
 core,admit,admit-monotonic,full Admit,"retention=lru;admission=monotonic;replacement=hybrid;repair_budget=2;sessions=12;caps=128/128/128",10,C2,main Table 5
@@ -31,6 +31,8 @@ core,activate,activate-fcfs-no-slice,unsliced FCFS baseline,"scheduler=fcfs-no-s
 core,activate,activate-no-yield,yield ablation,"scheduler=foreground-aware;slice=32;yield=false",10,C3,main Table 6
 core,activate,activate-no-grace,handoff-grace ablation,"scheduler=foreground-aware;slice=32;background_slice=4;handoff_grace=0;yield=true",10,C3,main Table 6
 sensitivity,retain,retain-pause-{0;1000;5000;30000;60000},pause-duration sensitivity,"lifecycle-aware;ttl_ms=30000",5,C1,main Figure 6a
+sensitivity,retain,retain-ttl-{1000;5000;30000;60000},TTL calibration,"retention=ttl;pause_ms=2000",5,C1,appendix
+sensitivity,e2e,handoff-contract-k-{1;2;4}-b-{1;4;8},protection-admission interaction,"full handoff;protection budget K;repair budget B",5,C0;C1;C2,main Figure 6a
 sensitivity,admit,admit-repair-{1;2;4;8;16;32},repair-budget sensitivity,"retention=lru;monotonic;sessions=12;caps=128/128/128",5,C2,main Figure 6b
 sensitivity,admit,admit-sessions-{4;8;12;16},working-set pressure,"retention=lru;monotonic;repair_budget=2;caps=128/128/128",5,C2,appendix/main Figure 6c
 sensitivity,admit,admit-capacity-{128;256;512},capacity sensitivity,"retention=lru;monotonic;repair_budget=2;sessions=12;equal tier caps",5,C2,appendix

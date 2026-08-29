@@ -92,6 +92,7 @@ const forward = [
   'wasm-build',
   'order',
   'cooldown-ms',
+  'tuned-retention-ttl-ms',
   'allow-dirty',
   'headless',
   'overwrite',

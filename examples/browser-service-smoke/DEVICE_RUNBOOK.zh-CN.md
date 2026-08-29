@@ -1,4 +1,4 @@
-# Retain–Admit–Activate 跨设备运行手册
+# wLLM Lifecycle-Consistent Handoff 跨设备运行手册
 
 本文档是配套运行手册，用于把浏览器多标签页实验分发给多位同学，在 Windows 和 macOS
 设备上并行执行。目标不是继续做功能调试，而是用统一代码、模型、Wasm
@@ -28,7 +28,7 @@ examples/browser-service-smoke/EXPERIMENT_PLAN.zh-CN.md
 | Core 重复次数 | 每 case 10 次 | 时间预算是否允许；若不允许，至少 5 次并统一 |
 | Sensitivity 重复次数 | 每点 5 次 | 只在代表性设备上运行 |
 | Activate workload | background 256 tokens；foreground 32 tokens | 是否足以形成稳定的背景长任务 |
-| Retain workload | passive pause 2 秒；12 个 pressure sessions；TTL baseline 1 秒 | 是否能在正式 1B 模型上制造可区分的 L1/L2/L3/rebuild |
+| Retain workload | passive pause 2 秒；12 个 pressure sessions；TTL 从 anchor calibration 后冻结 | 是否能在正式 1B 模型上制造可区分的 L1/L2/L3/rebuild |
 | Admit workload | `retention=lru`；12 sessions；caps 128/128/128；monotonic budget 2 | 正式 1B/WebGPU pilot 是否能同时触发 repair、budget-bound reject 和 reactive completion |
 | 冷却与顺序 | case 间 15 秒；每轮轮换 case 顺序 | 是否适合实验室时间预算 |
 | Trace replay | 使用 `suite=trace` | 是否已有可审计的 WebArena task config 和 page-context sidecar |
@@ -43,7 +43,8 @@ reject baseline 的取舍。正式 1B/WebGPU 分发前仍须统一做一次 pilo
 ## 1. 与论文结构的对应关系
 
 本方案直接对应当前论文
-`\sysname: Resumable and Responsive LLM Serving in the Browser` 的修订故事。
+`\sysname: Lifecycle-Consistent LLM Serving for Browser Foreground Handoffs`
+的当前研究故事。
 论文把一次浏览器 foreground handoff 分成因果连续的三步：
 
 ```text
@@ -94,7 +95,8 @@ Challenge 1–3，但全文必须保持一致。
    foreground dispatch。
 2. Evaluation 当前仍标为 legacy results draft，且设备写成单台 Apple M4。
    新结果应按本文第 15 节结构替换，不应与旧 MMLU/HellaSwag 数字混写。
-3. Abstract 中三个 `[TBD]` 分别应由 Retain、Admit、Activate 的正式结果填写。
+3. Abstract 中的 `[TBD]` 分别应由 Protection、Progress、Responsiveness
+   contract 的正式结果填写。
 4. Introduction 中“controlled workloads + auditable trace replay + interactive
    co-runs”的承诺，应分别由 core、`suite=trace` 和 Activate UI 指标闭环。
 
@@ -737,8 +739,11 @@ npm run experiment:browser-service:matrix -- \
 
 当前矩阵：
 
+- Protection/Admission interaction：`K=1,2,4` 与 `B=1,4,8` 的 3×3 handoff sweep。
 - Activate slice：`4, 8, 16, 32, 64`。
 - Retain pause：`0, 1, 5, 30, 60` 秒；TTL 固定 30 秒。
+- Retain TTL calibration：`1, 5, 30, 60` 秒；选定后通过
+  `--tuned-retention-ttl-ms` 冻结到正式 core/replication run。
 - Admit repair budget：`1, 2, 4, 8, 16, 32`；固定 caps 为
   `128/128/128`，用于画出 success rate 与 repair bound 的取舍曲线。
 - Admit equal per-tier capacity：`128, 256, 512 tokens`。
@@ -824,6 +829,7 @@ collector 会展开每个 `summary.json`，并生成统一 CSV。`valid=false`
 - dirty worktree。
 - 请求模式和实际模式不一致。
 - 出现非预期错误。
+- lifecycle/cache-hint 未成功下发，或 admission 选择了当时受保护的 victim。
 - Git、模型或 Wasm 与负责人给出的 expected 值不一致。
 
 具体原因会写入 `invalidReasons`。汇总前，负责人必须提供 expected Git、

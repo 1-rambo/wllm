@@ -39,6 +39,7 @@ const order = args.order ?? (suite === 'smoke' ? 'fixed' : 'rotate');
 const cooldownMs = Number(
   args['cooldown-ms'] ?? (suite === 'smoke' ? 0 : 15000)
 );
+const tunedRetentionTtlMs = Number(args['tuned-retention-ttl-ms'] ?? 5000);
 const deviceId = required('device-id');
 const modelFile = required('model-file');
 const wasmBuild = required('wasm-build');
@@ -460,7 +461,7 @@ const coreCases = [
     args: {
       scenario: 'retain',
       retention: 'ttl',
-      'retention-ttl': 1000,
+      'retention-ttl': tunedRetentionTtlMs,
       'pause-ms': 2000,
       'pause-state': 'passive',
       'client-count': 4,
@@ -616,6 +617,17 @@ const coreCases = [
 ];
 
 const sensitivityCases = [
+  ...[1, 2, 4].flatMap((protectionBudget) =>
+    [1, 4, 8].map((repairBudget) => ({
+      group: 'e2e',
+      id: `handoff-contract-k-${protectionBudget}-b-${repairBudget}`,
+      args: {
+        ...fullHandoffArgs,
+        'eviction-hint-top-k': protectionBudget,
+        'repair-budget': repairBudget,
+      },
+    }))
+  ),
   ...[4, 8, 16, 32, 64].map((slice) => ({
     group: 'activate',
     id: `activate-slice-${slice}`,
@@ -641,6 +653,33 @@ const sensitivityCases = [
       'retention-ttl': 30000,
       'pause-ms': pauseMs,
       'pause-state': 'hidden',
+      'client-count': 4,
+      'retention-decoys': 1,
+      'pressure-sessions': 12,
+      'pressure-predict': 16,
+      'release-pressure': true,
+      'session-predict': 16,
+      'target-prompt-repeats': 8,
+      'pressure-prompt-repeats': 8,
+      'eviction-hint-top-k': 1,
+      'n-ctx': 8192,
+      'n-seq-max': 8,
+      'l1-cap': 512,
+      'l2-cap': 2048,
+      'l3-cap': 8192,
+      replacement: 'hybrid',
+      slice: 16,
+    },
+  })),
+  ...[1000, 5000, 30000, 60000].map((ttlMs) => ({
+    group: 'retain',
+    id: `retain-ttl-${ttlMs}`,
+    args: {
+      scenario: 'retain',
+      retention: 'ttl',
+      'retention-ttl': ttlMs,
+      'pause-ms': 2000,
+      'pause-state': 'passive',
       'client-count': 4,
       'retention-decoys': 1,
       'pressure-sessions': 12,
@@ -966,6 +1005,7 @@ const manifest = {
   trials,
   order,
   cooldownMs,
+  tunedRetentionTtlMs,
   deviceId,
   operator,
   modelFile: path.resolve(modelFile),

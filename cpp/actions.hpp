@@ -184,10 +184,10 @@ inline static void admission_note_victim(app_t &app, int32_t node_id)
   {
     return;
   }
+  app.current_admission.repair_steps++;
   if (app.current_admission.visited_victims.insert(node_id).second)
   {
     app.current_admission.victim_ids.push_back(node_id);
-    app.current_admission.repair_steps++;
   }
 }
 
@@ -209,6 +209,31 @@ inline static bool tree_subtree_contains_pending(const app_t &app, int32_t node_
   for (const int32_t child_id : node->child_ids)
   {
     if (tree_subtree_contains_pending(app, child_id))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+inline static bool tree_subtree_contains_hot(const app_t &app, int32_t node_id)
+{
+  if (!app.tree)
+  {
+    return false;
+  }
+  const auto *node = app.tree->find_node(node_id);
+  if (!node)
+  {
+    return false;
+  }
+  if (app.queue_hot_nodes.find(node_id) != app.queue_hot_nodes.end())
+  {
+    return true;
+  }
+  for (const int32_t child_id : node->child_ids)
+  {
+    if (tree_subtree_contains_hot(app, child_id))
     {
       return true;
     }
@@ -1875,9 +1900,10 @@ inline static bool seq_allocator_evict_one(app_t &app, int32_t protected_node, s
   }
 
   auto prune_node = [&](int32_t node_id) -> bool {
-    if (tree_subtree_contains_pending(app, node_id))
+    if (tree_subtree_contains_pending(app, node_id) ||
+        tree_subtree_contains_hot(app, node_id))
     {
-      std::cerr << "seq_allocator_evict_one: skip subtree prune for pending subtree, victim="
+      std::cerr << "seq_allocator_evict_one: preserve protected subtree, victim="
                 << node_id << std::endl;
       tree_remove_slot(app, node_id);
       return true;
@@ -2174,9 +2200,10 @@ inline static void tier_assert_capacity_invariants(const app_t &app, const char 
 
 inline static bool tier_prune_tree_node(app_t &app, int32_t node_id, int32_t protected_slot, std::string &err)
 {
-  if (tree_subtree_contains_pending(app, node_id))
+  if (tree_subtree_contains_pending(app, node_id) ||
+      tree_subtree_contains_hot(app, node_id))
   {
-    std::cerr << "tier_prune_tree_node: skip subtree prune for pending subtree, victim=" << node_id
+    std::cerr << "tier_prune_tree_node: preserve protected subtree, victim=" << node_id
               << std::endl;
     tree_remove_slot(app, node_id);
     err.clear();
@@ -2389,18 +2416,8 @@ inline static bool tier_ensure_space_for_level(
     const int32_t after_tokens = tier_total_tokens(app, level);
     if (after_tokens >= before_tokens)
     {
-      // Emergency fallback: hard-remove one slot to enforce progress.
-      const int32_t forced = tier_pick_victim_slot(app, level, protected_slot);
-      if (forced >= 1)
-      {
-        tree_remove_slot(app, forced);
-      }
-      else
-      {
-        // If no victim exists, overflow can only persist when incoming itself
-        // is not admissible, which was already checked above.
-        break;
-      }
+      err = "admission repair made no progress in tier=" + std::to_string(level);
+      return false;
     }
   }
 

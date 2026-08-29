@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
+  combineHotNodeIds,
   compareEngineChatPriority,
   decodeSliceBudget,
   selectProtectedSessionNodeIds,
@@ -45,6 +46,16 @@ describe('compareEngineChatPriority', () => {
         true
       )
     ).toBeLessThan(0);
+  });
+});
+
+describe('combineHotNodeIds', () => {
+  test('keeps request parents in addition to the bounded lifecycle set', () => {
+    expect(combineHotNodeIds([10], [20, 30, 10])).toEqual([10, 20, 30]);
+  });
+
+  test('filters invalid and duplicate node ids', () => {
+    expect(combineHotNodeIds([0, 4, 4], [-1, 5, 4])).toEqual([4, 5]);
   });
 });
 

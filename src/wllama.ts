@@ -46,6 +46,7 @@ import type {
   GlueMsgTreeSwitchRes,
 } from './glue/messages';
 import {
+  combineHotNodeIds,
   compareEngineChatPriority,
   decodeSliceBudget,
   selectProtectedSessionNodeIds,
@@ -176,7 +177,9 @@ export interface WllamaConfig {
    */
   engineChatRetentionTtlMs?: number;
   /**
-   * Number of queued parent nodes sent to native cache-hint path.
+   * Maximum number of lifecycle-selected session heads protected from
+   * replacement. Parents of queued and active requests are added separately
+   * and do not consume this budget.
    *
    * Default: 64
    */
@@ -913,7 +916,7 @@ export class Wllama {
     }
   ): Promise<void> {
     const current = this.engineChatClientState.get(clientId);
-    if (current && update.lifecycleEpoch < current.lifecycleEpoch) return;
+    if (current && update.lifecycleEpoch <= current.lifecycleEpoch) return;
     const changedAt = update.changedAt ?? Date.now();
     this.engineChatClientState.set(clientId, {
       foreground: update.foreground,
@@ -2735,14 +2738,20 @@ export class Wllama {
     const queuePressure = Math.max(0, Math.min(1, pending / maxPending));
     const startedAt =
       typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let applied = true;
+    let errorMessage: string | undefined;
     try {
       await this.treeCacheHint(hotNodeIds, queuePressure);
-    } catch {
+    } catch (error) {
+      applied = false;
+      errorMessage = error instanceof Error ? error.message : String(error);
       // Non-critical best-effort hint path.
     } finally {
       const completedAt =
         typeof performance !== 'undefined' ? performance.now() : Date.now();
       this.emitEngineChatEvent('cache_hint', undefined, {
+        applied,
+        ...(errorMessage ? { error: errorMessage } : {}),
         hotNodeCount: hotNodeIds.length,
         hotNodeIds,
         queuePressure,
@@ -2753,31 +2762,19 @@ export class Wllama {
 
   private collectHotParentNodeIdsForHint(): number[] {
     const k = Math.max(1, this.getEngineChatEvictionHintTopK());
-    const ids: number[] = [];
-    const seen = new Set<number>();
+    const requestParentNodeIds: number[] = [];
     const appendFrom = (queue: EngineChatRequest[]) => {
       for (const req of queue) {
-        if (ids.length >= k) {
-          break;
-        }
         const candidates = [
           req.runtime?.nodeId,
           req.parentId,
           req.preparedPrompt?.parentNodeId,
         ];
         for (const candidate of candidates) {
-          if (ids.length >= k) {
-            break;
-          }
-          if (
-            typeof candidate !== 'number' ||
-            candidate < 0 ||
-            seen.has(candidate)
-          ) {
+          if (typeof candidate !== 'number' || candidate < 1) {
             continue;
           }
-          seen.add(candidate);
-          ids.push(candidate);
+          requestParentNodeIds.push(candidate);
         }
       }
     };
@@ -2803,20 +2800,14 @@ export class Wllama {
       sessionCandidates,
       now,
       ttlMs,
-      Math.max(0, k - ids.length)
+      k
     );
-    for (const nodeId of protectedNodeIds) {
-      if (nodeId >= 1 && !seen.has(nodeId)) {
-        seen.add(nodeId);
-        ids.push(nodeId);
-      }
-    }
     appendFrom(this.engineChatOverdueQueue);
     appendFrom(this.engineChatNormalQueue);
     if (this.engineChatActiveRequest) {
       appendFrom([this.engineChatActiveRequest]);
     }
-    return ids;
+    return combineHotNodeIds(protectedNodeIds, requestParentNodeIds);
   }
 
   private async pickNextEngineChatRequest(): Promise<

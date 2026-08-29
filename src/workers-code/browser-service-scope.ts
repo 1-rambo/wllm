@@ -269,7 +269,7 @@ const handleRequest = async (
       return null;
     case 'lifecycle': {
       const update = payload as BrowserClientLifecycle;
-      if (update.lifecycleEpoch >= client.lifecycle.lifecycleEpoch) {
+      if (update.lifecycleEpoch > client.lifecycle.lifecycleEpoch) {
         client.lifecycle = update;
         if (runtime && status === 'ready') {
           await runtime.updateEngineChatClientState(client.id, update);

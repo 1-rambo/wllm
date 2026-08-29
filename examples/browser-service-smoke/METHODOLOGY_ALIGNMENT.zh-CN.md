@@ -36,7 +36,8 @@ SharedWorker 负责唯一模型实例、客户端登记、lifecycle 转发、请
 ### 决策
 
 1. lifecycle policy 生成 protected session heads；
-2. pending/active 请求的 parent 也进入 hot-node hint；
+2. pending/active 请求的 parent 也进入 hot-node hint，且不占用 lifecycle
+   protection budget；
 3. protection set 按 lifecycle urgency 和最近 foreground 时间排序，并受
    `evictionHintTopK` 限制，避免“所有 session 都 protected”使 eviction
    失去选择空间；
@@ -80,9 +81,9 @@ V(v,t) = p_resume(v,t) R_avoid(v) - lambda LiveCost(v,t)
 
 ### 决策
 
-容量不足时逐步执行 demotion、checkpoint 或 removal。每步减少 token/slot
-deficit，或把一个已选择 victim 移到已经预留容量的更低层。同一 admission
-记录：
+容量不足时逐步执行 demotion、checkpoint 或 removal。每次 victim selection
+计为一个 repair step；每个成功步骤减少当前层占用、释放 live slot，或把
+victim 移到已先行确保容量的更低层。同一 admission 记录：
 
 ```text
 initialTokenDeficit

@@ -57,6 +57,7 @@ for (const eventPath of (await findEventFiles(input)).sort()) {
       .filter((event) => event.type === 'request_arrive')
       .map((event) => [event.requestId, event])
   );
+  let latestHotNodeIds = [];
   for (const event of events) {
     const common = {
       runId: summary.runId,
@@ -100,6 +101,9 @@ for (const eventPath of (await findEventFiles(input)).sort()) {
       event.type === 'admission_fallback' ||
       event.type === 'admission_reject'
     ) {
+      const victimIds = Array.isArray(event.data?.victimIds)
+        ? event.data.victimIds.map(Number)
+        : [];
       admissionRows.push({
         ...common,
         outcome: event.type,
@@ -113,8 +117,19 @@ for (const eventPath of (await findEventFiles(input)).sort()) {
         checkpointedTokens: event.data?.checkpointedTokens,
         removedStates: event.data?.removedStates,
         latencyMs: event.data?.latencyMs,
-        victimIds: event.data?.victimIds,
+        victimIds,
+        protectedNodeIds: latestHotNodeIds,
+        protectedVictimViolationCount: victimIds.filter((nodeId) =>
+          latestHotNodeIds.includes(nodeId)
+        ).length,
       });
+    }
+    if (event.type === 'cache_hint') {
+      if (event.data?.applied !== false) {
+        latestHotNodeIds = Array.isArray(event.data?.hotNodeIds)
+          ? event.data.hotNodeIds.map(Number)
+          : [];
+      }
     }
     if (event.type === 'state_snapshot') {
       stateRows.push({
@@ -148,6 +163,7 @@ for (const eventPath of (await findEventFiles(input)).sort()) {
         'admission_commit',
         'admission_fallback',
         'admission_reject',
+        'cache_hint',
         'state_restore',
         'state_rebuild',
         'state_release',
@@ -226,6 +242,8 @@ await writeCsv(
     'removedStates',
     'latencyMs',
     'victimIds',
+    'protectedNodeIds',
+    'protectedVictimViolationCount',
   ],
   admissionRows
 );

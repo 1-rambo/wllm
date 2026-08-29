@@ -77,8 +77,9 @@ cost-aware replacement among unprotected states”。
 ### 1.3 Admit：budgeted monotonic repair
 
 恢复或 checkpoint 一个状态前，系统检查目标 tier 的 token 容量和 live slot
-容量。容量不足时逐步 demote、checkpoint 或 remove victim。每一步必须减少
-当前 deficit，且同一 victim 在一次 admission 中最多处理一次。
+容量。容量不足时逐步 demote、checkpoint 或 remove victim。每次 victim
+selection 都计为一个 repair step；`victimIds` 另行记录本次 admission 涉及的
+不同节点。每个成功步骤必须减少当前层占用或释放 live slot。
 
 完整策略设置 repair budget。达到 budget 仍无法满足容量时，操作被拒绝。
 该过程：
@@ -123,7 +124,8 @@ blocking time，并确保 lifecycle 消息能够进入 SharedWorker event loop�
 
 ### RQ0：端到端效果
 
-完整 Retain–Admit–Activate 路径能否改善一次真实的 tab-return handoff，而不
+完整 Protection–Progress–Responsiveness contract chain 能否改善一次真实的
+tab-return handoff，而不
 只是分别优化三个内部指标？
 
 主指标：
@@ -235,6 +237,11 @@ normalized-contains proxy；最终 accuracy 必须使用 WebArena 官方 evaluat
 - TTL；
 - evict-on-pause；
 - retain-until-full。
+
+TTL 不能只选择一个明显不利的常数。先在 anchor 设备的独立 calibration run
+中执行 `1/5/30/60 s` sweep，按预先确定的 resume TTFT、state footprint 和
+rejection 规则选择一个值，再通过 `--tuned-retention-ttl-ms` 冻结到所有正式
+core 和 replication run。主表报告该 tuned fixed-TTL，附录报告完整 sweep。
 
 **Admit**
 
@@ -350,8 +357,9 @@ task intent 的 replay 表述成完整 WebArena agent execution。主论文最�
 
 ### E0：Motivation characterization
 
-**目的：** 证明公开 browser-agent tasks 包含可复用的页面/会话状态，并在公开、
-确定性的多标签页 replay 中量化 pause、resume、容量压力和前后台重叠。
+**目的：** 使用公开 browser-agent task 和页面上下文构造可审计、确定性的
+多标签页 replay，并验证该 replay 确实产生了论文要研究的 pause、resume、
+容量压力和前后台重叠。它不用于证明这些行为在自然用户中的发生频率。
 
 输入：WebArena-derived trace 和真实 page context。
 
@@ -442,6 +450,7 @@ npm run experiment:browser-service:matrix -- \
 - admission repair/reject；
 - peak state footprint；
 - per-site breakdown。
+- exact/must-include 可确定评分任务的输出准确率；fuzzy-match 使用官方 evaluator。
 
 论文产物：Table 3 和按 site 分组的 CDF/box plot。
 
@@ -462,6 +471,8 @@ npm run experiment:browser-service:matrix -- \
 
 - resume-to-first-token；
 - L1/L2/L3/rebuild distribution；
+- protected-victim violation count（必须为 0）；
+- cache-hint failure count（正式 run 必须为 0）；
 - replayed/rebuilt work；
 - released states/tokens；
 - peak snapshot bytes；
@@ -488,6 +499,8 @@ hybrid-no-lifecycle 没有稳定差异，应收窄 Retain novelty，而不是只
 - victim count；
 - removed states；
 - capacity violation count。
+- protected-victim violation count（启用 protection 的配置必须为 0）。
+- cache-hint failure count（正式 run 必须为 0）。
 
 核心判据：
 
@@ -523,6 +536,18 @@ hybrid-no-lifecycle 没有稳定差异，应收窄 Retain novelty，而不是只
 1. Retain：pause duration `0/1/5/30/60 s`；
 2. Admit：repair budget `1/2/4/8/16/32`；
 3. Activate：slice `4/8/16/32/64 tokens`。
+
+此外，主文需要报告一个直接验证 contract interaction 的二维 sweep：
+
+```text
+lifecycle-protection budget K = 1/2/4
+admission repair budget B = 1/4/8
+```
+
+该实验固定完整 handoff workload，联合报告 warm-restore 比例、resume TTFT、
+admission rejection、repair steps 和 displaced tokens。如果增加 `K` 只改善
+restore、却不会提高 admission pressure，或者改变 `B` 不会改变 completion/churn，
+则“protection 与 progress contract 相互制约”的统一故事不成立。
 
 附录：
 
@@ -883,7 +908,7 @@ timelines.csv
 已经具备：
 
 - SharedWorker 多标签页共享模型；
-- Retain、Admit、Activate 三个机制；
+- Protection、Progress、Responsiveness 三个 contract；
 - `smoke/core/e2e/sensitivity/scaling/overhead/trace` suites；
 - 版本化事件、wall-clock 时间和 lifecycle 时间；
 - request、slice、admission、state、UI 事件；

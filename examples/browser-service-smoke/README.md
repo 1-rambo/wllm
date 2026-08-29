@@ -69,7 +69,7 @@ Available suites:
 
 ```text
 smoke       engineering validation only
-e2e         full Retain-Admit-Activate handoff and component ablations
+e2e         full protection-progress-responsiveness handoff and contract ablations
 core        isolated Retain, Admit, and Activate mechanism experiments
 sensitivity parameter sweeps
 scaling     client-count and queue-pressure scaling
@@ -125,6 +125,8 @@ Each run writes:
 ```
 
 The JSONL stream uses schema `wllm.browser-service.v2`.
+Trace runs also write `trace-responses.json`, including generated answers,
+reference criteria, and deterministic exact/must-include scores.
 
 Aggregate many run directories:
 

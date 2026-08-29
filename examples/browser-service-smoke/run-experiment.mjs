@@ -417,6 +417,35 @@ const summarize = (events, clientIds, scenarioName) => {
       event.type
     )
   );
+  let latestHotNodeIds = new Set();
+  let protectedVictimViolationCount = 0;
+  let cacheHintFailureCount = 0;
+  for (const event of measuredEvents) {
+    if (event.type === 'cache_hint') {
+      if (event.data?.applied === false) {
+        cacheHintFailureCount += 1;
+      } else {
+        latestHotNodeIds = new Set(
+          Array.isArray(event.data?.hotNodeIds)
+            ? event.data.hotNodeIds.map(Number)
+            : []
+        );
+      }
+      continue;
+    }
+    if (
+      ['admission_commit', 'admission_fallback', 'admission_reject'].includes(
+        event.type
+      )
+    ) {
+      const victims = Array.isArray(event.data?.victimIds)
+        ? event.data.victimIds.map(Number)
+        : [];
+      protectedVictimViolationCount += victims.filter((nodeId) =>
+        latestHotNodeIds.has(nodeId)
+      ).length;
+    }
+  }
   const count = (type) =>
     measuredEvents.filter((event) => event.type === type).length;
   const released = measuredEvents.filter(
@@ -695,6 +724,8 @@ const summarize = (events, clientIds, scenarioName) => {
       ? Math.max(...admissionRepairSteps)
       : 0,
     admissionBudgetViolationCount,
+    protectedVictimViolationCount,
+    cacheHintFailureCount,
     admissionLatencyP95Ms: quantile(
       admissions.map((event) => Number(event.data?.latencyMs ?? 0)),
       0.95
@@ -1023,6 +1054,7 @@ try {
     ),
   };
   const operationErrors = [];
+  const traceResponses = [];
   const pressureNodeIds = [];
   const startUiMeasurement = async () => {
     if (uiWorkItems > 0) {
@@ -1694,6 +1726,20 @@ try {
             }
           )
         )
+        .then((result) => {
+          if (result && event.phase !== 'background-preload') {
+            traceResponses.push({
+              sourceTaskId: event.sourceTaskId ?? null,
+              site: event.site ?? null,
+              client: Number(event.client ?? 0),
+              session: sessionId,
+              phase: event.phase ?? 'request',
+              assistantText: result.assistantText ?? '',
+              evaluation: event.evaluation ?? null,
+            });
+          }
+          return result;
+        })
         .catch((error) => {
           operationErrors.push(
             error instanceof Error ? error.message : String(error)
@@ -1721,6 +1767,49 @@ try {
     ...window.wllmExperimentEvents,
   ]);
   const events = rawEvents.map((event) => ({ runId, ...event }));
+  const normalizeAnswer = (value) =>
+    String(value ?? '')
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}.+-]+/gu, ' ')
+      .trim();
+  const scoreTraceResponse = (response) => {
+    const answers =
+      response.evaluation?.reference_answers ?? response.evaluation ?? {};
+    const outputText = response.assistantText ?? '';
+    if (answers.exact_match !== undefined) {
+      return {
+        supported: true,
+        correct:
+          normalizeAnswer(outputText) === normalizeAnswer(answers.exact_match),
+        criterion: 'exact_match',
+      };
+    }
+    if (Array.isArray(answers.must_include)) {
+      return {
+        supported: true,
+        correct: answers.must_include.every((answer) =>
+          normalizeAnswer(outputText).includes(normalizeAnswer(answer))
+        ),
+        criterion: 'must_include',
+      };
+    }
+    return {
+      supported: false,
+      correct: false,
+      criterion: 'official-evaluator-required',
+    };
+  };
+  const scoredTraceResponses = traceResponses.map((response) => ({
+    ...response,
+    ...scoreTraceResponse(response),
+  }));
+  const supportedTraceResponses = scoredTraceResponses.filter(
+    (response) => response.supported
+  );
+  const correctTraceResponses = supportedTraceResponses.filter(
+    (response) => response.correct
+  );
   const summary = {
     protocolVersion: PROTOCOL_VERSION,
     runId,
@@ -1779,6 +1868,14 @@ try {
     clientIds,
     tieredCache,
     operationErrors,
+    traceScoredCount: supportedTraceResponses.length,
+    traceCorrectCount: correctTraceResponses.length,
+    traceAccuracy:
+      supportedTraceResponses.length > 0
+        ? correctTraceResponses.length / supportedTraceResponses.length
+        : null,
+    traceUnsupportedCount:
+      scoredTraceResponses.length - supportedTraceResponses.length,
     ...summarize(events, clientIds, scenario),
   };
   const outputDir = path.join(outputRoot, runId);
@@ -1791,6 +1888,12 @@ try {
     path.join(outputDir, 'summary.json'),
     `${JSON.stringify(summary, null, 2)}\n`
   );
+  if (scenario === 'trace') {
+    await writeFile(
+      path.join(outputDir, 'trace-responses.json'),
+      `${JSON.stringify(scoredTraceResponses, null, 2)}\n`
+    );
+  }
   console.log(JSON.stringify(summary));
 
   await background.evaluate(() => window.wllmBrowserClient.exit());

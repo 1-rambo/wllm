@@ -183,6 +183,7 @@ for (let index = 0; index < selectedRecords.length; index++) {
     phase: 'foreground-resume',
     sourceTaskId: task.task_id,
     site,
+    evaluation: task.eval,
   });
   events.push({
     atMs: atMs + 1,
