@@ -12,6 +12,12 @@ examples/browser-service-smoke/EXPERIMENT_PLAN.zh-CN.md
 examples/browser-service-smoke/DEVICE_RUNBOOK.zh-CN.md
 ```
 
+可直接转发给实验执行同学的任务通知：
+
+```text
+examples/browser-service-smoke/EXPERIMENT_ASSIGNMENT.zh-CN.md
+```
+
 This directory exercises the same-origin multi-tab serving architecture:
 
 ```text

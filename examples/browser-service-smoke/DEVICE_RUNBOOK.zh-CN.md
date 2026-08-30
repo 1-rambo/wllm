@@ -91,19 +91,17 @@ workload relevance，二者共同构成论文证据。
 时可以保留一个总 RQ，再把三组实验写成 RQ1–RQ3，也可以继续称为
 Challenge 1–3，但全文必须保持一致。
 
-### 1.1 当前论文文本需要随后同步的地方
+### 1.1 当前论文与实验的同步状态
 
-本方案不直接修改 Overleaf 仓库，但实验完成后论文至少需要同步：
+当前论文已按 SharedWorker、Protection、Progress 和 Responsiveness 三个
+contract 更新，Evaluation 中也已经放入与本方案一致的结果表和 `[TBD]`
+占位符。正式结果回来后需要完成：
 
-1. Methodology 目前仍有“dedicated Worker”和“lifecycle integration remains”
-   一类过期描述；实际实现已经是完整 SharedWorker、lifecycle telemetry 和
-   foreground dispatch。
-2. Evaluation 当前仍标为 legacy results draft，且设备写成单台 Apple M4。
-   新结果应按本文第 15 节结构替换，不应与旧 MMLU/HellaSwag 数字混写。
-3. Abstract 中的 `[TBD]` 分别应由 Protection、Progress、Responsiveness
-   contract 的正式结果填写。
-4. Introduction 中“controlled workloads + auditable trace replay + interactive
-   co-runs”的承诺，应分别由 core、`suite=trace` 和 Activate UI 指标闭环。
+1. 用真实 Windows/macOS WebGPU 数据替换全部 `[TBD]`；
+2. 将端到端结果与三个机制的 event-level signature 对齐；
+3. 将 controlled workload、WebArena-derived replay 和 UI co-run 分别写入对应
+   subsection，不与旧 MMLU/HellaSwag 结果混写；
+4. 根据真实结果保留、收窄或删除未获得证据支持的 claim。
 
 ## 2. Research Questions 和判定逻辑
 
@@ -597,13 +595,13 @@ Smoke 完成后，负责人先检查 `matrix.json` 和每个 `summary.json`，�
 单台设备全部 core 包含：
 
 ```text
-Activate: 6 cases × 10 trials = 60 runs
+Activate: 8 cases × 10 trials = 80 runs
 Retain:   6 cases × 10 trials = 60 runs
 Admit:    4 cases × 10 trials = 40 runs
-Total:                             160 runs
+Total:                             180 runs
 ```
 
-如果按 group 分工，每位同学只运行自己负责的 40–60 个 core runs。实际耗时
+如果按 group 分工，每位同学只运行自己负责的 40–80 个 core runs。实际耗时
 由模型和 GPU 决定，应先执行 `--trials=1` pilot，据此估算，不要在文档里用
 Tiny Stories smoke 的耗时推测 1B 模型正式耗时。
 

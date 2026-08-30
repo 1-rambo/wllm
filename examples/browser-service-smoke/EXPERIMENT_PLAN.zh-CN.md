@@ -8,6 +8,12 @@
 DEVICE_RUNBOOK.zh-CN.md
 ```
 
+可直接转发给实验执行同学的任务说明见：
+
+```text
+EXPERIMENT_ASSIGNMENT.zh-CN.md
+```
+
 本文的北极星是回答论文总问题：
 
 > 浏览器内的共享 LLM 服务，能否在有限本地容量下保留有价值的暂停会话，
@@ -733,6 +739,19 @@ npm run experiment:browser-service:paper -- \
 - 外部 WebLLM baseline、完整 sensitivity 和 trace replay 只要求 anchor
   设备执行；
 - 其余设备只验证主要结论的方向和跨设备稳定性。
+
+运行规模和职责可概括为：
+
+| 角色 | 设备要求 | Profile/内容 | 默认正式 runs | 论文用途 |
+| --- | --- | --- | ---: | --- |
+| Anchor A | Windows WebGPU | `primary` | 530 | 一套完整主表、敏感性、扩展性、开销、trace |
+| Anchor B | Apple Silicon WebGPU | `primary` | 530 | 跨平台完整复核 |
+| Replication | 至少 2 台 Windows + 2 台 Mac | `replication` | 每台 55 | 核心结论的跨设备稳定性 |
+| Optional external baseline | 两台 anchor | WebLLM + wllama no-reuse | 依 task 数而定 | 证明基础推理效率没有失真 |
+
+这里的 530 个 primary runs 来自 60 个 E2E、180 个 Core、215 个
+Sensitivity、30 个 Scaling、30 个 Overhead 和 15 个 Trace runs。可以按 suite
+分批执行，但不能在批次间改变冻结 commit、模型、Wasm、TTL 或 workload 参数。
 
 ---
 
