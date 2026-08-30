@@ -38,7 +38,8 @@ SharedWorker 负责唯一模型实例、客户端登记、lifecycle 转发、请
 1. lifecycle policy 生成 protected session heads；
 2. pending/active 请求的 parent 也进入 hot-node hint，且不占用 lifecycle
    protection budget；
-3. protection set 按 lifecycle urgency 和最近 foreground 时间排序，并受
+3. protection set 按 lifecycle urgency 和最近 foreground 时间排序，先为每个
+   eligible client 选择一个 head，再用剩余名额选择额外分支；集合受
    `evictionHintTopK` 限制，避免“所有 session 都 protected”使 eviction
    失去选择空间；
 4. native replacement 在非 protected 候选中选择 victim；
@@ -156,8 +157,8 @@ cold filesystem-backed checkpoint tier
 | --- | --- | --- |
 | lifecycle 信息改善 resume | Retain policy comparison + pause/pressure sensitivity | 若只与 LRU 持平，降级为工程整合点 |
 | monotonic repair 有界 | budget sweep + per-admission max + zero capacity violations | 若超 budget，属于 correctness bug |
-| foreground handoff 更快 | fixed-slice、FCFS、no-yield、no-grace 对比 | 若只胜 FCFS 不胜 fixed slice，收窄 scheduler novelty |
-| 三机制联合有效 | controlled handoff + trace replay + three ablations | 若某一 ablation 无影响，不能声称三者缺一不可 |
+| foreground handoff 更快 | fixed foreground slice、dual-queue、FCFS、no-event-loop-yield、no-cooperative-slicing、no-grace 对比 | 若只胜 FCFS 不胜 fixed foreground slice，或 no-event-loop-yield 与完整系统等价，收窄 scheduler novelty |
+| 三项跨层 invariant 联合有效 | controlled handoff + trace replay + three ablations | 若某一 ablation 无影响，不能声称对应 boundary 是 headline novelty |
 | 开销可接受 | control-plane、state footprint、disk/file I/O、background slowdown | 报告真实 tradeoff，不只报 foreground gain |
 | 真实场景相关 | WebArena-derived content replay；若主张自然发生频率则另需真实用户 trace | synthetic lifecycle 不能证明自然 prevalence |
 

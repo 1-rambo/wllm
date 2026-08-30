@@ -17,13 +17,13 @@ DEVICE_RUNBOOK.zh-CN.md
 完整证据链为：
 
 ```text
-真实 workload 中问题确实存在
+构造的异构 Web workload 确实覆盖目标压力条件
         ↓
 端到端 foreground handoff 得到改善
         ↓
 Retain / Admit / Activate 分别解释改善来自哪里
         ↓
-消融证明三个组件都不是装饰
+消融证明三个跨层 invariant 都有独立作用
         ↓
 敏感性、扩展性和成本说明适用边界
         ↓
@@ -93,7 +93,7 @@ selection 都计为一个 repair step；`victimIds` 另行记录本次 admission
 因此 Methodology 不应写成“先规划完整事务再原子提交”。当前实现是
 **online monotonic repair with bounded work and observable partial displacement**。
 
-### 1.4 Activate：foreground-aware cooperative slicing
+### 1.4 Activate：event-observable cooperative boundaries
 
 请求的 prefill 和 decode 被拆成 cooperative units。每个 unit 结束后重新调度：
 
@@ -138,25 +138,30 @@ tab-return handoff，而不
 - background P95 latency；
 - request success rate。
 
-### RQ1：Retain
+### RQ1：Lifecycle-to-state binding
 
-在 paused-session working set 超过 hot-state capacity 时，lifecycle protection
-能否使即将返回的会话更常留在热层，降低 replay/rebuild 和 resume TTFT？
+在 session head、physical tier 和 native slot 持续变化时，最新 lifecycle intent
+能否稳定绑定到正确的目标状态，并在后续 admission 中保持 target-binding miss
+和 protected-victim violation 为 0？在此 correctness 条件成立后，它是否使返回
+会话更常留在热层并降低 resume TTFT？
 
 ### RQ2：Admit
 
 容量不足时，monotonic admission 能否把 repair work 限制在明确 budget 内，
 保持容量约束，并在成功率和 state displacement 之间形成可解释的取舍？
 
-### RQ3：Activate
+### RQ3：Event-observable execution boundary
 
-foreground transition 到达时，foreground-aware slicing 能否减少 residual
-background blocking、activation latency 和 TTFT，同时控制后台 slowdown？
+foreground transition 到达时，bounded native unit 与 macrotask yield 能否分别
+降低 native residual blocking 和 client-to-SharedWorker signal delay，并使
+foreground request 更快得到 dispatch，同时控制 checkpoint、后台延迟和吞吐
+代价？
 
-### RQ4：真实 workload relevance
+### RQ4：异构 Web workload relevance
 
-在可审计的 WebArena-derived 浏览器任务 replay 中，pause/resume、状态压力和
-foreground/background overlap 是否足够频繁；完整系统的收益是否仍然存在？
+在可审计的 WebArena-derived 浏览器任务 replay 中，是否覆盖 pause/resume、
+状态压力和 foreground/background overlap，并且完整系统的收益能否跨不同站点
+上下文保持？该实验不估计自然用户行为中的发生频率。
 
 ### RQ5：开销与扩展性
 
@@ -253,10 +258,12 @@ core 和 replication run。主表报告该 tuned fixed-TTL，附录报告完整 
 **Activate**
 
 - foreground-aware；
+- foreground-aware + fixed foreground/background slice；
 - dual-queue/static priority；
 - single-size-aware；
 - FCFS/no-slice；
-- foreground-aware without event-loop yield；
+- foreground-aware without event-loop macrotask yield，但保留 checkpoint/requeue；
+- foreground-aware without cooperative slicing；
 - foreground-aware without handoff grace。
 
 ---
@@ -471,6 +478,8 @@ npm run experiment:browser-service:matrix -- \
 
 - resume-to-first-token；
 - L1/L2/L3/rebuild distribution；
+- protected target 是否在保护窗口内持续出现在 latest applied hot set；
+- protected-target binding miss count（完整 lifecycle-aware 配置必须为 0）；
 - protected-victim violation count（必须为 0）；
 - cache-hint failure count（正式 run 必须为 0）；
 - replayed/rebuilt work；
@@ -518,6 +527,7 @@ hybrid-no-lifecycle 没有稳定差异，应收窄 Retain novelty，而不是只
 指标：
 
 - foreground activation P50/P95/P99；
+- lifecycle signal delivery P50/P95；
 - foreground TTFT；
 - residual background slice P95/max；
 - foreground completion；
@@ -526,8 +536,13 @@ hybrid-no-lifecycle 没有稳定差异，应收窄 Retain novelty，而不是只
 - makespan 和 throughput；
 - overdue promotion count。
 
-必须比较 fixed sliced priority，而不能只与 FCFS/no-slice 比。否则无法说明收益
-来自 foreground-aware handoff，而不是仅仅来自“用了 slicing”。
+必须同时比较 fixed foreground-aware slice 和 fixed sliced dual queue，不能只与
+FCFS/no-slice 比。前者隔离 adaptive background slice，后者隔离 foreground
+priority；否则无法说明收益来自哪个部分。
+
+此外，`no-event-loop-yield` 必须只关闭 macrotask handoff，保留 cooperative
+checkpoint/requeue；`no-cooperative-slicing` 才关闭整个切片路径。两者不能合并，
+否则无法区分 native residual blocking 和 SharedWorker 消息不可见这两个边界。
 
 ### E6：Sensitivity
 
@@ -536,6 +551,11 @@ hybrid-no-lifecycle 没有稳定差异，应收窄 Retain novelty，而不是只
 1. Retain：pause duration `0/1/5/30/60 s`；
 2. Admit：repair budget `1/2/4/8/16/32`；
 3. Activate：slice `4/8/16/32/64 tokens`。
+
+Activate 的 slice sweep 除 foreground/background latency 与 throughput 外，还必须
+报告 checkpoint count、admission count、repair steps 和 moved tokens。原因是
+每次 cooperative yield 都会把 partial state 带回 admission path；如果只看调度
+延迟，就没有验证 Responsiveness 与 Progress 的交互代价。
 
 此外，主文需要报告一个直接验证 contract interaction 的二维 sweep：
 
@@ -763,13 +783,15 @@ npm run experiment:browser-service:paper -- \
 
 ### Table 6：Activate
 
-| Scheduler | Activation P50/P95 ↓ | FG TTFT P95 ↓ | Next-paint P95 ↓ | Slice max ↓ | BG slowdown ↓ | Throughput |
+| Scheduler | Signal P95 ↓ | Post-signal activation P95 ↓ | FG TTFT P95 ↓ | Next-paint P95 ↓ | BG slowdown ↓ | Throughput |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Foreground-aware | TBD | TBD | TBD | TBD | TBD | TBD |
+| Fixed foreground slice | TBD | TBD | TBD | TBD | TBD | TBD |
 | Dual queue | TBD | TBD | TBD | TBD | TBD | TBD |
 | Size-aware | TBD | TBD | TBD | TBD | TBD | TBD |
 | FCFS/no-slice | TBD | TBD | TBD | TBD | TBD | TBD |
-| No yield | TBD | TBD | TBD | TBD | TBD | TBD |
+| No event-loop yield | TBD | TBD | TBD | TBD | TBD | TBD |
+| No cooperative slicing | TBD | TBD | TBD | TBD | TBD | TBD |
 | No grace | TBD | TBD | TBD | TBD | TBD | TBD |
 
 ### Table 7：Overhead

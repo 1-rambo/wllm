@@ -156,6 +156,8 @@ for (const eventPath of (await findEventFiles(input)).sort()) {
     if (
       [
         'measurement_start',
+        'protected_target',
+        'protected_target_end',
         'foreground_change',
         'session_pause',
         'session_resume',

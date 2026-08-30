@@ -22,6 +22,7 @@ export type EngineChatRetentionPolicy =
 
 export interface EngineChatRetentionCandidate {
   nodeId: number;
+  clientId?: string;
   lifecycle:
     | {
         foreground: boolean;
@@ -80,21 +81,45 @@ export const selectProtectedSessionNodeIds = (
     if (candidate.lifecycle?.lifecycleState === 'hidden') return 1;
     return 0;
   };
-  return eligible
-    .sort((left, right) => {
-      const rankDelta = lifecycleRank(right) - lifecycleRank(left);
-      if (rankDelta !== 0) return rankDelta;
-      const foregroundDelta =
-        (right.lifecycle?.lastForegroundAt ?? 0) -
-        (left.lifecycle?.lastForegroundAt ?? 0);
-      if (foregroundDelta !== 0) return foregroundDelta;
-      const changedDelta =
-        (right.lifecycle?.changedAt ?? 0) - (left.lifecycle?.changedAt ?? 0);
-      if (changedDelta !== 0) return changedDelta;
-      return left.nodeId - right.nodeId;
-    })
-    .slice(0, limit)
-    .map((candidate) => candidate.nodeId);
+  const ordered = eligible.sort((left, right) => {
+    const rankDelta = lifecycleRank(right) - lifecycleRank(left);
+    if (rankDelta !== 0) return rankDelta;
+    const foregroundDelta =
+      (right.lifecycle?.lastForegroundAt ?? 0) -
+      (left.lifecycle?.lastForegroundAt ?? 0);
+    if (foregroundDelta !== 0) return foregroundDelta;
+    const changedDelta =
+      (right.lifecycle?.changedAt ?? 0) - (left.lifecycle?.changedAt ?? 0);
+    if (changedDelta !== 0) return changedDelta;
+    return left.nodeId - right.nodeId;
+  });
+  if (policy !== 'lifecycle-aware') {
+    return ordered.slice(0, limit).map((candidate) => candidate.nodeId);
+  }
+
+  const selected: EngineChatRetentionCandidate[] = [];
+  const selectedNodeIds = new Set<number>();
+  const selectedClients = new Set<string>();
+
+  // A lifecycle event describes a client, not an arbitrary number of session
+  // heads. Give each client one candidate before using remaining budget for
+  // additional sessions from the same client.
+  for (const candidate of ordered) {
+    const clientKey = candidate.clientId ?? `node:${candidate.nodeId}`;
+    if (selectedClients.has(clientKey)) continue;
+    selected.push(candidate);
+    selectedClients.add(clientKey);
+    selectedNodeIds.add(candidate.nodeId);
+    if (selected.length >= limit) {
+      return selected.map((item) => item.nodeId);
+    }
+  }
+  for (const candidate of ordered) {
+    if (selectedNodeIds.has(candidate.nodeId)) continue;
+    selected.push(candidate);
+    if (selected.length >= limit) break;
+  }
+  return selected.map((candidate) => candidate.nodeId);
 };
 
 export const combineHotNodeIds = (
@@ -133,6 +158,21 @@ export const decodeSliceBudget = (
     ? Math.min(selected, Math.max(0, Math.floor(remainingTokens)))
     : selected;
 };
+
+export const shouldInterruptBackgroundUnit = (
+  policy:
+    | 'fcfs-no-slice'
+    | 'single-size-aware'
+    | 'dual-queue'
+    | 'foreground-aware',
+  requestForeground: boolean,
+  foregroundPending: boolean,
+  enabled: boolean
+): boolean =>
+  enabled &&
+  policy === 'foreground-aware' &&
+  !requestForeground &&
+  foregroundPending;
 
 export const compareEngineChatPriority = (
   left: EngineChatPriorityView,

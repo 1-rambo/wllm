@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const PROTOCOL_VERSION = 'wllm.browser-service.experiment.v2';
+const PROTOCOL_VERSION = 'wllm.browser-service.experiment.v3';
 const args = Object.fromEntries(
   process.argv.slice(2).map((arg) => {
     const [key, ...rest] = arg.replace(/^--/, '').split('=');
@@ -382,6 +382,13 @@ const summarize = (events, clientIds, scenarioName) => {
       event.data?.foreground === true &&
       (scenarioName === 'trace' || event.clientId === clientIds.foreground)
   );
+  const foregroundSignalDeliveryLatenciesMs = foregroundChanges.map((event) =>
+    Math.max(
+      0,
+      Number(event.wallTimeMs ?? 0) -
+        Number(event.data?.changedAt ?? event.wallTimeMs ?? 0)
+    )
+  );
   const foregroundChange = [...measuredEvents]
     .reverse()
     .find(
@@ -405,6 +412,13 @@ const summarize = (events, clientIds, scenarioName) => {
       (!foregroundReference ||
         event.timestampMs >= foregroundReference.timestampMs)
   );
+  const foregroundRequestArrival = measuredEvents.find(
+    (event) =>
+      event.type === 'request_arrive' &&
+      event.clientId === clientIds.foreground &&
+      (!foregroundReference ||
+        event.timestampMs >= foregroundReference.timestampMs)
+  );
   const firstToken = measuredEvents.find(
     (event) =>
       event.type === 'first_token' &&
@@ -417,10 +431,55 @@ const summarize = (events, clientIds, scenarioName) => {
       event.type
     )
   );
+  const protectedTargetMarker = events.find(
+    (event) => event.type === 'protected_target'
+  );
+  const protectedTargetNodeId = Number(
+    protectedTargetMarker?.data?.nodeId ?? -1
+  );
+  const protectedTargetClientId = protectedTargetMarker?.clientId;
+  const protectedTargetRequired =
+    protectedTargetMarker?.data?.requireProtection === true;
+  const protectedTargetEnd = protectedTargetMarker
+    ? events.find(
+        (event) =>
+          event.type === 'protected_target_end' &&
+          event.sequence > protectedTargetMarker.sequence
+      )
+    : undefined;
   let latestHotNodeIds = new Set();
   let protectedVictimViolationCount = 0;
   let cacheHintFailureCount = 0;
-  for (const event of measuredEvents) {
+  let protectedTargetHintSeen = false;
+  let protectedTargetHintObservationCount = 0;
+  let protectedTargetHintProtectedCount = 0;
+  let protectedTargetAdmissionObservationCount = 0;
+  let protectedTargetAdmissionProtectedCount = 0;
+  let protectedTargetMissingAtAdmissionCount = 0;
+  let protectedTargetForeground = false;
+  let protectedTargetLifecycleState = 'hidden';
+  let protectedTargetLastForegroundAt = Number.NEGATIVE_INFINITY;
+  const retentionTtlMs = Number(args['retention-ttl'] ?? 30000);
+  for (const event of events) {
+    if (
+      event.type === 'foreground_change' &&
+      event.clientId === protectedTargetClientId
+    ) {
+      protectedTargetForeground = event.data?.foreground === true;
+      protectedTargetLifecycleState = String(
+        event.data?.lifecycleState ?? 'hidden'
+      );
+      if (protectedTargetForeground) {
+        protectedTargetLastForegroundAt = Number(
+          event.data?.changedAt ?? event.wallTimeMs ?? 0
+        );
+      }
+    }
+    const targetIsLifecycleEligible =
+      protectedTargetForeground ||
+      protectedTargetLifecycleState === 'passive' ||
+      Number(event.wallTimeMs ?? 0) - protectedTargetLastForegroundAt <=
+        retentionTtlMs;
     if (event.type === 'cache_hint') {
       if (event.data?.applied === false) {
         cacheHintFailureCount += 1;
@@ -430,6 +489,20 @@ const summarize = (events, clientIds, scenarioName) => {
             ? event.data.hotNodeIds.map(Number)
             : []
         );
+        if (
+          protectedTargetMarker &&
+          protectedTargetNodeId >= 1 &&
+          event.sequence > protectedTargetMarker.sequence &&
+          (!protectedTargetEnd ||
+            event.sequence < protectedTargetEnd.sequence) &&
+          targetIsLifecycleEligible
+        ) {
+          protectedTargetHintObservationCount += 1;
+          if (latestHotNodeIds.has(protectedTargetNodeId)) {
+            protectedTargetHintSeen = true;
+            protectedTargetHintProtectedCount += 1;
+          }
+        }
       }
       continue;
     }
@@ -444,6 +517,20 @@ const summarize = (events, clientIds, scenarioName) => {
       protectedVictimViolationCount += victims.filter((nodeId) =>
         latestHotNodeIds.has(nodeId)
       ).length;
+      if (
+        protectedTargetMarker &&
+        protectedTargetNodeId >= 1 &&
+        event.sequence > protectedTargetMarker.sequence &&
+        (!protectedTargetEnd || event.sequence < protectedTargetEnd.sequence) &&
+        targetIsLifecycleEligible
+      ) {
+        protectedTargetAdmissionObservationCount += 1;
+        if (latestHotNodeIds.has(protectedTargetNodeId)) {
+          protectedTargetAdmissionProtectedCount += 1;
+        } else {
+          protectedTargetMissingAtAdmissionCount += 1;
+        }
+      }
     }
   }
   const count = (type) =>
@@ -654,6 +741,37 @@ const summarize = (events, clientIds, scenarioName) => {
       return dispatch ? Number(dispatch.wallTimeMs) - changedAt : null;
     })
     .filter((value) => value !== null);
+  const postSignalActivationLatenciesMs = foregroundChanges
+    .map((change) => {
+      const dispatch = measuredEvents.find(
+        (event) =>
+          event.type === 'slice_dispatch' &&
+          event.clientId === change.clientId &&
+          event.timestampMs >= change.timestampMs
+      );
+      return dispatch
+        ? Number(dispatch.wallTimeMs) - Number(change.wallTimeMs)
+        : null;
+    })
+    .filter((value) => value !== null);
+  const foregroundPostArrivalDispatchMs =
+    foregroundRequestArrival && firstDispatch
+      ? Math.max(
+          0,
+          Number(firstDispatch.wallTimeMs) -
+            Number(foregroundRequestArrival.wallTimeMs)
+        )
+      : null;
+  const foregroundGapBackgroundDispatchCount =
+    foregroundReference && foregroundRequestArrival
+      ? measuredEvents.filter(
+          (event) =>
+            event.type === 'slice_dispatch' &&
+            event.data?.foreground !== true &&
+            event.sequence > foregroundReference.sequence &&
+            event.sequence < foregroundRequestArrival.sequence
+        ).length
+      : 0;
   const foregroundResumeTtftsMs = foregroundChanges
     .map((change) => {
       const token = measuredEvents.find(
@@ -726,6 +844,25 @@ const summarize = (events, clientIds, scenarioName) => {
     admissionBudgetViolationCount,
     protectedVictimViolationCount,
     cacheHintFailureCount,
+    protectedTargetNodeId:
+      protectedTargetNodeId >= 1 ? protectedTargetNodeId : null,
+    protectedTargetRequired,
+    protectedTargetHintSeen,
+    protectedTargetHintObservationCount,
+    protectedTargetHintProtectedCount,
+    protectedTargetHintCoverage:
+      protectedTargetHintObservationCount > 0
+        ? protectedTargetHintProtectedCount /
+          protectedTargetHintObservationCount
+        : null,
+    protectedTargetAdmissionObservationCount,
+    protectedTargetAdmissionProtectedCount,
+    protectedTargetAdmissionCoverage:
+      protectedTargetAdmissionObservationCount > 0
+        ? protectedTargetAdmissionProtectedCount /
+          protectedTargetAdmissionObservationCount
+        : null,
+    protectedTargetMissingAtAdmissionCount,
     admissionLatencyP95Ms: quantile(
       admissions.map((event) => Number(event.data?.latencyMs ?? 0)),
       0.95
@@ -784,6 +921,32 @@ const summarize = (events, clientIds, scenarioName) => {
           (measuredCompleted.length + measuredFailed.length)
         : 0,
     foregroundSwitchCount: foregroundChanges.length,
+    foregroundSignalDeliveryP50Ms: quantile(
+      foregroundSignalDeliveryLatenciesMs,
+      0.5
+    ),
+    foregroundSignalDeliveryP95Ms: quantile(
+      foregroundSignalDeliveryLatenciesMs,
+      0.95
+    ),
+    foregroundRequestArrivalAfterSignalMs:
+      foregroundReference && foregroundRequestArrival
+        ? Math.max(
+            0,
+            Number(foregroundRequestArrival.wallTimeMs) -
+              Number(foregroundReference.wallTimeMs)
+          )
+        : null,
+    foregroundPostArrivalDispatchMs,
+    foregroundGapBackgroundDispatchCount,
+    foregroundPostSignalActivationP50Ms: quantile(
+      postSignalActivationLatenciesMs,
+      0.5
+    ),
+    foregroundPostSignalActivationP95Ms: quantile(
+      postSignalActivationLatenciesMs,
+      0.95
+    ),
     foregroundActivationP50Ms: quantile(activationLatenciesMs, 0.5),
     foregroundActivationP95Ms: quantile(activationLatenciesMs, 0.95),
     foregroundResumeTtftP50Ms: quantile(foregroundResumeTtftsMs, 0.5),
@@ -872,6 +1035,11 @@ try {
   base.searchParams.set('backgroundSlice', args['background-slice'] ?? '4');
   base.searchParams.set('handoffGrace', args['handoff-grace'] ?? '16');
   base.searchParams.set('yield', args.yield ?? 'true');
+  base.searchParams.set('eventLoopYield', args['event-loop-yield'] ?? 'true');
+  base.searchParams.set(
+    'foregroundInterrupt',
+    args['foreground-interrupt'] ?? 'true'
+  );
   base.searchParams.set('queueMaxPending', args['queue-max-pending'] ?? '128');
   base.searchParams.set(
     'prefillSliceMaxMs',
@@ -1181,6 +1349,13 @@ try {
         ),
       }
     );
+    await markMeasurement(background, 'protected_target', {
+      nodeId: state.nodeId,
+      requireProtection: args['require-protected-target'] === 'true',
+    });
+    await foreground.evaluate(() =>
+      window.wllmBrowserClient.flushLifecyclePolicy()
+    );
     await focusClient(foreground, foreground, clientIds.foreground);
     await demoteClient(
       background,
@@ -1232,6 +1407,12 @@ try {
         'frozen'
       );
     }
+    // The lifecycle-selected protection interval ends when the client begins
+    // its return. From request arrival onward, the same parent is protected as
+    // an in-flight dependency rather than as speculative lifecycle state.
+    await markMeasurement(background, 'protected_target_end', {
+      nodeId: state.nodeId,
+    });
     await demoteClient(foreground, foreground, clientIds.foreground);
     await focusClient(background, foreground, clientIds.background);
     await background.evaluate(
@@ -1347,6 +1528,13 @@ try {
         ),
       }
     );
+    await markMeasurement(foreground, 'protected_target', {
+      nodeId: targetState.nodeId,
+      requireProtection: args['require-protected-target'] === 'true',
+    });
+    await foreground.evaluate(() =>
+      window.wllmBrowserClient.flushLifecyclePolicy()
+    );
     await demoteClient(foreground, foreground, clientIds.foreground);
     await focusClient(background, foreground, clientIds.background);
 
@@ -1435,6 +1623,11 @@ try {
       () => background.evaluate(() => window.wllmBackgroundChunkCount ?? 0),
       (chunkCount) => chunkCount > 0
     );
+    // End lifecycle-selected protection immediately before the foreground
+    // transition. The subsequent request parent remains protected through Q_t.
+    await markMeasurement(foreground, 'protected_target_end', {
+      nodeId: targetState.nodeId,
+    });
     await demoteClientWithoutAck(background);
     await focusClientWithoutAck(foreground);
     const interaction = foreground.evaluate(

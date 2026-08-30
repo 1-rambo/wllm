@@ -10,7 +10,7 @@
 examples/browser-service-smoke/EXPERIMENT_PLAN.zh-CN.md
 ```
 
-> 当前实验协议版本：`wllm.browser-service.experiment.v2`（事件 schema 为 `wllm.browser-service.v2`）
+> 当前实验协议版本：`wllm.browser-service.experiment.v3`（事件 schema 为 `wllm.browser-service.v2`）
 >
 > 主实验必须使用干净的 Git 工作区。实验脚本默认拒绝从 dirty worktree
 > 记录结果，以避免不同同学实际运行了不同代码。
@@ -45,24 +45,29 @@ reject baseline 的取舍。正式 1B/WebGPU 分发前仍须统一做一次 pilo
 本方案直接对应当前论文
 `\sysname: Lifecycle-Consistent LLM Serving for Browser Foreground Handoffs`
 的当前研究故事。
-论文把一次浏览器 foreground handoff 分成因果连续的三步：
+论文把一次浏览器 foreground handoff 建模为三个反复交互的约束：
 
 ```text
-Retain paused state -> Admit resumed state -> Activate foreground request
+Lifecycle intent constrains state victims
+       ↕
+Admission changes residency under finite capacity
+       ↕
+Execution yields and partial state re-enters admission
 ```
 
-它们不是三个互不相关的优化，而是用户返回一个本地助手标签页时依次可能支付的
-三类成本。
+它们不是固定的一次性流水线。Protection 约束之后的 victim selection；
+Admission 可能发生在恢复或 slice checkpoint；Execution yield 后的 partial state
+又会经过相同的 admission 约束。
 
 | 论文部分 | 论文问题或主张 | 本方案实验 | 主要证据 |
 | --- | --- | --- | --- |
 | Abstract / Introduction 的 foreground-handoff 总体主张 | 浏览器生命周期需要贯穿状态保留、恢复准入和前台调度 | 三组 core experiment 的联合结果 | Resume TTFT、admission latency/churn、activation latency、background cost |
-| Introduction Challenge 1: selective resume retention | 暂停会话多于 live slots 时，不能简单 retain-all 或 evict-all | C1 Retain | lifecycle-aware 对比 LRU、TTL、evict-on-pause、retain-until-full |
-| Methodology: Resumable Session Store | 生命周期、近期前台状态和恢复代价是否能指导状态保留 | C1 Retain + pause sensitivity | 恢复来源分布、恢复时间、释放量、成功率 |
-| Introduction Challenge 2: disruptive resume admission | 恢复一个状态可能引发 demotion、checkpoint、prune 和 rejection | C2 Admit | monotonic 对比 reactive 和 reject |
-| Methodology / Analysis: Monotonic State Admission | repair 是否有进展、有界，并保持容量约束 | C2 Admit + repair-budget sensitivity | repair steps、deficit、victims、moved tokens、reject、success rate |
-| Introduction Challenge 3: delayed foreground activation | priority bit 不能中断已经发出的背景执行单元 | C3 Activate | foreground-aware 对比 dual-queue、FCFS/no-slice、no-yield |
-| Methodology / Analysis: Foreground-Aware Cooperative Slicing | bounded slice 是否缩短前台 handoff，同时控制后台代价 | C3 Activate + slice sensitivity | activation、foreground TTFT、next-paint、slice tail、background wall time |
+| Introduction Challenge 1: lifecycle-to-state binding | lifecycle 作用于 client，但 replacement 作用于变化的 node/slot，且后续 fallback 可能推翻保护 | C1 Retain | target-binding miss、protected-victim violation、lifecycle-aware 对比 hybrid-no-lifecycle/LRU/TTL |
+| Methodology: Binding Intent to Mutable State | 最新 lifecycle epoch 如何持续绑定到正确 session head 和 request dependency | C1 Retain + pause/prefix sensitivity | hot-set membership、恢复来源、恢复时间、资源代价 |
+| Introduction Challenge 2: nested-capacity repair | L1 demotion 可制造 L2/L3 deficit，无法预先原子规划整个 cascade | C2 Admit | monotonic 对比 reactive 和 reject |
+| Methodology / Analysis: Repairing Nested Capacities | destination-first transition 是否逐步保持容量安全，并由 admission-wide budget 限制工作量 | C2 Admit + repair-budget/capacity sensitivity | repair steps、deficit、victims、moved tokens、reject、capacity violation |
+| Introduction Challenge 3: event-observable foreground transfer | priority bit 既不能中断 native call，也不能保证 SharedWorker 及时处理 lifecycle message | C3 Activate | foreground-aware 对比 fixed foreground slice、dual-queue、FCFS/no-slice、no-event-loop-yield、no-cooperative-slicing |
+| Methodology / Analysis: Event-Observable Boundaries | bounded native unit、checkpoint/requeue 和 macrotask yield 是否分别跨过 native 与 event-loop 边界 | C3 Activate + slice sensitivity | signal delivery、post-signal activation、foreground TTFT、next-paint、slice tail、background wall time |
 | Evaluation: controlled session graphs | 先做端到端，再隔离三个机制的因果效果 | `suite=e2e` + `suite=core` | foreground-handoff 主比较和三组受控 workload |
 | Evaluation: interactive co-runs | 同时测 serving 和浏览器交互 | Activate 组 | first-token 与 input-to-next-paint |
 | Evaluation: cross-platform robustness | 结论是否只在单一设备成立 | Windows/macOS 多设备矩阵 | per-device median/IQR 与跨设备趋势 |
@@ -75,8 +80,8 @@ Retain paused state -> Admit resumed state -> Activate foreground request
 4. WebArena-derived trace replay；
 5. sensitivity、scaling 和 overhead。
 
-论文 Introduction 还提出了 auditable WebArena-derived traces，用于证明这些
-failure 在真实 agent 工作负载中是否频繁发生。`suite=trace` 已实现该 replay；
+论文 Introduction 还提出了 auditable WebArena-derived traces，用于验证这些
+机制在异构 Web task/context 中是否仍然成立。`suite=trace` 已实现该 replay；
 但正式运行仍必须准备可审计的公开 task config，最好同时提供真实
 page-context sidecar。controlled workload 回答因果机制，trace replay 回答
 workload relevance，二者共同构成论文证据。
@@ -106,10 +111,10 @@ Challenge 1–3，但全文必须保持一致。
 
 对应论文：
 
-- Introduction 的 `selective resume retention`。
+- Introduction 的 `binding ephemeral lifecycle intent to mutable inference state`。
 - Background 的 `Retain everything` 和 `Evict background sessions`
   两类失败。
-- Methodology 的 `Resumable Session Store`。
+- Methodology 的 `Binding Intent to Mutable State`。
 
 研究问题：
 
@@ -155,9 +160,9 @@ Challenge 1–3，但全文必须保持一致。
 
 对应论文：
 
-- Introduction 的 `disruptive resume admission`。
+- Introduction 的 `repairing nested capacities without atomic reservation`。
 - Background 的 `Evict reactively until the request fits`。
-- Methodology 和 Analysis 的 `Monotonic State Admission`。
+- Methodology 和 Analysis 的 `Repairing Nested Capacities`。
 
 研究问题：
 
@@ -209,9 +214,9 @@ repair budget 后产生受控拒绝；这正是 bounded repair 的语义。只�
 
 对应论文：
 
-- Introduction 的 `delayed foreground activation`。
+- Introduction 的 `making foreground priority observable to a non-preemptive runtime`。
 - Background 的 `Set a foreground priority bit` 失败。
-- Methodology 和 Analysis 的 `Foreground-Aware Cooperative Slicing`。
+- Methodology 和 Analysis 的 `Event-Observable Boundaries`。
 
 研究问题：
 
@@ -231,15 +236,31 @@ repair budget 后产生受控拒绝；这正是 bounded repair 的语义。只�
 - `foreground-aware`：完整 Activate。
 - `dual-queue`：有旧队列机制，但没有浏览器前台优先。
 - `fcfs-no-slice`：没有 cooperative boundary。
-- `foreground-aware + yield=false`：去掉浏览器 task-queue yield。
+- `activate-fixed-foreground-slice`：保留 foreground priority、checkpoint/requeue、
+  macrotask yield 和 grace，但不缩短 background slice。
+- `activate-no-event-loop-yield`：保留 cooperative slicing，只去掉浏览器
+  task-queue 的 macrotask yield。
+- `activate-no-cooperative-slicing`：关闭 checkpoint/requeue slicing。
 
 主要指标：
 
-- `foregroundActivationMs`：前台 lifecycle 信号到第一次 slice dispatch。
+- `foregroundSignalDeliveryP95Ms`：client-side lifecycle timestamp 到
+  SharedWorker 接受 foreground event。
+- `foregroundPostSignalActivationP95Ms`：SharedWorker 接受 foreground event 到
+  第一次 foreground slice dispatch。
+- `foregroundPostArrivalDispatchMs`：foreground request 到达服务后到第一次
+  foreground slice dispatch，衡量 request 已经 runnable 后的 scheduler delay。
+- `foregroundGapBackgroundDispatchCount`：SharedWorker 接受 foreground event
+  后、foreground request 到达前又 dispatch 的 background slices；直接检验
+  grace 是否阻止后台任务抢先重新进入 native execution。
+- `foregroundActivationMs`：client-side lifecycle timestamp 到第一次 slice
+  dispatch，即前两项之和。
 - `foregroundFirstTokenMs`：前台 lifecycle 信号到前台请求首 token。
 - `foregroundTotalWallMs`：前台请求端到端时间。
 - `inputToNextPaintP95Ms`：输入事件到下一次绘制。
 - `sliceDurationP95Ms`、`sliceDurationMaxMs`。
+- checkpoint/admission count、repair steps 和 moved tokens，用于检查更细 slice
+  是否把成本转移到 Progress contract；
 - `backgroundTotalWallMs`。
 
 支持论文主张的结果形态应是：
@@ -247,20 +268,22 @@ repair budget 后产生受控拒绝；这正是 bounded repair 的语义。只�
 - foreground-aware 明显低于 dual-queue 和 FCFS 的 activation/TTFT；
 - 更小 background slice 降低 foreground delay；
 - 收益没有伴随不可接受的 background wall-time 膨胀；
-- no-yield 的结果说明事件循环 yield 是否必要。
+- `no-event-loop-yield` 的结果说明浏览器消息是否需要显式 macrotask boundary；
+- `no-cooperative-slicing` 的结果说明 native residual unit 是否是主要阻塞项。
 
 ## 3. Claim–Evidence Matrix
 
 | Claim / RQ | Reviewer 会问什么 | 主实验 | 基线/消融 | 核心指标 | 论文落点 |
 | --- | --- | --- | --- | --- | --- |
-| C1 / RQ1 Retain | 生命周期信息是否真的改善恢复，而不是普通 recency 就够了？ | `core/retain` | LRU、TTL、evict-on-pause、retain-until-full | resume-to-first-token、restore/rebuild、residency source、released tokens | Evaluation: Retain；对应 Introduction Challenge 1 |
+| C1 / RQ1 Retain | 生命周期意图是否真正绑定到当前 session head，并在后续 admission 中保持有效？ | `core/retain` | hybrid-no-lifecycle、LRU、TTL、evict-on-pause、retain-until-full | target-binding miss、protected-victim violation、resume-to-first-token、restore/rebuild、residency source | Evaluation: Retain；对应 Introduction Challenge 1 |
 | C2 / RQ2 Admit | 压力下是否能完成准入，并且 repair 有界、可解释？ | `core/admit` | reactive、reject | success rate、admission P95、repair steps、fallback/reject、churn | Evaluation: Admit；对应 Challenge 2 和 capacity/termination analysis |
-| C3 / RQ3 Activate | foreground priority 是否真的缩短 handoff，还是仍被当前长任务阻塞？ | `core/activate` | dual-queue、FCFS/no-slice、no-yield | activation、foreground TTFT、next-paint、slice tail、background wall | Evaluation: Activate；对应 Challenge 3 和 residual-bound analysis |
+| C3 / RQ3 Activate | foreground priority 是否跨过 native call 与 SharedWorker event loop 两个边界？ | `core/activate` | fixed foreground slice、dual-queue、FCFS/no-slice、no-event-loop-yield、no-cooperative-slicing、no-grace | signal delivery、activation、foreground TTFT、next-paint、slice tail、background wall | Evaluation: Activate；对应 Challenge 3 和 residual-bound analysis |
 | Cross-device robustness | 结果是否只在作者的一台 Mac 上成立？ | Windows/macOS 同协议复现 | 不同 CPU/GPU/内存档位 | per-device median/IQR、趋势一致性、失败率 | Experimental Setup + Cross-device subsection |
-| Workload importance | 三类 failure 在真实 agent trace 中是否常见？ | `suite=trace` 的 WebArena-derived replay | trace statistics | pause/resume frequency、working-set pressure、handoff overlap | Evaluation 中独立 workload-characterization subsection |
+| Workload relevance | 三类机制在异构 Web task/context 上是否仍然成立？ | `suite=trace` 的 WebArena-derived replay | trace statistics | pause/resume、working-set pressure、handoff overlap、per-site effect | Evaluation 中独立 workload-characterization subsection |
 
 这张表是审稿视角下的证据闭环。Core experiment 回答机制因果性；设备矩阵
-回答可移植性；trace replay 回答现实发生频率。三者不能互相替代。
+回答可移植性；trace replay 回答构造的异构 Web workload 中机制是否仍然成立，
+不回答自然用户行为中的发生频率。三者不能互相替代。
 
 ## 4. 实验包的层次
 
@@ -618,10 +641,12 @@ warmup_runs=1
 
 ```text
 activate-full
+activate-fixed-foreground-slice
 activate-dual-queue
 activate-size-aware
 activate-fcfs-no-slice
-activate-no-yield
+activate-no-event-loop-yield
+activate-no-cooperative-slicing
 activate-no-grace
 ```
 
@@ -874,7 +899,7 @@ per-device 结果，再报告跨设备总体趋势。
 4. **RQ3 / Activate**：activation、foreground TTFT、UI tail 与后台代价。
 5. **Sensitivity**：pause duration、repair budget、slice size。
 6. **Cross-device robustness**：Windows/macOS 分设备结果和总体趋势。
-7. **Auditable trace replay**：报告 WebArena-derived workload 的发生频率和端到端结果。
+7. **Auditable trace replay**：报告构造 replay 的压力特征、跨站点上下文结果和端到端效果，不把它解释成自然用户频率。
 8. **Overhead and limitations**：控制面开销、浏览器/驱动限制和不支持设备。
 
 
@@ -885,7 +910,9 @@ per-device 结果，再报告跨设备总体趋势。
 | TBD | Foreground-aware | TBD | TBD | TBD | TBD | TBD |
 | TBD | Dual queue | TBD | TBD | TBD | TBD | TBD |
 | TBD | FCFS/no-slice | TBD | TBD | TBD | TBD | TBD |
-| TBD | No-yield | TBD | TBD | TBD | TBD | TBD |
+| TBD | Fixed foreground slice | TBD | TBD | TBD | TBD | TBD |
+| TBD | No event-loop yield | TBD | TBD | TBD | TBD | TBD |
+| TBD | No cooperative slicing | TBD | TBD | TBD | TBD | TBD |
 
 ### 15.2 Retain 主表
 

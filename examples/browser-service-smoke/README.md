@@ -70,7 +70,7 @@ Available suites:
 ```text
 smoke       engineering validation only
 e2e         full protection-progress-responsiveness handoff and contract ablations
-core        isolated Retain, Admit, and Activate mechanism experiments
+core        isolated intent-binding, nested-repair, and observable-boundary experiments
 sensitivity parameter sweeps
 scaling     client-count and queue-pressure scaling
 overhead    model-load, client-attach, and control-plane cost
@@ -93,6 +93,8 @@ Useful switches:
 --slice=<tokens>
 --background-slice=<tokens>
 --yield=true|false
+--event-loop-yield=true|false
+--foreground-interrupt=true|false
 --retention=lifecycle-aware|lru|ttl|evict-on-pause|retain-until-full
 --retention-ttl=<milliseconds>
 --admission=monotonic|reactive|reject

@@ -38,6 +38,10 @@
             params.get('foregroundSlice') ?? params.get('slice') ?? 4
           ),
           engineChatYieldEnabled: params.get('yield') !== 'false',
+          engineChatEventLoopYieldEnabled:
+            params.get('eventLoopYield') !== 'false',
+          engineChatForegroundInterruptEnabled:
+            params.get('foregroundInterrupt') !== 'false',
           engineChatQueueMaxPending: Number(
             params.get('queueMaxPending') ?? 128
           ),

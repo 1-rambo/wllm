@@ -11,7 +11,7 @@ const input = path.resolve(args.input ?? 'artifacts/runs');
 const output = path.resolve(args.output ?? path.join(input, 'aggregate.csv'));
 const expected = {
   protocolVersion:
-    args['expected-protocol'] ?? 'wllm.browser-service.experiment.v2',
+    args['expected-protocol'] ?? 'wllm.browser-service.experiment.v3',
   gitRevision: args['expected-git'],
   modelSha256: args['expected-model-sha256'],
   wasmSha256: args['expected-wasm-sha256'],
@@ -84,6 +84,13 @@ const columns = [
   'foregroundActivationMs',
   'foregroundActivationP50Ms',
   'foregroundActivationP95Ms',
+  'foregroundSignalDeliveryP50Ms',
+  'foregroundSignalDeliveryP95Ms',
+  'foregroundRequestArrivalAfterSignalMs',
+  'foregroundPostArrivalDispatchMs',
+  'foregroundGapBackgroundDispatchCount',
+  'foregroundPostSignalActivationP50Ms',
+  'foregroundPostSignalActivationP95Ms',
   'foregroundFirstTokenMs',
   'foregroundResumeTtftP50Ms',
   'foregroundResumeTtftP95Ms',
@@ -107,6 +114,16 @@ const columns = [
   'admissionBudgetViolationCount',
   'protectedVictimViolationCount',
   'cacheHintFailureCount',
+  'protectedTargetNodeId',
+  'protectedTargetRequired',
+  'protectedTargetHintSeen',
+  'protectedTargetHintObservationCount',
+  'protectedTargetHintProtectedCount',
+  'protectedTargetHintCoverage',
+  'protectedTargetAdmissionObservationCount',
+  'protectedTargetAdmissionProtectedCount',
+  'protectedTargetAdmissionCoverage',
+  'protectedTargetMissingAtAdmissionCount',
   'admissionLatencyP95Ms',
   'admissionDemotedTokens',
   'admissionCheckpointedTokens',
@@ -194,6 +211,25 @@ for (const summaryPath of summaries.sort()) {
   if (Number(summary.protectedVictimViolationCount ?? 0) > 0) {
     invalidReasons.push('protected-victim-violation');
   }
+  if (
+    summary.protectedTargetRequired === true &&
+    Number(summary.protectedTargetHintObservationCount ?? 0) === 0
+  ) {
+    invalidReasons.push('protected-target-hint-unobserved');
+  }
+  if (
+    summary.protectedTargetRequired === true &&
+    Number(summary.protectedTargetHintCoverage ?? 0) < 1
+  ) {
+    invalidReasons.push('protected-target-binding-missing');
+  }
+  if (
+    summary.protectedTargetRequired === true &&
+    Number(summary.protectedTargetAdmissionObservationCount ?? 0) > 0 &&
+    Number(summary.protectedTargetAdmissionCoverage ?? 0) < 1
+  ) {
+    invalidReasons.push('protected-target-admission-binding-missing');
+  }
   if (Number(summary.admissionBudgetViolationCount ?? 0) > 0) {
     invalidReasons.push('admission-budget-violation');
   }
@@ -278,6 +314,17 @@ for (const summaryPath of summaries.sort()) {
     foregroundActivationMs: summary.foregroundActivationMs,
     foregroundActivationP50Ms: summary.foregroundActivationP50Ms,
     foregroundActivationP95Ms: summary.foregroundActivationP95Ms,
+    foregroundSignalDeliveryP50Ms: summary.foregroundSignalDeliveryP50Ms,
+    foregroundSignalDeliveryP95Ms: summary.foregroundSignalDeliveryP95Ms,
+    foregroundRequestArrivalAfterSignalMs:
+      summary.foregroundRequestArrivalAfterSignalMs,
+    foregroundPostArrivalDispatchMs: summary.foregroundPostArrivalDispatchMs,
+    foregroundGapBackgroundDispatchCount:
+      summary.foregroundGapBackgroundDispatchCount,
+    foregroundPostSignalActivationP50Ms:
+      summary.foregroundPostSignalActivationP50Ms,
+    foregroundPostSignalActivationP95Ms:
+      summary.foregroundPostSignalActivationP95Ms,
     foregroundFirstTokenMs: summary.foregroundFirstTokenMs,
     foregroundResumeTtftP50Ms: summary.foregroundResumeTtftP50Ms,
     foregroundResumeTtftP95Ms: summary.foregroundResumeTtftP95Ms,
@@ -301,6 +348,21 @@ for (const summaryPath of summaries.sort()) {
     admissionBudgetViolationCount: summary.admissionBudgetViolationCount,
     protectedVictimViolationCount: summary.protectedVictimViolationCount,
     cacheHintFailureCount: summary.cacheHintFailureCount,
+    protectedTargetNodeId: summary.protectedTargetNodeId,
+    protectedTargetRequired: summary.protectedTargetRequired,
+    protectedTargetHintSeen: summary.protectedTargetHintSeen,
+    protectedTargetHintObservationCount:
+      summary.protectedTargetHintObservationCount,
+    protectedTargetHintProtectedCount:
+      summary.protectedTargetHintProtectedCount,
+    protectedTargetHintCoverage: summary.protectedTargetHintCoverage,
+    protectedTargetAdmissionObservationCount:
+      summary.protectedTargetAdmissionObservationCount,
+    protectedTargetAdmissionProtectedCount:
+      summary.protectedTargetAdmissionProtectedCount,
+    protectedTargetAdmissionCoverage: summary.protectedTargetAdmissionCoverage,
+    protectedTargetMissingAtAdmissionCount:
+      summary.protectedTargetMissingAtAdmissionCount,
     admissionLatencyP95Ms: summary.admissionLatencyP95Ms,
     admissionDemotedTokens: summary.admissionDemotedTokens,
     admissionCheckpointedTokens: summary.admissionCheckpointedTokens,

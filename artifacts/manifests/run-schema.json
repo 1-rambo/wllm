@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "wllm.browser-service.run.v2",
+  "$id": "wllm.browser-service.run.v3",
   "title": "wLLM browser service event",
   "type": "object",
   "required": [

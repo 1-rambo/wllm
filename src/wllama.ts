@@ -50,6 +50,7 @@ import {
   compareEngineChatPriority,
   decodeSliceBudget,
   selectProtectedSessionNodeIds,
+  shouldInterruptBackgroundUnit,
   type EngineChatLifecycleState,
 } from './engine-chat-policy';
 import { LIBLLAMA_VERSION } from './workers-code/generated';
@@ -278,6 +279,21 @@ export interface WllamaConfig {
    * Default: true
    */
   engineChatYieldEnabled?: boolean;
+  /**
+   * Whether a yielded request performs a macrotask handoff before the next
+   * scheduling decision. This lets SharedWorker lifecycle messages become
+   * observable independently of whether cooperative slicing is enabled.
+   *
+   * Default: true
+   */
+  engineChatEventLoopYieldEnabled?: boolean;
+  /**
+   * Whether a background prefill/decode unit stops at the next native-call
+   * boundary after foreground work becomes pending.
+   *
+   * Default: true
+   */
+  engineChatForegroundInterruptEnabled?: boolean;
   /**
    * Enable detailed engine-chat tracing logs for diagnosing random stalls/timeouts.
    *
@@ -2636,10 +2652,12 @@ export class Wllama {
             this.traceEngineChat(
               `yield req=${req.id} nextStage=${req.runtime?.stage ?? 'na'} pending=${this.getEngineChatPendingCount()} slices=${req.sliceCount}`
             );
-            // Yield to the browser task queue, not only the promise microtask
-            // queue. SharedWorker lifecycle messages cannot update foreground
-            // priority while a chain of immediately-resolved slices is running.
-            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            if (this.isEngineChatEventLoopYieldEnabled()) {
+              // Yield to the browser task queue, not only the promise microtask
+              // queue. SharedWorker lifecycle messages cannot update foreground
+              // priority while a chain of immediately-resolved slices is running.
+              await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
           }
         } catch (err) {
           const failAt = Date.now();
@@ -2793,7 +2811,7 @@ export class Wllama {
       const clientId =
         separator >= 0 ? sessionKey.slice(0, separator) : sessionKey;
       const lifecycle = this.engineChatClientState.get(clientId);
-      sessionCandidates.push({ nodeId, lifecycle });
+      sessionCandidates.push({ nodeId, clientId, lifecycle });
     }
     const protectedNodeIds = selectProtectedSessionNodeIds(
       retentionPolicy,
@@ -3550,7 +3568,10 @@ export class Wllama {
       }
       runtime.remainingPromptTokens.splice(0, take);
       processed += take;
-      if (!req.foreground && this.hasForegroundPending()) {
+      if (
+        this.shouldInterruptBackgroundForForeground(req) &&
+        this.hasForegroundPending()
+      ) {
         break;
       }
       if (
@@ -3623,7 +3644,10 @@ export class Wllama {
       runtime.samplingHistoryTokens.push(sampled.token);
       await this.decode([sampled.token], {});
 
-      if (!req.foreground && this.hasForegroundPending()) {
+      if (
+        this.shouldInterruptBackgroundForForeground(req) &&
+        this.hasForegroundPending()
+      ) {
         break;
       }
 
@@ -3824,6 +3848,9 @@ export class Wllama {
 
   private getEngineChatDecodeSliceTokenBudget(req?: EngineChatRequest): number {
     const base = this.getEngineChatSliceTokenBudget();
+    if (this.getEngineChatSchedulingPolicy() !== 'foreground-aware') {
+      return base;
+    }
     if (req?.foreground) {
       const configured = this.config.engineChatForegroundSliceTokenBudget;
       return typeof configured === 'number' &&
@@ -3945,7 +3972,11 @@ export class Wllama {
       1,
       Math.floor(this.getEngineChatPrefillSliceMaxMs() / perTokenMs)
     );
-    if (!req?.foreground && this.hasForegroundPending()) {
+    if (
+      this.getEngineChatSchedulingPolicy() === 'foreground-aware' &&
+      !req?.foreground &&
+      this.hasForegroundPending()
+    ) {
       return Math.min(base, this.getEngineChatDecodeSliceTokenBudget(req));
     }
     return base;
@@ -4069,6 +4100,26 @@ export class Wllama {
       return true;
     }
     return configured;
+  }
+
+  private isEngineChatEventLoopYieldEnabled(): boolean {
+    const configured = this.config.engineChatEventLoopYieldEnabled;
+    if (typeof configured !== 'boolean') {
+      return true;
+    }
+    return configured;
+  }
+
+  private shouldInterruptBackgroundForForeground(
+    req?: EngineChatRequest
+  ): boolean {
+    const configured = this.config.engineChatForegroundInterruptEnabled;
+    return shouldInterruptBackgroundUnit(
+      this.getEngineChatSchedulingPolicy(),
+      req?.foreground ?? false,
+      this.hasForegroundPending(),
+      typeof configured === 'boolean' ? configured : true
+    );
   }
 
   private recordEngineChatCostObservation(

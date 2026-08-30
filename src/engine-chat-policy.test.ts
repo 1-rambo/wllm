@@ -4,6 +4,7 @@ import {
   compareEngineChatPriority,
   decodeSliceBudget,
   selectProtectedSessionNodeIds,
+  shouldInterruptBackgroundUnit,
   shouldProtectSession,
 } from './engine-chat-policy';
 
@@ -16,6 +17,23 @@ describe('decodeSliceBudget', () => {
   test('shortens background work while foreground work is waiting', () => {
     expect(decodeSliceBudget(128, 100, false, true, undefined, 8)).toBe(8);
     expect(decodeSliceBudget(128, 100, true, true, 64, 8)).toBe(64);
+  });
+});
+
+describe('shouldInterruptBackgroundUnit', () => {
+  test('interrupts only background work in foreground-aware mode', () => {
+    expect(
+      shouldInterruptBackgroundUnit('foreground-aware', false, true, true)
+    ).toBe(true);
+    expect(
+      shouldInterruptBackgroundUnit('foreground-aware', true, true, true)
+    ).toBe(false);
+    expect(shouldInterruptBackgroundUnit('dual-queue', false, true, true)).toBe(
+      false
+    );
+    expect(
+      shouldInterruptBackgroundUnit('foreground-aware', false, true, false)
+    ).toBe(false);
   });
 });
 
@@ -132,5 +150,38 @@ describe('selectProtectedSessionNodeIds', () => {
       1
     );
     expect(selected).toEqual([2]);
+  });
+
+  test('diversifies the bounded set across clients before selecting siblings', () => {
+    const selected = selectProtectedSessionNodeIds(
+      'lifecycle-aware',
+      [
+        {
+          ...hidden(1, 990),
+          clientId: 'active-client',
+          lifecycle: {
+            foreground: true,
+            lifecycleState: 'active',
+            changedAt: 990,
+            lastForegroundAt: 990,
+          },
+        },
+        {
+          ...hidden(2, 980),
+          clientId: 'active-client',
+          lifecycle: {
+            foreground: true,
+            lifecycleState: 'active',
+            changedAt: 980,
+            lastForegroundAt: 980,
+          },
+        },
+        { ...hidden(3, 970), clientId: 'recently-hidden-client' },
+      ],
+      now,
+      500,
+      2
+    );
+    expect(selected).toEqual([1, 3]);
   });
 });
