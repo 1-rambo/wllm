@@ -1,0 +1,40 @@
+{
+  "kind": "apps-pins",
+  "note": "Pinned real-application sources for the ArtifexWebGame and Holtwick Tavern end-to-end evaluation. Vendor checkouts remain pristine; evaluation adapters are loaded separately.",
+  "applications": [
+    {
+      "name": "ArtifexWebGame",
+      "path": "vendor/artifex-webgame",
+      "repository": "https://github.com/kavenmartinez1-collab/ArtifexWebGame.git",
+      "commit": "16ad6c8985ea85d2a482a67a4521a6c23e57c711",
+      "license": "MIT",
+      "entrypoint": "game.html",
+      "run": "npm ci && npm run dev",
+      "models": {
+        "director": "local/flux2-te-qwen3-4b-q4_k_m/flux2-te-qwen3-4b-q4_k_m.gguf",
+        "npcFast": "mradermacher/Qwen3-1.7B-abliterated-GGUF/Qwen3-1.7B-abliterated.Q4_K_M.gguf"
+      },
+      "integrationSeams": [
+        "src/game/director/director.ts:createGGUFInferenceSession",
+        "src/game/ui/npc-chat-panel.ts:createGGUFInferenceSession"
+      ]
+    },
+    {
+      "name": "Holtwick Tavern",
+      "path": "vendor/holtwick-tavern",
+      "repository": "https://github.com/lucianosmori/holtwick-tavern.git",
+      "commit": "d47be2fd1d23bef13a821c58ad1bb60a22529862",
+      "license": "MIT",
+      "entrypoint": "index.html",
+      "run": "python -m http.server 8000",
+      "models": {
+        "upstream": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+        "evaluation": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
+      },
+      "integrationSeams": [
+        "index.html:CreateMLCEngine",
+        "index.html:engine.chat.completions.create"
+      ]
+    }
+  ]
+}

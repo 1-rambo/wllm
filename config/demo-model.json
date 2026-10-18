@@ -1,0 +1,16 @@
+{
+  "id": "llama-3.2-1b-instruct-q4_k_m",
+  "label": "Llama 3.2 1B Instruct (Q4_K_M)",
+  "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+  "sourceUrl": "https://huggingface.co/unsloth/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+  "downloadUrl": "https://hf-mirror.com/unsloth/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+  "license": "Llama 3.2 Community License",
+  "licenseUrl": "https://www.llama.com/llama3_2/license/",
+  "sizeBytes": 807694368,
+  "sha256": "3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1",
+  "runtime": {
+    "nCtx": 2048,
+    "nBatch": 128,
+    "nParallel": 4
+  }
+}

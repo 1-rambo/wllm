@@ -1,0 +1,1101 @@
+diff --git a/cpp/glue.hpp b/cpp/glue.hpp
+index a71b13b..963983b 100644
+--- a/cpp/glue.hpp
++++ b/cpp/glue.hpp
+@@ -455,6 +455,7 @@ void glue_handler::deserialize(glue_inbuf &input)
+       break;
+     case GLUE_DTYPE_RAW:
+       ((glue_raw *)field)->parse(input);
++      break;
+     case GLUE_DTYPE_ARRAY_BOOL:
+       ((glue_arr_bool *)field)->parse(input);
+       break;
+@@ -469,6 +470,7 @@ void glue_handler::deserialize(glue_inbuf &input)
+       break;
+     case GLUE_DTYPE_ARRAY_RAW:
+       ((glue_arr_raw *)field)->parse(input);
++      break;
+     }
+   }
+ }
+@@ -680,3 +682,130 @@ struct glue_msg_test_backend_ops_res
+   GLUE_FIELD(int, retcode)
+   GLUE_FIELD(bool, success)
+ };
++
++///////// Slot-scoped KV state (bounded serving support)
++
++// Export the KV cache of one serving slot so the host can park it in memory
++// (L2) or in persistent storage (L3) and later resume it without re-prefill.
++struct glue_msg_kvsv_req
++{
++  GLUE_HANDLER("kvsv_req")
++  GLUE_FIELD(int, slot_id)
++  GLUE_FIELD(bool, drop)
++};
++
++struct glue_msg_kvsv_res
++{
++  GLUE_HANDLER("kvsv_res")
++  GLUE_FIELD(bool, success)
++  GLUE_FIELD(int, status)
++  GLUE_FIELD(int, n_tokens)
++  GLUE_FIELD(int, n_bytes)
++  GLUE_FIELD(arr_int, tokens)
++  GLUE_FIELD(raw, data)
++};
++
++// Restore a previously exported KV state into a slot. The slot must be idle.
++struct glue_msg_kvld_req
++{
++  GLUE_HANDLER("kvld_req")
++  GLUE_FIELD(int, slot_id)
++  GLUE_FIELD(arr_int, tokens)
++  GLUE_FIELD(raw, data)
++};
++
++struct glue_msg_kvld_res
++{
++  GLUE_HANDLER("kvld_res")
++  GLUE_FIELD(bool, success)
++  GLUE_FIELD(int, status)
++  GLUE_FIELD(int, n_tokens)
++};
++
++// Drop the KV state of one idle slot without exporting it (bounded L1 eviction).
++struct glue_msg_kvdr_req
++{
++  GLUE_HANDLER("kvdr_req")
++  GLUE_FIELD(int, slot_id)
++};
++
++struct glue_msg_kvdr_res
++{
++  GLUE_HANDLER("kvdr_res")
++  GLUE_FIELD(bool, success)
++  GLUE_FIELD(int, status)
++  GLUE_FIELD(int, n_tokens)
++};
++
++///////// Parked sequence states (wasm-resident tier two)
++
++// Park a slot's sequence state inside the wasm heap under a handle and release
++// the live serving slot. Unlike kvsv, the state never crosses into the host,
++// so a parked node costs the host one integer handle and no heap copy.
++struct glue_msg_kvpk_req
++{
++  GLUE_HANDLER("kvpk_req")
++  GLUE_FIELD(int, slot_id)
++};
++
++struct glue_msg_kvpk_res
++{
++  GLUE_HANDLER("kvpk_res")
++  GLUE_FIELD(bool, success)
++  GLUE_FIELD(int, status)
++  GLUE_FIELD(int, handle)
++  GLUE_FIELD(int, n_tokens)
++  GLUE_FIELD(int, n_bytes)
++};
++
++// Restore a parked state into an idle slot. The parked copy is kept so the same
++// node can be parked and resumed repeatedly; the host releases it explicitly.
++struct glue_msg_kvrs_req
++{
++  GLUE_HANDLER("kvrs_req")
++  GLUE_FIELD(int, handle)
++  GLUE_FIELD(int, slot_id)
++};
++
++struct glue_msg_kvrs_res
++{
++  GLUE_HANDLER("kvrs_res")
++  GLUE_FIELD(bool, success)
++  GLUE_FIELD(int, status)
++  GLUE_FIELD(int, n_tokens)
++};
++
++// Serialize a parked state out to the host, which is the tier-three step: the
++// bytes leave the wasm heap and the native copy is released separately.
++struct glue_msg_kvrq_req
++{
++  GLUE_HANDLER("kvrq_req")
++  GLUE_FIELD(int, handle)
++};
++
++struct glue_msg_kvrq_res
++{
++  GLUE_HANDLER("kvrq_res")
++  GLUE_FIELD(bool, success)
++  GLUE_FIELD(int, status)
++  GLUE_FIELD(int, n_tokens)
++  GLUE_FIELD(int, n_bytes)
++  GLUE_FIELD(arr_int, tokens)
++  GLUE_FIELD(raw, data)
++};
++
++// Release a parked state without restoring it (tier-three flush or eviction).
++struct glue_msg_kvfd_req
++{
++  GLUE_HANDLER("kvfd_req")
++  GLUE_FIELD(int, handle)
++};
++
++struct glue_msg_kvfd_res
++{
++  GLUE_HANDLER("kvfd_res")
++  GLUE_FIELD(bool, success)
++  GLUE_FIELD(int, status)
++  GLUE_FIELD(int, n_tokens)
++  GLUE_FIELD(int, n_bytes)
++};
+diff --git a/cpp/wllama-context.h b/cpp/wllama-context.h
+index f0aed65..82dad11 100644
+--- a/cpp/wllama-context.h
++++ b/cpp/wllama-context.h
+@@ -21,6 +21,7 @@
+ #include "server-context.h"
+ #include "server-queue.h"
+ #include "server-schema.h"
++#include "server-common.h"
+ 
+ #include "ggml-cpu.h"
+ #include "ggml-backend.h"
+@@ -264,6 +265,10 @@ struct wllama_context
+   // one reader per in-flight request, keyed by req_id; erasing an entry cancels its unfinished tasks
+   std::unordered_map<int, std::unique_ptr<server_response_reader>> readers;
+   int next_req_id = 1;
++  // tier two: sequence states parked inside the wasm heap, keyed by handle.
++  // The host holds only handles, so a parked node costs it no heap copy.
++  std::unordered_map<int, server_slot_state> parked_states;
++  int next_park_handle = 1;
+   std::unique_ptr<const server_context_meta> meta;
+ 
+   struct console
+@@ -302,6 +307,8 @@ struct wllama_context
+       server_task task = server_task(SERVER_TASK_TYPE_COMPLETION);
+       task.id = rd.get_new_id();
+       task.index = 0;
++      // pin the request to a serving slot when the host asks for one
++      task.id_slot = json_value(body, "id_slot", -1);
+       task.params = server_schema::eval_llama_cmpl_schema(
+           vocab,
+           params,
+@@ -831,6 +838,167 @@ struct wllama_context
+     return res;
+   }
+ 
++  // bounded serving: copy the KV state of an idle slot out of the context
++  glue_msg_kvsv_res action_kv_save(const char *req_raw)
++  {
++    PARSE_REQ(glue_msg_kvsv_req);
++    glue_msg_kvsv_res res;
++
++    server_slot_state state;
++    const bool ok = ctx_server.slot_state_export(req.slot_id.value, state, req.drop.value);
++
++    res.success.value = ok;
++    res.status.value = state.status;
++    res.n_tokens.value = state.n_tokens;
++    res.n_bytes.value = (int)state.kv.size();
++    res.tokens.arr = std::move(state.tokens);
++    res.data.buf.assign(
++        reinterpret_cast<const char *>(state.kv.data()),
++        reinterpret_cast<const char *>(state.kv.data()) + state.kv.size());
++    return res;
++  }
++
++  // bounded serving: install a previously exported KV state into an idle slot
++  glue_msg_kvld_res action_kv_load(const char *req_raw)
++  {
++    PARSE_REQ(glue_msg_kvld_req);
++    glue_msg_kvld_res res;
++
++    server_slot_state in;
++    in.tokens = req.tokens.arr;
++    in.kv.assign(
++        reinterpret_cast<const uint8_t *>(req.data.buf.data()),
++        reinterpret_cast<const uint8_t *>(req.data.buf.data()) + req.data.buf.size());
++
++    server_slot_state out;
++    const bool ok = ctx_server.slot_state_import(req.slot_id.value, in, out);
++
++    res.success.value = ok;
++    res.status.value = out.status;
++    res.n_tokens.value = out.n_tokens;
++    return res;
++  }
++
++  // bounded serving: release the KV state of an idle slot without exporting it
++  glue_msg_kvdr_res action_kv_drop(const char *req_raw)
++  {
++    PARSE_REQ(glue_msg_kvdr_req);
++    glue_msg_kvdr_res res;
++
++    server_slot_state out;
++    const bool ok = ctx_server.slot_state_clear(req.slot_id.value, out);
++
++    res.success.value = ok;
++    res.status.value = out.status;
++    res.n_tokens.value = out.n_tokens;
++    return res;
++  }
++
++  // tier two: move a slot's state into the wasm-side park bank and release the
++  // serving slot. The host receives a handle instead of the state bytes.
++  glue_msg_kvpk_res action_kv_park(const char *req_raw)
++  {
++    PARSE_REQ(glue_msg_kvpk_req);
++    glue_msg_kvpk_res res;
++
++    server_slot_state state;
++    const bool ok = ctx_server.slot_state_export(req.slot_id.value, state, true);
++
++    res.success.value = ok;
++    res.status.value = state.status;
++    res.n_tokens.value = state.n_tokens;
++    if (!ok)
++    {
++      res.handle.value = -1;
++      res.n_bytes.value = 0;
++      return res;
++    }
++
++    const int handle = next_park_handle++;
++    res.handle.value = handle;
++    res.n_bytes.value = (int)state.kv.size();
++    parked_states.emplace(handle, std::move(state));
++    return res;
++  }
++
++  // tier two: install a parked state into an idle slot without re-prefilling it.
++  // The parked copy survives, so a node can be parked again after the turn.
++  glue_msg_kvrs_res action_kv_resume(const char *req_raw)
++  {
++    PARSE_REQ(glue_msg_kvrs_req);
++    glue_msg_kvrs_res res;
++
++    auto it = parked_states.find(req.handle.value);
++    if (it == parked_states.end())
++    {
++      res.success.value = false;
++      res.status.value = SERVER_SLOT_STATE_EMPTY;
++      res.n_tokens.value = 0;
++      return res;
++    }
++
++    server_slot_state out;
++    const bool ok = ctx_server.slot_state_import(req.slot_id.value, it->second, out);
++
++    res.success.value = ok;
++    res.status.value = out.status;
++    res.n_tokens.value = out.n_tokens;
++    return res;
++  }
++
++  // tier three: serialize a parked state out to the host. The native copy stays
++  // until the host releases it, so a failed flush loses no state.
++  glue_msg_kvrq_res action_kv_read(const char *req_raw)
++  {
++    PARSE_REQ(glue_msg_kvrq_req);
++    glue_msg_kvrq_res res;
++
++    auto it = parked_states.find(req.handle.value);
++    if (it == parked_states.end())
++    {
++      res.success.value = false;
++      res.status.value = SERVER_SLOT_STATE_EMPTY;
++      res.n_tokens.value = 0;
++      res.n_bytes.value = 0;
++      return res;
++    }
++
++    const server_slot_state &state = it->second;
++    res.success.value = true;
++    res.status.value = state.status;
++    res.n_tokens.value = state.n_tokens;
++    res.n_bytes.value = (int)state.kv.size();
++    res.tokens.arr = state.tokens;
++    res.data.buf.assign(
++        reinterpret_cast<const char *>(state.kv.data()),
++        reinterpret_cast<const char *>(state.kv.data()) + state.kv.size());
++    return res;
++  }
++
++  // tier three: release a parked state once its serialized copy is durable.
++  glue_msg_kvfd_res action_kv_release(const char *req_raw)
++  {
++    PARSE_REQ(glue_msg_kvfd_req);
++    glue_msg_kvfd_res res;
++
++    auto it = parked_states.find(req.handle.value);
++    if (it == parked_states.end())
++    {
++      res.success.value = false;
++      res.status.value = SERVER_SLOT_STATE_EMPTY;
++      res.n_tokens.value = 0;
++      res.n_bytes.value = 0;
++      return res;
++    }
++
++    res.success.value = true;
++    res.status.value = SERVER_SLOT_STATE_OK;
++    res.n_tokens.value = it->second.n_tokens;
++    res.n_bytes.value = (int)it->second.kv.size();
++    parked_states.erase(it);
++    return res;
++  }
++
+   glue_msg_test_backend_ops_res action_test_backend_ops(const char *req_raw)
+   {
+     PARSE_REQ(glue_msg_test_backend_ops_req);
+diff --git a/cpp/wllama.cpp b/cpp/wllama.cpp
+index 81a98f6..ea1beda 100644
+--- a/cpp/wllama.cpp
++++ b/cpp/wllama.cpp
+@@ -115,6 +115,13 @@ extern "C" const char *wllama_action(const char *name, const char *req_raw)
+     WLLAMA_ACTION(rerank)
+     WLLAMA_ACTION(get_result)
+     WLLAMA_ACTION(cancel)
++    WLLAMA_ACTION(kv_save)
++    WLLAMA_ACTION(kv_load)
++    WLLAMA_ACTION(kv_drop)
++    WLLAMA_ACTION(kv_park)
++    WLLAMA_ACTION(kv_resume)
++    WLLAMA_ACTION(kv_read)
++    WLLAMA_ACTION(kv_release)
+     WLLAMA_ACTION(test_backend_ops)
+ 
+     else
+diff --git a/scripts/docker-compose.yml b/scripts/docker-compose.yml
+index ac0208d..b098cf3 100644
+--- a/scripts/docker-compose.yml
++++ b/scripts/docker-compose.yml
+@@ -29,10 +29,16 @@ services:
+         DAWN_TAG=v20260317.182325
+         EMDAWN_PKG="emdawnwebgpu_pkg-$${DAWN_TAG}.zip"
+         EMDAWNWEBGPU_DIR="/source/build/emdawn/emdawnwebgpu_pkg"
+-        echo "Downloading $${EMDAWN_PKG}"
+-        curl -L -o emdawn.zip \
+-          "https://github.com/google/dawn/releases/download/$${DAWN_TAG}/$${EMDAWN_PKG}"
+-        python3 -c "import zipfile; zf=zipfile.ZipFile('emdawn.zip','r'); zf.extractall('/source/build/emdawn'); zf.close()"
++        if [ ! -s emdawn.zip ]; then
++          echo "Downloading $${EMDAWN_PKG}"
++          curl -L -o emdawn.zip \
++            "https://github.com/google/dawn/releases/download/$${DAWN_TAG}/$${EMDAWN_PKG}"
++        else
++          echo "Reusing cached emdawn.zip"
++        fi
++        if [ ! -d "$${EMDAWNWEBGPU_DIR}" ]; then
++          python3 -c "import zipfile; zf=zipfile.ZipFile('emdawn.zip','r'); zf.extractall('/source/build/emdawn'); zf.close()"
++        fi
+ 
+         CMAKE_EXTRA_FLAGS="-DWLLAMA_TEST_BACKEND=OFF"
+         if [ -n "${WLLAMA_TEST_BACKEND}" ]; then
+diff --git a/src/glue/messages.ts b/src/glue/messages.ts
+index 843fcb2..cd2dafa 100644
+--- a/src/glue/messages.ts
++++ b/src/glue/messages.ts
+@@ -645,6 +645,309 @@ export const GLUE_MESSAGE_PROTOTYPES: { [name: string]: GlueMessageProto } = {
+         "isNullable": false
+       }
+     ]
++  },
++  "kvsv_req": {
++    "name": "kvsv_req",
++    "structName": "glue_msg_kvsv_req",
++    "className": "GlueMsgKvsvReq",
++    "fields": [
++      {
++        "type": "int",
++        "name": "slot_id",
++        "isNullable": false
++      },
++      {
++        "type": "bool",
++        "name": "drop",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvsv_res": {
++    "name": "kvsv_res",
++    "structName": "glue_msg_kvsv_res",
++    "className": "GlueMsgKvsvRes",
++    "fields": [
++      {
++        "type": "bool",
++        "name": "success",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "status",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_tokens",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_bytes",
++        "isNullable": false
++      },
++      {
++        "type": "arr_int",
++        "name": "tokens",
++        "isNullable": false
++      },
++      {
++        "type": "raw",
++        "name": "data",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvld_req": {
++    "name": "kvld_req",
++    "structName": "glue_msg_kvld_req",
++    "className": "GlueMsgKvldReq",
++    "fields": [
++      {
++        "type": "int",
++        "name": "slot_id",
++        "isNullable": false
++      },
++      {
++        "type": "arr_int",
++        "name": "tokens",
++        "isNullable": false
++      },
++      {
++        "type": "raw",
++        "name": "data",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvld_res": {
++    "name": "kvld_res",
++    "structName": "glue_msg_kvld_res",
++    "className": "GlueMsgKvldRes",
++    "fields": [
++      {
++        "type": "bool",
++        "name": "success",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "status",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_tokens",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvdr_req": {
++    "name": "kvdr_req",
++    "structName": "glue_msg_kvdr_req",
++    "className": "GlueMsgKvdrReq",
++    "fields": [
++      {
++        "type": "int",
++        "name": "slot_id",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvdr_res": {
++    "name": "kvdr_res",
++    "structName": "glue_msg_kvdr_res",
++    "className": "GlueMsgKvdrRes",
++    "fields": [
++      {
++        "type": "bool",
++        "name": "success",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "status",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_tokens",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvpk_req": {
++    "name": "kvpk_req",
++    "structName": "glue_msg_kvpk_req",
++    "className": "GlueMsgKvpkReq",
++    "fields": [
++      {
++        "type": "int",
++        "name": "slot_id",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvpk_res": {
++    "name": "kvpk_res",
++    "structName": "glue_msg_kvpk_res",
++    "className": "GlueMsgKvpkRes",
++    "fields": [
++      {
++        "type": "bool",
++        "name": "success",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "status",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "handle",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_tokens",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_bytes",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvrs_req": {
++    "name": "kvrs_req",
++    "structName": "glue_msg_kvrs_req",
++    "className": "GlueMsgKvrsReq",
++    "fields": [
++      {
++        "type": "int",
++        "name": "handle",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "slot_id",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvrs_res": {
++    "name": "kvrs_res",
++    "structName": "glue_msg_kvrs_res",
++    "className": "GlueMsgKvrsRes",
++    "fields": [
++      {
++        "type": "bool",
++        "name": "success",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "status",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_tokens",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvrq_req": {
++    "name": "kvrq_req",
++    "structName": "glue_msg_kvrq_req",
++    "className": "GlueMsgKvrqReq",
++    "fields": [
++      {
++        "type": "int",
++        "name": "handle",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvrq_res": {
++    "name": "kvrq_res",
++    "structName": "glue_msg_kvrq_res",
++    "className": "GlueMsgKvrqRes",
++    "fields": [
++      {
++        "type": "bool",
++        "name": "success",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "status",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_tokens",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_bytes",
++        "isNullable": false
++      },
++      {
++        "type": "arr_int",
++        "name": "tokens",
++        "isNullable": false
++      },
++      {
++        "type": "raw",
++        "name": "data",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvfd_req": {
++    "name": "kvfd_req",
++    "structName": "glue_msg_kvfd_req",
++    "className": "GlueMsgKvfdReq",
++    "fields": [
++      {
++        "type": "int",
++        "name": "handle",
++        "isNullable": false
++      }
++    ]
++  },
++  "kvfd_res": {
++    "name": "kvfd_res",
++    "structName": "glue_msg_kvfd_res",
++    "className": "GlueMsgKvfdRes",
++    "fields": [
++      {
++        "type": "bool",
++        "name": "success",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "status",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_tokens",
++        "isNullable": false
++      },
++      {
++        "type": "int",
++        "name": "n_bytes",
++        "isNullable": false
++      }
++    ]
+   }
+ };
+ 
+@@ -830,5 +1133,116 @@ export interface GlueMsgTestBackendOpsRes {
+   success: boolean;
+ }
+ 
++// struct glue_msg_kvsv_req
++export interface GlueMsgKvsvReq {
++  _name: "kvsv_req";
++  slot_id: number;
++  drop: boolean;
++}
++
++// struct glue_msg_kvsv_res
++export interface GlueMsgKvsvRes {
++  _name: "kvsv_res";
++  success: boolean;
++  status: number;
++  n_tokens: number;
++  n_bytes: number;
++  tokens: number[];
++  data: Uint8Array;
++}
++
++// struct glue_msg_kvld_req
++export interface GlueMsgKvldReq {
++  _name: "kvld_req";
++  slot_id: number;
++  tokens: number[];
++  data: Uint8Array;
++}
++
++// struct glue_msg_kvld_res
++export interface GlueMsgKvldRes {
++  _name: "kvld_res";
++  success: boolean;
++  status: number;
++  n_tokens: number;
++}
++
++// struct glue_msg_kvdr_req
++export interface GlueMsgKvdrReq {
++  _name: "kvdr_req";
++  slot_id: number;
++}
++
++// struct glue_msg_kvdr_res
++export interface GlueMsgKvdrRes {
++  _name: "kvdr_res";
++  success: boolean;
++  status: number;
++  n_tokens: number;
++}
++
++// struct glue_msg_kvpk_req
++export interface GlueMsgKvpkReq {
++  _name: "kvpk_req";
++  slot_id: number;
++}
++
++// struct glue_msg_kvpk_res
++export interface GlueMsgKvpkRes {
++  _name: "kvpk_res";
++  success: boolean;
++  status: number;
++  handle: number;
++  n_tokens: number;
++  n_bytes: number;
++}
++
++// struct glue_msg_kvrs_req
++export interface GlueMsgKvrsReq {
++  _name: "kvrs_req";
++  handle: number;
++  slot_id: number;
++}
++
++// struct glue_msg_kvrs_res
++export interface GlueMsgKvrsRes {
++  _name: "kvrs_res";
++  success: boolean;
++  status: number;
++  n_tokens: number;
++}
++
++// struct glue_msg_kvrq_req
++export interface GlueMsgKvrqReq {
++  _name: "kvrq_req";
++  handle: number;
++}
++
++// struct glue_msg_kvrq_res
++export interface GlueMsgKvrqRes {
++  _name: "kvrq_res";
++  success: boolean;
++  status: number;
++  n_tokens: number;
++  n_bytes: number;
++  tokens: number[];
++  data: Uint8Array;
++}
++
++// struct glue_msg_kvfd_req
++export interface GlueMsgKvfdReq {
++  _name: "kvfd_req";
++  handle: number;
++}
++
++// struct glue_msg_kvfd_res
++export interface GlueMsgKvfdRes {
++  _name: "kvfd_res";
++  success: boolean;
++  status: number;
++  n_tokens: number;
++  n_bytes: number;
++}
++
+ 
+-export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgCompletionReq | GlueMsgCompletionRes | GlueMsgEmbeddingReq | GlueMsgEmbeddingRes | GlueMsgRerankReq | GlueMsgRerankRes | GlueMsgGetResultReq | GlueMsgGetResultRes | GlueMsgCancelReq | GlueMsgCancelRes | GlueMsgTestBackendOpsReq | GlueMsgTestBackendOpsRes;
++export type GlueMsg = GlueMsgError | GlueMsgLoadReq | GlueMsgLoadRes | GlueMsgCompletionReq | GlueMsgCompletionRes | GlueMsgEmbeddingReq | GlueMsgEmbeddingRes | GlueMsgRerankReq | GlueMsgRerankRes | GlueMsgGetResultReq | GlueMsgGetResultRes | GlueMsgCancelReq | GlueMsgCancelRes | GlueMsgTestBackendOpsReq | GlueMsgTestBackendOpsRes | GlueMsgKvsvReq | GlueMsgKvsvRes | GlueMsgKvldReq | GlueMsgKvldRes | GlueMsgKvdrReq | GlueMsgKvdrRes | GlueMsgKvpkReq | GlueMsgKvpkRes | GlueMsgKvrsReq | GlueMsgKvrsRes | GlueMsgKvrqReq | GlueMsgKvrqRes | GlueMsgKvfdReq | GlueMsgKvfdRes;
+diff --git a/src/types/oai-compat.ts b/src/types/oai-compat.ts
+index b0e6ef1..50e5d06 100644
+--- a/src/types/oai-compat.ts
++++ b/src/types/oai-compat.ts
+@@ -220,6 +220,18 @@ export interface ResultTimings {
+   predicted_ms: number;
+   predicted_per_token_ms: number;
+   predicted_per_second: number;
++  /**
++   * True when the native server stopped the task at a token boundary
++   * because it consumed the per-unit time budget. The slot keeps its KV
++   * cache, so the next bounded unit resumes from the same prefix.
++   */
++  bounded_stop?: boolean;
++  /** Exact native budget that closed a bounded stop. */
++  bounded_stop_reason?:
++    | 'prefill-budget'
++    | 'decode-budget'
++    | 'unit-time-budget'
++    | 'predict-time-budget';
+ }
+ 
+ /** Response when stream=true — one chunk per SSE event */
+@@ -254,8 +266,20 @@ export type RawCompletionParams = {
+   best_of?: number;
+   logit_bias?: Record<string, number>;
+   seed?: number;
+-  user?: string;
+   return_progress?: boolean;
++  // bounded serving: pin this request to a serving slot. The slot keeps its
++  // prompt cache alive until it is explicitly exported or dropped.
++  id_slot?: number;
++  // bounded serving: evaluate at most this many uncached prompt tokens in
++  // this request. The slot keeps the evaluated prefix for the next unit.
++  n_prefill_max?: number;
++  // bounded serving: decode at most this many tokens in this request, then
++  // stop at a token boundary with the slot KV retained for the next unit.
++  n_decode_max?: number;
++  // bounded serving: maximum wall-clock time for the native task unit in
++  // milliseconds. It covers prompt and decode and is checked at token
++  // boundaries so the slot KV remains resumable.
++  t_unit_max_ms?: number;
+ } & SamplingParams;
+ 
+ export interface RawCompletionChoice {
+diff --git a/src/types/types.ts b/src/types/types.ts
+index de08636..8b85eb8 100644
+--- a/src/types/types.ts
++++ b/src/types/types.ts
+@@ -137,3 +137,33 @@ export enum LogLevel {
+   WARN = 3,
+   ERROR = 4,
+ }
++
++// bounded serving: snapshot of one serving slot, produced by Wllama.exportSlotState()
++export interface SlotStateSnapshot {
++  slotId: number;
++  // opaque sequence state bytes (KV cache of the sequence)
++  kv: Uint8Array;
++  // token-aligned serialization of the slot prompt, required to resume the slot
++  tokens: number[];
++  tokenCount: number;
++  byteLength: number;
++}
++
++// Tier two: a sequence state parked inside the wasm heap. The host holds the
++// handle only; the state bytes never cross the wasm boundary until the state
++// is serialized out for tier three.
++export interface ParkedSlotStateHandle {
++  handle: number;
++  tokenCount: number;
++  byteLength: number;
++}
++
++// Tier three: a parked state serialized out to the host.
++export interface ParkedSlotStateSnapshot {
++  handle: number;
++  // opaque sequence state bytes, same layout as SlotStateSnapshot.kv
++  kv: Uint8Array;
++  tokens: number[];
++  tokenCount: number;
++  byteLength: number;
++}
+diff --git a/src/wllama.ts b/src/wllama.ts
+index c04abf2..e550e95 100644
+--- a/src/wllama.ts
++++ b/src/wllama.ts
+@@ -21,6 +21,13 @@ import type {
+   GlueMsgEmbeddingRes,
+   GlueMsgRerankRes,
+   GlueMsgGetResultRes,
++  GlueMsgKvdrRes,
++  GlueMsgKvldRes,
++  GlueMsgKvfdRes,
++  GlueMsgKvpkRes,
++  GlueMsgKvrqRes,
++  GlueMsgKvrsRes,
++  GlueMsgKvsvRes,
+   GlueMsgLoadRes,
+   GlueMsgTestBackendOpsRes,
+ } from './glue/messages';
+@@ -28,6 +35,9 @@ import { LIBLLAMA_VERSION } from './workers-code/generated';
+ import type {
+   LoadedContextInfo,
+   LoadModelParams,
++  ParkedSlotStateHandle,
++  ParkedSlotStateSnapshot,
++  SlotStateSnapshot,
+   StreamParams,
+ } from './types/types';
+ import type {
+@@ -1013,6 +1023,150 @@ export class Wllama {
+   }
+ 
+   // release the slot occupied by the request; cancelling an already-finished request is a no-op
++  // bounded serving: copy the KV state of an idle slot out of the context
++  async exportSlotState(
++    slotId: number,
++    options: { drop?: boolean } = {}
++  ): Promise<SlotStateSnapshot> {
++    this.checkModelLoaded();
++    const res = await this.proxy.wllamaAction<GlueMsgKvsvRes>('kv_save', {
++      _name: 'kvsv_req',
++      slot_id: slotId,
++      drop: options.drop ?? true,
++    });
++    if (!res.success) {
++      throw new WllamaError(
++        `Failed to export slot state (status ${res.status})`,
++        'inference_error'
++      );
++    }
++    return {
++      slotId,
++      kv: res.data,
++      tokens: [...res.tokens],
++      tokenCount: res.n_tokens,
++      byteLength: res.n_bytes,
++    };
++  }
++
++  // bounded serving: install a previously exported KV state into an idle slot
++  async importSlotState(
++    slotId: number,
++    state: { kv: Uint8Array; tokens: number[] }
++  ): Promise<number> {
++    this.checkModelLoaded();
++    const res = await this.proxy.wllamaAction<GlueMsgKvldRes>('kv_load', {
++      _name: 'kvld_req',
++      slot_id: slotId,
++      tokens: [...state.tokens],
++      data: state.kv,
++    });
++    if (!res.success) {
++      throw new WllamaError(
++        `Failed to import slot state (status ${res.status})`,
++        'inference_error'
++      );
++    }
++    return res.n_tokens;
++  }
++
++  // bounded serving: release the KV state of an idle slot without exporting it
++  async dropSlotState(slotId: number): Promise<number> {
++    this.checkModelLoaded();
++    const res = await this.proxy.wllamaAction<GlueMsgKvdrRes>('kv_drop', {
++      _name: 'kvdr_req',
++      slot_id: slotId,
++    });
++    if (!res.success) {
++      throw new WllamaError(
++        `Failed to drop slot state (status ${res.status})`,
++        'inference_error'
++      );
++    }
++    return res.n_tokens;
++  }
++
++  // tier two: park the sequence state inside the wasm heap and release the slot,
++  // so a parked node costs the host one handle and no heap copy
++  async parkSlotState(slotId: number): Promise<ParkedSlotStateHandle> {
++    this.checkModelLoaded();
++    const res = await this.proxy.wllamaAction<GlueMsgKvpkRes>('kv_park', {
++      _name: 'kvpk_req',
++      slot_id: slotId,
++    });
++    if (!res.success) {
++      throw new WllamaError(
++        `Failed to park slot state (status ${res.status})`,
++        'inference_error'
++      );
++    }
++    return {
++      handle: res.handle,
++      tokenCount: res.n_tokens,
++      byteLength: res.n_bytes,
++    };
++  }
++
++  // tier two: install a parked state into an idle slot without re-prefilling it
++  async resumeSlotState(handle: number, slotId: number): Promise<number> {
++    this.checkModelLoaded();
++    const res = await this.proxy.wllamaAction<GlueMsgKvrsRes>('kv_resume', {
++      _name: 'kvrs_req',
++      handle,
++      slot_id: slotId,
++    });
++    if (!res.success) {
++      throw new WllamaError(
++        `Failed to resume parked slot state (status ${res.status})`,
++        'inference_error'
++      );
++    }
++    return res.n_tokens;
++  }
++
++  // tier three: serialize a parked state out of the wasm heap. The native copy
++  // stays until releaseSlotState() is called, so a failed write loses no state.
++  async readParkedSlotState(
++    handle: number
++  ): Promise<ParkedSlotStateSnapshot> {
++    this.checkModelLoaded();
++    const res = await this.proxy.wllamaAction<GlueMsgKvrqRes>('kv_read', {
++      _name: 'kvrq_req',
++      handle,
++    });
++    if (!res.success) {
++      throw new WllamaError(
++        `Failed to read parked slot state (status ${res.status})`,
++        'inference_error'
++      );
++    }
++    return {
++      handle,
++      kv: res.data,
++      tokens: [...res.tokens],
++      tokenCount: res.n_tokens,
++      byteLength: res.n_bytes,
++    };
++  }
++
++  // tier three: drop the wasm-heap copy once its serialized form is durable
++  async releaseParkedSlotState(
++    handle: number
++  ): Promise<{ tokenCount: number; byteLength: number }> {
++    this.checkModelLoaded();
++    const res = await this.proxy.wllamaAction<GlueMsgKvfdRes>('kv_release', {
++      _name: 'kvfd_req',
++      handle,
++    });
++    if (!res.success) {
++      throw new WllamaError(
++        `Failed to release parked slot state (status ${res.status})`,
++        'inference_error'
++      );
++    }
++    return { tokenCount: res.n_tokens, byteLength: res.n_bytes };
++  }
++
+   private async cancelRequest(reqId: number): Promise<void> {
+     try {
+       await this.proxy.wllamaAction<GlueMsgCancelRes>('cancel', {
+diff --git a/src/workers-code/generated.ts b/src/workers-code/generated.ts
+index 132818f..5ddd1bf 100644
+--- a/src/workers-code/generated.ts
++++ b/src/workers-code/generated.ts
+@@ -1,7 +1,7 @@
+ // This file is auto-generated
+ // To re-generate it, run: npm run build:worker
+ 
+-export const LIBLLAMA_VERSION = 'b10663-83d855c';
++export const LIBLLAMA_VERSION = 'b1-83d855c';
+ 
+ export const LLAMA_CPP_WORKER_CODE = "// Start the main llama.cpp\nlet wllamaMalloc;\nlet wllamaStart;\nlet wllamaAction;\nlet wllamaExit;\nlet wllamaDebug;\n\nlet Module = null;\nlet isCompat = false;\nlet lastStack = '';\nlet isAborted = false;\nlet hasMultithread = false;\n\n//////////////////////////////////////////////////////////////\n// UTILS\n//////////////////////////////////////////////////////////////\n\n// send message back to main thread\nconst msg = (data, transfer) => postMessage(data, transfer);\n\n// Convert CPP log into JS log\nconst cppLogToJSLog = (line) => {\n  const matched = line.match(/@@(DEBUG|INFO|WARN|ERROR)@@(.*)/);\n  return !!matched\n    ? {\n        level: (matched[1] === 'INFO' ? 'debug' : matched[1]).toLowerCase(),\n        text: matched[2],\n      }\n    : { level: 'log', text: line };\n};\n\nconst getHeapU8 = () => {\n  const buffer = Module.wasmMemory.buffer;\n  return new Uint8Array(buffer);\n};\n\nconst toSizeT = (num) => {\n  return isCompat ? Number(num) : BigInt(num);\n};\n\n// Get module config that forwards stdout/err to main thread\nconst getWModuleConfig = (_argMainScriptBlob) => {\n  var pathConfig = RUN_OPTIONS.pathConfig;\n  var pthreadPoolSize = RUN_OPTIONS.nbThread;\n  var argMainScriptBlob = _argMainScriptBlob;\n\n  isCompat = RUN_OPTIONS.compat;\n  hasMultithread = pthreadPoolSize > 1;\n\n  msg({\n    verb: 'console.debug',\n    args: [\n      `Multithread enabled: ${hasMultithread}, pthreadPoolSize: ${pthreadPoolSize}`,\n    ],\n  });\n\n  if (!pathConfig['wllama.wasm']) {\n    throw new Error('\"wllama.wasm\" is missing in pathConfig');\n  }\n  return {\n    noInitialRun: true,\n    print: function (text) {\n      if (arguments.length > 1)\n        text = Array.prototype.slice.call(arguments).join(' ');\n      msg({ verb: 'console.log', args: [text] });\n    },\n    printErr: function (text) {\n      if (arguments.length > 1)\n        text = Array.prototype.slice.call(arguments).join(' ');\n      if (text.startsWith('@@STACK@@')) {\n        lastStack = text.slice('@@STACK@@'.length);\n        return;\n      }\n      const logLine = cppLogToJSLog(text);\n      msg({ verb: 'console.' + logLine.level, args: [logLine.text] });\n    },\n    locateFile: function (filename, basePath) {\n      const p = pathConfig[filename];\n      const truncate = (str) =>\n        str.length > 128 ? `${str.substr(0, 128)}...` : str;\n      if (filename.match(/wllama\\.worker\\.js/)) {\n        msg({\n          verb: 'console.error',\n          args: [\n            '\"wllama.worker.js\" is removed from v2.2.1. Hint: make sure to clear browser\\'s cache.',\n          ],\n        });\n      } else {\n        msg({\n          verb: 'console.debug',\n          args: [`Loading \"${filename}\" from \"${truncate(p)}\"`],\n        });\n        return p;\n      }\n    },\n    mainScriptUrlOrBlob: hasMultithread\n      ? argMainScriptBlob\n      : 'throw new Error(\"Multithreading is not enabled\")',\n    pthreadPoolSize: hasMultithread ? pthreadPoolSize : 0,\n    wasmMemory: hasMultithread ? getWasmMemory() : null,\n    onAbort: function (message) {\n      isAborted = true;\n      msg({ verb: 'signal.abort', args: ['abort', message, lastStack, null] });\n    },\n    onExit: function (code) {\n      isAborted = true;\n      const callstack = new Error().stack.toString();\n      msg({\n        verb: 'signal.abort',\n        args: ['abort', 'exit(' + code + ')', callstack, null],\n      });\n    },\n  };\n};\n\n// Get the memory to be used by wasm. (Only used in multi-thread mode)\n// Because we have a weird OOM issue on iOS, we need to try some values\n// See: https://github.com/emscripten-core/emscripten/issues/19144\n//      https://github.com/godotengine/godot/issues/70621\nconst getWasmMemory = () => {\n  let minBytes = 128 * 1024 * 1024;\n  let maxBytes = 4096 * 1024 * 1024;\n  let stepBytes = 128 * 1024 * 1024;\n  while (maxBytes > minBytes) {\n    try {\n      const wasmMemory = new WebAssembly.Memory({\n        initial: toSizeT(minBytes / 65536),\n        maximum: toSizeT(maxBytes / 65536),\n        shared: true,\n        address: isCompat ? undefined : 'i64',\n      });\n      return wasmMemory;\n    } catch (e) {\n      maxBytes -= stepBytes;\n      continue; // retry\n    }\n  }\n  throw new Error('Cannot allocate WebAssembly.Memory');\n};\n\n//////////////////////////////////////////////////////////////\n// HEAPFS PATCH\n//////////////////////////////////////////////////////////////\n\n/**\n * By default, emscripten uses memfs. The way it works is by\n * allocating new Uint8Array in javascript heap. This is not good\n * because it requires files to be copied to wasm heap each time\n * a file is read.\n *\n * HeapFS is an alternative, which resolves this problem by\n * allocating space for file directly inside wasm heap. This\n * allows us to mmap without doing any copy.\n *\n * For llama.cpp, this is great because we use MAP_SHARED\n *\n * Ref: https://github.com/ngxson/wllama/pull/39\n * Ref: https://github.com/emscripten-core/emscripten/blob/main/src/library_memfs.js\n *\n * Note 29/05/2024 @ngxson\n * Due to ftell() being limited to MAX_LONG, we cannot load files bigger than 2^31 bytes (or 2GB)\n * Ref: https://github.com/emscripten-core/emscripten/blob/main/system/lib/libc/musl/src/stdio/ftell.c\n */\n\nconst fsNameToFile = {}; // map Name => File\nconst fsIdToFile = {}; // map ID => File\nlet currFileId = 0;\n\n// Patch and redirect memfs calls to wllama\nconst patchHeapFS = () => {\n  const m = Module;\n  // save functions\n  m.MEMFS.stream_ops._read = m.MEMFS.stream_ops.read;\n  m.MEMFS.stream_ops._write = m.MEMFS.stream_ops.write;\n  m.MEMFS.stream_ops._llseek = m.MEMFS.stream_ops.llseek;\n  m.MEMFS.stream_ops._allocate = m.MEMFS.stream_ops.allocate;\n  m.MEMFS.stream_ops._mmap = m.MEMFS.stream_ops.mmap;\n  m.MEMFS.stream_ops._msync = m.MEMFS.stream_ops.msync;\n\n  const patchStream = (stream) => {\n    const name = stream.node.name;\n    if (fsNameToFile[name]) {\n      const f = fsNameToFile[name];\n      const ptr = Number(f.ptr);\n      stream.node.contents = getHeapU8().subarray(ptr, ptr + f.size);\n      stream.node.usedBytes = f.size;\n    }\n  };\n\n  // replace \"read\" functions\n  m.MEMFS.stream_ops.read = function (\n    stream,\n    buffer,\n    offset,\n    length,\n    position\n  ) {\n    patchStream(stream);\n    return m.MEMFS.stream_ops._read(stream, buffer, offset, length, position);\n  };\n  m.MEMFS.ops_table.file.stream.read = m.MEMFS.stream_ops.read;\n\n  // replace \"llseek\" functions\n  m.MEMFS.stream_ops.llseek = function (stream, offset, whence) {\n    patchStream(stream);\n    return m.MEMFS.stream_ops._llseek(stream, offset, whence);\n  };\n  m.MEMFS.ops_table.file.stream.llseek = m.MEMFS.stream_ops.llseek;\n\n  // replace \"mmap\" functions\n  m.MEMFS.stream_ops.mmap = function (stream, length, position, prot, flags) {\n    patchStream(stream);\n    const name = stream.node.name;\n    if (fsNameToFile[name]) {\n      const f = fsNameToFile[name];\n      const mmapPtr = f.ptr + toSizeT(position);\n      return {\n        ptr: mmapPtr,\n        allocated: false,\n      };\n    } else {\n      return m.MEMFS.stream_ops._mmap(stream, length, position, prot, flags);\n    }\n  };\n  m.MEMFS.ops_table.file.stream.mmap = m.MEMFS.stream_ops.mmap;\n\n  // mount FS\n  m.FS.mkdir('/models');\n  m.FS.mount(m.MEMFS, { root: '.' }, '/models');\n};\n\n// Allocate a new file in wllama heapfs, returns file ID\nconst heapfsAlloc = (name, size, allocBuffer) => {\n  if (size < 1) {\n    throw new Error('File size must be bigger than 0');\n  }\n  const m = Module;\n  const ptr = toSizeT(allocBuffer ? m.mmapAlloc(size) : 0);\n  const file = {\n    ptr: ptr,\n    size: size,\n    id: currFileId++,\n  };\n  fsIdToFile[file.id] = file;\n  fsNameToFile[name] = file;\n  return file.id;\n};\n\n// Add new file to wllama heapfs, return number of written bytes\nconst heapfsWrite = (id, buffer, offset) => {\n  if (fsIdToFile[id]) {\n    const { ptr, size } = fsIdToFile[id];\n    const afterWriteByte = offset + buffer.byteLength;\n    if (afterWriteByte > size) {\n      throw new Error(\n        `File ID ${id} write out of bound, afterWriteByte = ${afterWriteByte} while size = ${size}`\n      );\n    }\n    getHeapU8().set(buffer, Number(ptr) + offset);\n    return buffer.byteLength;\n  } else {\n    throw new Error(`File ID ${id} not found in heapfs`);\n  }\n};\n\n//////////////////////////////////////////////////////////////\n// ASYNC FILE READ\n//////////////////////////////////////////////////////////////\n\nlet isAwaitReading = false;\nlet pendingReadPromise = null;\nlet pendingReadResolve = null;\nlet pendingReadReject = null;\n\nconst _stripModelsPrefix = (path) => path.replace(/^\\/?models\\//, '');\n\n// Called from EM_ASYNC_JS stub in wllama-fs.h (path is already a JS string)\nconst _wllama_js_file_read = async (path, offset, req_size, out_ptr) => {\n  const name = _stripModelsPrefix(path);\n\n  pendingReadPromise = new Promise((res, rej) => {\n    pendingReadResolve = res;\n    pendingReadReject = rej;\n  });\n  isAwaitReading = true;\n\n  postMessage({ verb: 'fs.read_req', args: [name, offset, req_size] });\n\n  let data;\n  try {\n    data = await pendingReadPromise;\n  } finally {\n    isAwaitReading = false;\n    pendingReadResolve = null;\n    pendingReadReject = null;\n  }\n\n  const bytes = new Uint8Array(data);\n  getHeapU8().set(bytes, out_ptr);\n  return toSizeT(bytes.length);\n};\n\n//////////////////////////////////////////////////////////////\n// MAIN CODE\n//////////////////////////////////////////////////////////////\n\nconst callWrapper = (name, ret, args, isAsync) => {\n  const fn = Module.cwrap(\n    name,\n    ret,\n    args,\n    isAsync ? { async: true } : undefined\n  );\n  return async (action, req) => {\n    // console.log(`Calling ${name} with action:`, action, 'and req:', req);\n    let result;\n    try {\n      if (args.length === 2) {\n        result = isAsync ? await fn(action, req) : fn(action, req);\n      } else {\n        result = fn();\n      }\n    } catch (ex) {\n      console.error(ex);\n      throw ex;\n    }\n    return result;\n  };\n};\n\n// re-entering the wasm while a call is suspended (JSPI / asyncify) corrupts its state, so only one call runs at a time and the rest wait in the queue\nlet wasmCallBusy = false;\nconst wasmCallQueue = [];\n\nconst runWasmCall = async (callbackId, fn) => {\n  if (isAborted) {\n    // the wasm is dead, fail fast instead of calling into it\n    msg({ callbackId, err: 'wllama has crashed, please reload the module' });\n    return;\n  }\n  if (wasmCallBusy) {\n    wasmCallQueue.push({ callbackId, fn });\n    return;\n  }\n  wasmCallBusy = true;\n  try {\n    await fn();\n  } finally {\n    wasmCallBusy = false;\n    if (isAborted) {\n      // do not touch the wasm again after it aborted; the main thread already rejected the queued tasks\n      wasmCallQueue.length = 0;\n    } else {\n      const next = wasmCallQueue.shift();\n      if (next) runWasmCall(next.callbackId, next.fn);\n    }\n  }\n};\n\nconst runAction = async (data) => {\n  const { args, callbackId } = data;\n  const argAction = args[0];\n  const argEncodedMsg = args[1];\n  try {\n    const inputPtr = await wllamaMalloc(toSizeT(argEncodedMsg.byteLength), 0);\n    // copy data to wasm heap\n    const inputBuffer = new Uint8Array(\n      getHeapU8().buffer,\n      Number(inputPtr),\n      argEncodedMsg.byteLength\n    );\n    inputBuffer.set(argEncodedMsg, 0);\n    const outputPtr = await wllamaAction(argAction, inputPtr);\n    // length of output buffer is written at the first 4 bytes of input buffer\n    const outputLen = new Uint32Array(\n      getHeapU8().buffer,\n      Number(inputPtr),\n      1\n    )[0];\n    // copy the output buffer to JS heap\n    const outputBuffer = new Uint8Array(outputLen);\n    const outputSrcView = new Uint8Array(\n      getHeapU8().buffer,\n      Number(outputPtr),\n      outputLen\n    );\n    outputBuffer.set(outputSrcView, 0); // copy it\n    msg({ callbackId, result: outputBuffer }, [outputBuffer.buffer]);\n  } catch (err) {\n    handleError(err);\n  }\n};\n\nfunction handleError(err) {\n  // If WASM already aborted, onAbort already sent signal.abort; skip to avoid\n  // re-reporting the resulting WebAssembly.RuntimeError as a JS exception.\n  if (isAborted) return;\n\n  const message = err ? err.message || String(err) : 'Unknown error';\n  const stack = err ? err.stack || String(err) : '';\n  msg({\n    verb: 'signal.abort',\n    args: ['exception', message, stack, err],\n  });\n}\n\nonmessage = async (e) => {\n  if (!e.data) return;\n  const { verb, args, callbackId } = e.data;\n\n  // fs.read_res arrives while wasm is JSPI-suspended; resolve the pending promise.\n  if (verb === 'fs.read_res') {\n    if (pendingReadResolve) {\n      pendingReadResolve(args[0]);\n    }\n    return;\n  }\n\n  // Guard: while awaiting a file read, reject any other incoming task.\n  if (isAwaitReading) {\n    if (callbackId) {\n      msg({\n        callbackId,\n        err: 'Worker is suspended waiting for file data (JSPI)',\n      });\n    }\n    return;\n  }\n\n  if (!callbackId) {\n    msg({ verb: 'console.error', args: ['callbackId is required', e.data] });\n    return;\n  }\n\n  if (verb === 'module.init') {\n    const argMainScriptBlob = args[0];\n    const argUseAsyncFile = args[1];\n    try {\n      Module = getWModuleConfig(argMainScriptBlob);\n      Module.preRun = () => {\n        if (argUseAsyncFile) {\n          Module.ENV['USE_ASYNC_FILE'] = '1';\n        }\n      };\n      Module.onRuntimeInitialized = () => {\n        // async call once module is ready\n        // init FS\n        patchHeapFS();\n        // init cwrap\n        const pointer = isCompat ? 'number' : 'bigint';\n        // TODO: note sure why emscripten cannot bind if there is only 1 argument\n        wllamaMalloc = callWrapper('wllama_malloc', pointer, [\n          'number',\n          pointer,\n        ]);\n        wllamaStart = callWrapper('wllama_start', 'string', [], true);\n        wllamaAction = callWrapper(\n          'wllama_action',\n          pointer,\n          ['string', pointer],\n          true\n        );\n        wllamaExit = callWrapper('wllama_exit', 'string', []);\n        wllamaDebug = callWrapper('wllama_debug', 'string', []);\n        msg({ callbackId, result: null });\n      };\n      wModuleInit();\n    } catch (err) {\n      handleError(err);\n    }\n    return;\n  }\n\n  if (verb === 'fs.alloc') {\n    const argFilename = args[0];\n    const argSize = args[1];\n    const argAllocBuffer = args[2];\n    try {\n      // create blank file\n      const emptyBuffer = new ArrayBuffer(0);\n      Module['FS_createDataFile'](\n        '/models',\n        argFilename,\n        emptyBuffer,\n        true,\n        true,\n        true\n      );\n      // alloc data on heap\n      const fileId = heapfsAlloc(argFilename, argSize, argAllocBuffer);\n      msg({ callbackId, result: { fileId } });\n    } catch (err) {\n      handleError(err);\n    }\n    return;\n  }\n\n  if (verb === 'fs.write') {\n    const argFileId = args[0];\n    const argBuffer = args[1];\n    const argOffset = args[2];\n    try {\n      const writtenBytes = heapfsWrite(argFileId, argBuffer, argOffset);\n      msg({ callbackId, result: { writtenBytes } });\n    } catch (err) {\n      handleError(err);\n    }\n    return;\n  }\n\n  if (verb === 'wllama.start') {\n    await runWasmCall(callbackId, async () => {\n      try {\n        const result = await wllamaStart();\n        msg({ callbackId, result });\n      } catch (err) {\n        handleError(err);\n      }\n    });\n    return;\n  }\n\n  if (verb === 'wllama.action') {\n    await runWasmCall(callbackId, () => runAction(e.data));\n    return;\n  }\n\n  if (verb === 'wllama.exit') {\n    await runWasmCall(callbackId, async () => {\n      try {\n        const result = await wllamaExit();\n        msg({ callbackId, result });\n      } catch (err) {\n        handleError(err);\n      }\n    });\n    return;\n  }\n\n  if (verb === 'wllama.debug') {\n    await runWasmCall(callbackId, async () => {\n      try {\n        const result = await wllamaDebug();\n        msg({ callbackId, result });\n      } catch (err) {\n        handleError(err);\n      }\n    });\n    return;\n  }\n};\n";
+ 

@@ -1,0 +1,3958 @@
+var __defProp = Object.defineProperty;
+var __defProps = Object.defineProperties;
+var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
+var __getOwnPropSymbols = Object.getOwnPropertySymbols;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __knownSymbol = (name, symbol) => (symbol = Symbol[name]) ? symbol : /* @__PURE__ */ Symbol.for("Symbol." + name);
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __spreadValues = (a, b) => {
+  for (var prop in b || (b = {}))
+    if (__hasOwnProp.call(b, prop))
+      __defNormalProp(a, prop, b[prop]);
+  if (__getOwnPropSymbols)
+    for (var prop of __getOwnPropSymbols(b)) {
+      if (__propIsEnum.call(b, prop))
+        __defNormalProp(a, prop, b[prop]);
+    }
+  return a;
+};
+var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __async = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
+var __await = function(promise, isYieldStar) {
+  this[0] = promise;
+  this[1] = isYieldStar;
+};
+var __asyncGenerator = (__this, __arguments, generator) => {
+  var resume = (k, v, yes, no) => {
+    try {
+      var x = generator[k](v), isAwait = (v = x.value) instanceof __await, done = x.done;
+      Promise.resolve(isAwait ? v[0] : v).then((y) => isAwait ? resume(k === "return" ? k : "next", v[1] ? { done: y.done, value: y.value } : y, yes, no) : yes({ value: y, done })).catch((e) => resume("throw", e, yes, no));
+    } catch (e) {
+      no(e);
+    }
+  }, method = (k, call, wait, clear) => it[k] = (x) => (call = new Promise((yes, no, run) => (run = () => resume(k, x, yes, no), q ? q.then(run) : run())), clear = () => q === wait && (q = 0), q = wait = call.then(clear, clear), call), q, it = {};
+  return generator = generator.apply(__this, __arguments), it[__knownSymbol("asyncIterator")] = () => it, method("next"), method("throw"), method("return"), it;
+};
+var __forAwait = (obj, it, method) => (it = obj[__knownSymbol("asyncIterator")]) ? it.call(obj) : (obj = obj[__knownSymbol("iterator")](), it = {}, method = (key, fn) => (fn = obj[key]) && (it[key] = (arg) => new Promise((yes, no, done) => (arg = fn.call(obj, arg), done = arg.done, Promise.resolve(arg.value).then((value) => yes({ value, done }), no)))), method("next"), method("return"), it);
+
+// src/glue/messages.ts
+var GLUE_VERSION = 1;
+var GLUE_MESSAGE_PROTOTYPES = {
+  "erro_evt": {
+    "name": "erro_evt",
+    "structName": "glue_msg_error",
+    "className": "GlueMsgError",
+    "fields": [
+      {
+        "type": "str",
+        "name": "message",
+        "isNullable": false
+      }
+    ]
+  },
+  "load_req": {
+    "name": "load_req",
+    "structName": "glue_msg_load_req",
+    "className": "GlueMsgLoadReq",
+    "fields": [
+      {
+        "type": "arr_str",
+        "name": "model_paths",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "mmproj_path",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "n_ctx_auto",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "use_mmap",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "use_mlock",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_gpu_layers",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_ctx",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_threads",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "model_alias",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "log_level",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "embeddings",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "offload_kqv",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "n_batch",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "n_ubatch",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "n_parallel",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "pooling_type",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "rope_scaling_type",
+        "isNullable": true
+      },
+      {
+        "type": "float",
+        "name": "rope_freq_base",
+        "isNullable": true
+      },
+      {
+        "type": "float",
+        "name": "rope_freq_scale",
+        "isNullable": true
+      },
+      {
+        "type": "float",
+        "name": "yarn_ext_factor",
+        "isNullable": true
+      },
+      {
+        "type": "float",
+        "name": "yarn_attn_factor",
+        "isNullable": true
+      },
+      {
+        "type": "float",
+        "name": "yarn_beta_fast",
+        "isNullable": true
+      },
+      {
+        "type": "float",
+        "name": "yarn_beta_slow",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "yarn_orig_ctx",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "cache_type_k",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "cache_type_v",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "kv_unified",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "flash_attn",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "swa_full",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "n_ctx_checkpoints",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "checkpoint_min_step",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "chat_template",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "jinja",
+        "isNullable": true
+      },
+      {
+        "type": "arr_str",
+        "name": "default_template_kwargs_keys",
+        "isNullable": true
+      },
+      {
+        "type": "arr_str",
+        "name": "default_template_kwargs_vals",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "reasoning",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "image_min_tokens",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "image_max_tokens",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "warmup",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "no_kv_offload",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "mmproj_offload",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "cont_batching",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "n_keep",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "ctx_shift",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "cache_idle_slots",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "n_cache_reuse",
+        "isNullable": true
+      },
+      {
+        "type": "arr_str",
+        "name": "lora_paths",
+        "isNullable": true
+      },
+      {
+        "type": "arr_float",
+        "name": "lora_scales",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "lora_init_without_apply",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "spec_draft_model",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "spec_draft_ngl",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "spec_draft_n_max",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "spec_draft_n_min",
+        "isNullable": true
+      },
+      {
+        "type": "float",
+        "name": "spec_draft_p_min",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "spec_draft_threads",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "spec_draft_threads_batch",
+        "isNullable": true
+      },
+      {
+        "type": "arr_str",
+        "name": "kv_overrides_keys",
+        "isNullable": true
+      },
+      {
+        "type": "arr_str",
+        "name": "kv_overrides_vals",
+        "isNullable": true
+      },
+      {
+        "type": "int",
+        "name": "reasoning_budget_tokens",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "reasoning_budget_message",
+        "isNullable": true
+      },
+      {
+        "type": "str",
+        "name": "reasoning_format",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "skip_chat_parsing",
+        "isNullable": true
+      },
+      {
+        "type": "bool",
+        "name": "prefill_assistant",
+        "isNullable": true
+      }
+    ]
+  },
+  "load_res": {
+    "name": "load_res",
+    "structName": "glue_msg_load_res",
+    "className": "GlueMsgLoadRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_ctx",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_batch",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_ubatch",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_vocab",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_ctx_train",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_embd",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_layer",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "metadata_key",
+        "isNullable": false
+      },
+      {
+        "type": "arr_str",
+        "name": "metadata_val",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "token_bos",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "token_eos",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "token_eot",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "list_tokens_eog",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "add_bos_token",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "add_eos_token",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "has_encoder",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "token_decoder_start",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "media_marker",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "has_image_input",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "has_audio_input",
+        "isNullable": false
+      }
+    ]
+  },
+  "cmpl_req": {
+    "name": "cmpl_req",
+    "structName": "glue_msg_completion_req",
+    "className": "GlueMsgCompletionReq",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "is_chat",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "data_json",
+        "isNullable": false
+      },
+      {
+        "type": "arr_raw",
+        "name": "files",
+        "isNullable": false
+      }
+    ]
+  },
+  "cmpl_res": {
+    "name": "cmpl_res",
+    "structName": "glue_msg_completion_res",
+    "className": "GlueMsgCompletionRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "req_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "embd_req": {
+    "name": "embd_req",
+    "structName": "glue_msg_embedding_req",
+    "className": "GlueMsgEmbeddingReq",
+    "fields": [
+      {
+        "type": "str",
+        "name": "data_json",
+        "isNullable": false
+      },
+      {
+        "type": "arr_raw",
+        "name": "files",
+        "isNullable": false
+      }
+    ]
+  },
+  "embd_res": {
+    "name": "embd_res",
+    "structName": "glue_msg_embedding_res",
+    "className": "GlueMsgEmbeddingRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "req_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "rrnk_req": {
+    "name": "rrnk_req",
+    "structName": "glue_msg_rerank_req",
+    "className": "GlueMsgRerankReq",
+    "fields": [
+      {
+        "type": "str",
+        "name": "data_json",
+        "isNullable": false
+      }
+    ]
+  },
+  "rrnk_res": {
+    "name": "rrnk_res",
+    "structName": "glue_msg_rerank_res",
+    "className": "GlueMsgRerankRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "req_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "gres_req": {
+    "name": "gres_req",
+    "structName": "glue_msg_get_result_req",
+    "className": "GlueMsgGetResultReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "req_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "gres_res": {
+    "name": "gres_res",
+    "structName": "glue_msg_get_result_res",
+    "className": "GlueMsgGetResultRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "has_more",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "is_error",
+        "isNullable": false
+      },
+      {
+        "type": "str",
+        "name": "data_json",
+        "isNullable": false
+      }
+    ]
+  },
+  "cncl_req": {
+    "name": "cncl_req",
+    "structName": "glue_msg_cancel_req",
+    "className": "GlueMsgCancelReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "req_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "cncl_res": {
+    "name": "cncl_res",
+    "structName": "glue_msg_cancel_res",
+    "className": "GlueMsgCancelRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      }
+    ]
+  },
+  "tbop_req": {
+    "name": "tbop_req",
+    "structName": "glue_msg_test_backend_ops_req",
+    "className": "GlueMsgTestBackendOpsReq",
+    "fields": [
+      {
+        "type": "arr_str",
+        "name": "args",
+        "isNullable": false
+      }
+    ]
+  },
+  "tbop_res": {
+    "name": "tbop_res",
+    "structName": "glue_msg_test_backend_ops_res",
+    "className": "GlueMsgTestBackendOpsRes",
+    "fields": [
+      {
+        "type": "int",
+        "name": "retcode",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvsv_req": {
+    "name": "kvsv_req",
+    "structName": "glue_msg_kvsv_req",
+    "className": "GlueMsgKvsvReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      },
+      {
+        "type": "bool",
+        "name": "drop",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvsv_res": {
+    "name": "kvsv_res",
+    "structName": "glue_msg_kvsv_res",
+    "className": "GlueMsgKvsvRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "status",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_bytes",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "tokens",
+        "isNullable": false
+      },
+      {
+        "type": "raw",
+        "name": "data",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvld_req": {
+    "name": "kvld_req",
+    "structName": "glue_msg_kvld_req",
+    "className": "GlueMsgKvldReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "tokens",
+        "isNullable": false
+      },
+      {
+        "type": "raw",
+        "name": "data",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvld_res": {
+    "name": "kvld_res",
+    "structName": "glue_msg_kvld_res",
+    "className": "GlueMsgKvldRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "status",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_tokens",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvdr_req": {
+    "name": "kvdr_req",
+    "structName": "glue_msg_kvdr_req",
+    "className": "GlueMsgKvdrReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvdr_res": {
+    "name": "kvdr_res",
+    "structName": "glue_msg_kvdr_res",
+    "className": "GlueMsgKvdrRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "status",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_tokens",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvpk_req": {
+    "name": "kvpk_req",
+    "structName": "glue_msg_kvpk_req",
+    "className": "GlueMsgKvpkReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvpk_res": {
+    "name": "kvpk_res",
+    "structName": "glue_msg_kvpk_res",
+    "className": "GlueMsgKvpkRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "status",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "handle",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_bytes",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvrs_req": {
+    "name": "kvrs_req",
+    "structName": "glue_msg_kvrs_req",
+    "className": "GlueMsgKvrsReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "handle",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "slot_id",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvrs_res": {
+    "name": "kvrs_res",
+    "structName": "glue_msg_kvrs_res",
+    "className": "GlueMsgKvrsRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "status",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_tokens",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvrq_req": {
+    "name": "kvrq_req",
+    "structName": "glue_msg_kvrq_req",
+    "className": "GlueMsgKvrqReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "handle",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvrq_res": {
+    "name": "kvrq_res",
+    "structName": "glue_msg_kvrq_res",
+    "className": "GlueMsgKvrqRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "status",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_bytes",
+        "isNullable": false
+      },
+      {
+        "type": "arr_int",
+        "name": "tokens",
+        "isNullable": false
+      },
+      {
+        "type": "raw",
+        "name": "data",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvfd_req": {
+    "name": "kvfd_req",
+    "structName": "glue_msg_kvfd_req",
+    "className": "GlueMsgKvfdReq",
+    "fields": [
+      {
+        "type": "int",
+        "name": "handle",
+        "isNullable": false
+      }
+    ]
+  },
+  "kvfd_res": {
+    "name": "kvfd_res",
+    "structName": "glue_msg_kvfd_res",
+    "className": "GlueMsgKvfdRes",
+    "fields": [
+      {
+        "type": "bool",
+        "name": "success",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "status",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_tokens",
+        "isNullable": false
+      },
+      {
+        "type": "int",
+        "name": "n_bytes",
+        "isNullable": false
+      }
+    ]
+  }
+};
+
+// src/glue/glue.ts
+var GLUE_MAGIC = new Uint8Array([71, 76, 85, 69]);
+var GLUE_DTYPE_NULL = 0;
+var GLUE_DTYPE_BOOL = 1;
+var GLUE_DTYPE_INT = 2;
+var GLUE_DTYPE_FLOAT = 3;
+var GLUE_DTYPE_STRING = 4;
+var GLUE_DTYPE_RAW = 5;
+var GLUE_DTYPE_ARRAY_BOOL = 6;
+var GLUE_DTYPE_ARRAY_INT = 7;
+var GLUE_DTYPE_ARRAY_FLOAT = 8;
+var GLUE_DTYPE_ARRAY_STRING = 9;
+var GLUE_DTYPE_ARRAY_RAW = 10;
+var TYPE_MAP = {
+  str: GLUE_DTYPE_STRING,
+  int: GLUE_DTYPE_INT,
+  float: GLUE_DTYPE_FLOAT,
+  bool: GLUE_DTYPE_BOOL,
+  raw: GLUE_DTYPE_RAW,
+  arr_str: GLUE_DTYPE_ARRAY_STRING,
+  arr_int: GLUE_DTYPE_ARRAY_INT,
+  arr_float: GLUE_DTYPE_ARRAY_FLOAT,
+  arr_bool: GLUE_DTYPE_ARRAY_BOOL,
+  arr_raw: GLUE_DTYPE_ARRAY_RAW,
+  null: GLUE_DTYPE_NULL
+};
+function glueDeserialize(buf) {
+  let offset = 0;
+  const view = new DataView(buf.buffer);
+  const readUint32 = () => {
+    const value = view.getUint32(offset, true);
+    offset += 4;
+    return value;
+  };
+  const readInt32 = () => {
+    const value = view.getInt32(offset, true);
+    offset += 4;
+    return value;
+  };
+  const readFloat = () => {
+    const value = view.getFloat32(offset, true);
+    offset += 4;
+    return value;
+  };
+  const readBool = () => {
+    return readUint32() !== 0;
+  };
+  const readString = (customLen) => {
+    const length = customLen != null ? customLen : readUint32();
+    const value = new TextDecoder().decode(buf.slice(offset, offset + length));
+    offset += length;
+    return value;
+  };
+  const readRaw = () => {
+    const length = readUint32();
+    const value = buf.slice(offset, offset + length);
+    offset += length;
+    return value;
+  };
+  const readArray = (readItem) => {
+    const length = readUint32();
+    const value = new Array(length);
+    for (let i = 0; i < length; i++) {
+      value[i] = readItem();
+    }
+    return value;
+  };
+  const readNull = () => null;
+  const readField = (field) => {
+    switch (field.type) {
+      case "str":
+        return readString();
+      case "int":
+        return readInt32();
+      case "float":
+        return readFloat();
+      case "bool":
+        return readBool();
+      case "raw":
+        return readRaw();
+      case "arr_str":
+        return readArray(readString);
+      case "arr_int":
+        return readArray(readInt32);
+      case "arr_float":
+        return readArray(readFloat);
+      case "arr_bool":
+        return readArray(readBool);
+      case "arr_raw":
+        return readArray(readRaw);
+      case "null":
+        return readNull();
+    }
+  };
+  const magicValid = buf[0] === GLUE_MAGIC[0] && buf[1] === GLUE_MAGIC[1] && buf[2] === GLUE_MAGIC[2] && buf[3] === GLUE_MAGIC[3];
+  offset += 4;
+  if (!magicValid) {
+    throw new Error("Invalid magic number");
+  }
+  const version = readUint32();
+  if (version !== GLUE_VERSION) {
+    throw new Error("Invalid version number");
+  }
+  const name = readString(8);
+  const msgProto = GLUE_MESSAGE_PROTOTYPES[name];
+  if (!msgProto) {
+    throw new Error(`Unknown message name: ${name}`);
+  }
+  const output = { _name: name };
+  for (const field of msgProto.fields) {
+    const readType = readUint32();
+    if (readType === GLUE_DTYPE_NULL) {
+      if (!field.isNullable) {
+        throw new Error(
+          `${name}: Expect field ${field.name} to be non-nullable`
+        );
+      }
+      output[field.name] = null;
+      continue;
+    }
+    if (readType !== TYPE_MAP[field.type]) {
+      throw new Error(
+        `${name}: Expect field ${field.name} to have type ${field.type}`
+      );
+    }
+    output[field.name] = readField(field);
+  }
+  return output;
+}
+function glueSerialize(msg) {
+  const msgProto = GLUE_MESSAGE_PROTOTYPES[msg._name];
+  if (!msgProto) {
+    throw new Error(`Unknown message name: ${msg._name}`);
+  }
+  const bufs = [];
+  const writeUint32 = (value) => {
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setUint32(0, value, true);
+    bufs.push(new Uint8Array(buf));
+  };
+  const writeInt32 = (value) => {
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setInt32(0, value, true);
+    bufs.push(new Uint8Array(buf));
+  };
+  const writeFloat = (value) => {
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setFloat32(0, value, true);
+    bufs.push(new Uint8Array(buf));
+  };
+  const writeBool = (value) => {
+    writeUint32(value ? 1 : 0);
+  };
+  const writeString = (value) => {
+    const utf8 = new TextEncoder().encode(value);
+    writeUint32(utf8.byteLength);
+    bufs.push(utf8);
+  };
+  const writeRaw = (value) => {
+    writeUint32(value.byteLength);
+    bufs.push(value);
+  };
+  const writeArray = (value, writeItem) => {
+    writeUint32(value.length);
+    for (const item of value) {
+      writeItem(item);
+    }
+  };
+  const writeNull = () => {
+  };
+  bufs.push(GLUE_MAGIC);
+  writeUint32(GLUE_VERSION);
+  {
+    const utf8 = new TextEncoder().encode(msg._name);
+    bufs.push(utf8);
+  }
+  for (const field of msgProto.fields) {
+    const val = msg[field.name];
+    if (!field.isNullable && (val === null || val === void 0)) {
+      throw new Error(
+        `${msg._name}: Expect field ${field.name} to be non-nullable`
+      );
+    }
+    if (val === null || val === void 0) {
+      writeUint32(GLUE_DTYPE_NULL);
+      continue;
+    }
+    writeUint32(TYPE_MAP[field.type]);
+    switch (field.type) {
+      case "str":
+        writeString(val);
+        break;
+      case "int":
+        writeInt32(val);
+        break;
+      case "float":
+        writeFloat(val);
+        break;
+      case "bool":
+        writeBool(val);
+        break;
+      case "raw":
+        writeRaw(val);
+        break;
+      case "arr_str":
+        writeArray(val, writeString);
+        break;
+      case "arr_int":
+        writeArray(val, writeInt32);
+        break;
+      case "arr_float":
+        writeArray(val, writeFloat);
+        break;
+      case "arr_bool":
+        writeArray(val, writeBool);
+        break;
+      case "arr_raw":
+        writeArray(val, writeRaw);
+        break;
+      case "null":
+        writeNull();
+        break;
+    }
+  }
+  const totalLength = bufs.reduce((acc, buf) => acc + buf.byteLength, 0);
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const buf of bufs) {
+    output.set(buf, offset);
+    offset += buf.byteLength;
+  }
+  return output;
+}
+
+// src/wasm/source-map.ts
+var WASM_SOURCE_MAP = {
+  "default": "H4sIAAAAAAAAA+S9e3PcNrYvOlWThz1O/LYlS7Yl27JN+hWrJXsyGsezM0kmOzuTmUzmVXufsw8KTaK7GfFlgmxJqVOqe7/C/fN+vvs5bt1aCwAJgADZ9s6pulXnH1uN9SNIgngsLKz1W1/+4he/+H9u/eIX/3nhF79YYxmPqqSsWU6mTZLWSU5mFWMfFSWraF1U2zk7+tV8nqWETouqvpamGZlXtFyQqMhrdlwfHETTrTSlGSVZEbOUTClnBwdRxWjNSM1yXlRneB0fHDx79mwzKrKsyMmPvMgPDk61X0F4jpDomJJ6URVH6+JvmqZFBNWw44iVdVLkV4UAHrEr/Fg8XxyTJCvTq0fzsvl9ksdfV0VT/sBSRjn7mNdVks/JrKgyWm9FaVLKx00LGrPq4AD+l4/LbzneElonJnlRZTflY5dsTkpacbhaNdfjy6Ip0mJOkrxmVU7TDzKWRVl5Xl4GIhrH4qHnrCZVccS/ztNikdE8PziA1iB0mpDlHtmdkOcHB1PKkwhb6VUHe/bs2euDA8o5q2qS5EtaJTSvP5kWRbqtfw71fnCnQ3byqsl5Ms9ZvJ1ADRfwKSrGF7RkZC++23s37BaihZKaVTTd0b4aWdK0ga9tF217WzAtKkqy7BJ+pWY2Y5X8RDfwUQRoVlRHtIoJOy5pHp8XD1mUDD/wB7yuUpafxVKo/YLoFCyPSUTraPERSrImJRmtb4rGWJS0ohk/OMgJy6YxWTAak8P32HE5+7iFQ+1D+OV57Dj4XtDvr4gbzxt41kq8hlFGozdNUrGHo19llha0fn17oPVrOl/DB004vnQyb4qGY+e5h9XjGFP98LPPXkULWj3BUvjQok1KVmVNzcyvPonN3/uyb3JWk5xm7Dwh8UlOsyQiEeX1JfGCUzZPctHe14xRDQ9Hk5zvaS/T5HWStoPl1CMJwnWrpvaHePxlwo7IXnxFjPeKEU4zRvCpr/U+G3yxoe7MSxqxIFx3XkgOl1d7gqqA3uTp17NZfsF4elo/dIBPe2VBeE715IjWYq7lEU3ZJaMnwex7pfdIs9kD7xMleUmKpiZJzINQa8BJLG6YT09qxte1bnlwoP24PU8bRuqTkskp3fz9VO/Ob45YvlfXHN+vXxyEl3Dg9GbFRbXjePxe0aZ7TC7J/A298WOS/0gPDmZNHhFazbkYVGXBPVcdwlX7yyKJxZAhpIbVZEpTmkeM0FnNKpLkMK++6gAwhu4ONnVZ8CC8bnSBdjTeGbwSHuuhY1Y97ZUF4efvuFB0oov48cVCiOPbv9pFSxZ9IJCX8Cr9A94ZGFsVKxmt18jf86Mkj8kXNE2/ZxUvcpom9cll0f3YkVxvyW581S7Cib4qmjyeXe5Pe//2jq2gt27MeF0VJzccGlCGisea81v+t//0zwFvDpfPYF07OPjz9EcW1b+nnL0SBV8UWSme4bSTBeF7aTGfBfiCR2w6LxuS0UOlNpEpNN4c1BjC8ro68X8pWtf50AehdZEl0YdJWSV5PbuuL2OdYrOeURJXZJbSiMByBhpRRKMFEwtwXdGclwVnW0NfvknZvRF1ENqp1wcm8XtRwQemM3hFHC6HS2M6248/TEVHud2fCljOm4qRqGjy+qoU4/cnUZGVtGIbDlUQ5o9mb/LBnNUsX/6+myqWLKqLSswK2MvEFyWEclCqyFFSLwhPfmIW5J78tmVSsjTJYWhbJUH4UPSTVnH9Cj74wcGpWRCE/+7CPTKer0Oo52NZmdIIJrnokPC0OCIlrRcW8DxoDK9fb0dFzusH4ZmZ7C2b8Enq4pDlyU+sImVKs2Iiv8plY4ywPA7Cj3k9TQhotrsvU/apPtEuKF+Qmk5T9qorUc8YF6RigHhVVw17/R5P8plfjcwKBkvue7QuEqGuVBnHXvxRqxeSifV8tKroyYZPxwjCOy4Vzei6QumE7YfqTWJjgf8H4XcDH4eQJk/ypE5omvzEYrW5KSoSFeUJTniiVVDQ6Ww8mWdFEvsmFtChHROLNkB2Y/FjSqsqYdV9bfTSiuXUVMiwKAjv62tPUrPMWo6gKAi3B2YC1Oz0zjBld42mx+1EXWi7p0dBeE9CogWtScbn3W1VSRDudPpuxebsGNT8aCEaD/owgfb4f7VHYyVPUvgbH/GJ/tS8plXtEsBuwlEsN0HOqtibhoEK4ZBFiyJxS2CprBPYxrqk1P0UeeF8ZpqfqOLNbuRUjDdpfXCAG+S8bOpr/el/Nsuv9odKEG4Ycybor/KvIJT7L8rroV7AStCKZP+LDqFVp81MKB7rdvGMVTi2YIcXZeUZnosZKNS7gFLnTvuFQbhmVCmXFs7qc/jKLI+KmO0Y74QvCm8Gs75UAHgQfjyfNzMygwX4kJ2YbcOysj4JwoddM5KomC9THCN2WRBe/uMfvyPf/qPr5kH4LyusKTBXeFcUuSVGNYvsS/XJ3Bnu3hv4LKqvGppA9/fQCCPkqKLd9FQnGSMNP0MIX8xZHb1f03wxu2J2JlweH4zuggHw+gyBvXid7N0tK0aO5jw9OPi+YmVVRIxzmC7K9teNdhKmNctYXh8csGMWNTXb03UqvoD7kDSZHhzo5XJqV4vwNd1ugNvfRZLX9s4y4YQf0VtGJypw5oVeJDYOoZRWNOEs7ixV/ZKeHrTfbgW8kyopckaK2SWjjeMmK92GgCOcE+sn27jUvldXSXa9/04Vi6qhHpPR6hC26DeaPIFRRKKyBlVxzomcK4b0TzH//a7X7ZO8FjaKA68qleT1oyfb8O/rviomb8lp5r3ehGx2neqr47L6IzuGx8txH26aQXZjMcMZOsWSTGLT3CE+fac7sJqSmC1htoduzcs0qQn2z4s4pWBfX+I++qxc39PmpmsmxMuTn9h1Qsp6UYFVAow3x6TJ0yI6vGoXQ+EF+LrkaJHUDO0bvxvaKMWspgls+qERenulOatxGoRHbKaon4hN4Kzcm5C6ILNy96UcrLO9jZ6K2/bAW4aFQVg8S0ZmFL4gv9AZPMg0oXzT1RQJJ4uC1+buumz4AoE33Bt9HoQ37OUrAR0R1O0zwh5Gpe0rormcTZ/KF4kTXsKkR2LGo05hN4qD8OxSrVHX5K2UkYsdlyyq77qtE4dHtJqTogKjweDqCQr1eew3aHiBVfOG0UDysfCKO4YEe6LVBYeGqFCB14Q+UNP5nMUabpOzaskqUlN+eHBwqv0Kwtu+Of2IJfNFvS/Eh0uxmSQxX+5rpwdFVsKeQp4HiL+DUJphWxg/yaNFVcAWJAjrVXo1NhirKjjDeCu4UvmtEbGR1VmsGamK4rApxb7ooblxpjGBCUX8nlVgowSbIpO7h4qlzeNVtrkk4Uc0CG87OnGSZQ1upLohmqEtuLee7MXXjG4RsyV2o4uzomI0WhDomrASDfUNHi1YRoeWBzHBB+GtgcOR//nZjb7mCa9a0aPnOLV7N/BLKjdHfEGFMe69sjiaXbIGXcLVFkM8MU7ZrKpBhgdEYJ540LP9VSwrlsyy9glLbJTSrLwVM1Zyxg7Jcp/woqpJXRSpVKz5YzVY4CFabfvUURqE63I/VBVHam5rck5n7F/efaLmEQyYTW+PqmSn4MWsJhk9xqlcKJCzJBWnHi4rWIQb0aFukbM5rdkZQmbQOMVHvK7q4pjsTvb3ny9XeSHROKsPUg3fjlL8anmTpmhfuyGG4hFdioFYRpkYgvyWPkhjhjpMN0J3oLMsaJ4z0P5KoX3zmuYxWN+l5EzCCXvT0HRd7q55glsPltdctL0Y4aACX2jPUIqmLpta2txJnGRcLD5RefJoYLS8ehUoKbzYRFv7HmybKohaaa1NgmOft0xqh/EPrYctgBQlWvLNgiD8WJxHVAyPaC/LE9WKCdMSTbXN/t4kZXLZb6awXLYHA+JnEG55lIKKvUGT4Zq5aAiln1bstrXWQwPzIwr2LDBL3zfmSvmItf37gqHoJ1LRg0++3d+pwrPhSEBl7EqnTpap3K5OaFMX6vPpf0dFmsK+oKwYLpixWC54EG7+XgyyH5oUrIHaryB82lt8Vcen+cnRglUMzQLsuK5oVJ9tj57/uPII6s8h7X6EZIxzOmfbA98HlTV5fp02OH+clafZaaOZ3/bia9q0MkMl9Ygesu+13vvIpc7/yIsRy6UJ/IhInXiWpOxXhKg/r0s1hadFDTtZPKANwl8WTX136FiYZClVJjR8k/3Y3NByVENA+WVZVJ7gDv9vfyLffPf9H6Ul8Et9kREamJjv1SrDayqbXntDS3hd22txMquKjDT17NMr+hasLrDslyWNV+oAXmVf9E05RoLw7sBGHTRXWlWbSV6bM9Gc1bBfe91qJdK94WZPBVF/V2y+J03xRPow8G4N9UiCcOikvGIz3UVD2jhh9RfIZ7YVMuNoKPVYJB/odqYav1bNSJxUMLJpWabCdnvTHPjmc5+FfekCjBoey09Jk+rVkOWnBXg2O5VqchiDhFWzWy5LGM5loErfcO2yYJaqr7EMDMtf4OLaGrKVORitPRmjmv2tLRr+KjSOr8lTRTTYtZCXY2Yh2dukcRxsDdAOfVtAZ5D32gJMyL32a7Y2RaskCLfUTgcnbm3nIydyJZc6F3YFWJVgggY1ZWieWYp5RmgD/E11tXUJwu2D+GYfzI6qpGYbDgWtYrgurfc7O6dLFoSbfQFYifAZd5UMn0ssZ3iOceoWBKH7OPSzz7b08YEW+4rlsWqSvP5rNDkSu0+ch60Jv5WNTfgG8GPRk+YVzTJabXdmL4Lq+Z6cR79IxfHSx2izLMksSgvOvFakeUXHrEgS8szYQoA6RISdFL/5q6C1nAI4CK/JTlIxXhY5nIdCB7ll7Yu7LXF5Qg5f2AoQrytGM3lYlM8K6ItWUbsV764yf59vTVC0qgi4UIGRu2JyNec8wx3TOc26/JEylIDCIX6kEzSKiX2l2HLg+oH99VrbiWdJxVXphijF/lp1fn15Ectbx8kS+6Vpw6jYHKsCcy/s3yrGuXmYgIfUU8Zr0/IPFwkrnHOmi1JGq63+8DC6lXl2iBrkY+daMGc5DAY8wqmKrBSzwHZvXFgFF+Vv1Ijh7dacu+MgXO8sfZzVEbippDgWzhC4rJ7t9bt064aYeLu0CfnqrRWWWVXktSV9CBYhuUqL8Yo7YassCD/gsGud7VoDA/ds6CLmFgThX/RtxCPHK4NkZC4xgboDlDCaLWkKalDgG5+g1eBBGjkkSXzMH/mA7TdsoR8JqNh+btuGHTGTdJaouzYAWo/DH2CNJw1n8Rp6ZS1oHqfiXKcS58s3zPKYtZJLxhwAN7va+VfifnU246wWqxI7Lq/otm+p9ziP2easvmeUgw2mHXK8Kcuiqln8EW4mcjgvZfGQ8ZPmJ0G4bw0aErM0yZJaallu0UfQHytsQpKeIwS9K3lSz87JHeCPRZLvoj0vyeicEXmiBFv1g4NTtyAIf5kW83DQkytjGVmcTKskDsIn4lOrjaJsFDUjW8XhCn3tDckoP5TnDHLSwPkUfBlhvKL+FoQ7llFM7B2TGXxMmEATsPNem8sN8cHBqfozCO/qp2OaExK0WbFkVUpLeWhRM/XXm6ped3UHWJUe9C3SqjvAFKm8KhzbA4GC3uk9GwEzwQfsuMx2Z++z43IyU/6Xylflmv4bNkplwiL2haXglCxqUlonS0biis7qvgpkI4LQXBqwgTf652K4YYvKetPYhsolApegIPzpnTzZzInP3sx5Jz4T+Fj0JNE6Ma2pPAsvaQVOKsLQmeRYk1dXQR3dPvsQx2kOd6zT9u8gXJPiiJac4BkKLg5c+CcuWUTioiazvYnQRpJsEhXper+nnGAvOSd9gmk+Z8pdQNqApbLULwxC1UPUaKQRmEF035ftzmXQMjrcQq2zt/3FM+wg/EipnLBwfXgknF0/BMvJNJ+t4wzTulSJzSm0523fnETLkuXxX1FMmzgpSMZSsxd0spFeYAJvC7NoVu4po6g4u8BjC3bs91zFg4psQZ+MH2Xkheg2QSg9mJdFRKd4kMGK+ZZ11CPspaRiRYVL/mbPyE/a8/49nLtg8octd8pQCasYV7NaXxKE5gIIHV+Y+uuiJIdiUssYzS90695uTMrFfcfa1qm9SvDM1l8Tjn58zuIgvN23Nwpbo5jnvHMfdPkPZrO04YuHZse2TzzKCtbEZMn2vbNau5L2RbqPy7yieVKzfbR7Q3cXX3kK1jZtw8WT6PN0/n2RJtHJk+1VfG3OKPPdh4TwJI9n8P8iTbIPCYkKHs92vv7673/4jtX04ODrb//xqvvVGa8Ol5+0kS1pkc/7A7MTi03ZzoCZtbWu/qo1aX+6ZlkCyoLjULlunIy2++IvVjHGtUpZfxKHnfr/sUodEPuTJjFRxquVDlLsizxnnrfEfIT6R7Ro8kNhnZBtsIbSBUtLcK4p5nMRRzW/pp+04LHZNKn5kzGvYDhLIuDqfFzyh6vo3lVRP/Ph3OVbfuUJz3Vu9qeaJGZ5ncwSVm3217PWBaFdzLpjbfzjCZhI5RYJ3YrhxBhPgeZJzS3XnBFwL6BHeZOwE7G9ftPQvE5+Yniq8eZT8pzsH38q9+9wXjmJzygv/v+hJg1Nt4mKfJbMnQZ5XrLVDPISaK+r4v+hwLn/+dAYsNoP61DrKc5IYomc7U2IOl5yFZs+eioahfDykOURfqPlboxBRPc0XFlEh6xGIKM5qxXwYwKzAsvjeFbPJhjA9iWaGGQA27+7XEQsz+wWMeaZbQD7RuO+rdMyGpuAK7wGFx456MWu8AM8rZ2tG9OX9uOmprUKzezgoC6kp/S26Ub1vT5/fh7HQfjLsjja1uaBYj6fckLmBfRoUDBKOmc3u/VKO6iVsSnbbg/WGex60XB02dxJgRnrYc9oBg+vrGXq7yDcsL1L4BRR1HPHp43wIl0yOM0IXZPIab8wCK/1fcSTfB4692ewTtPqxNikbTiRuC9+JEV4nKM7GJ5aJUG4LqHztJjSVFt3N+xJ67QNSbuYZHN0cgAzJnSoh606dbgEnwJTxVJlQfi4U7vQTtVTxtpS2IPa/pZlxaILpr3h6J/9PaSxeSQy4BDNRitjgzAwsELriupjFQMsdm+gkaHuBlbZBgObaHR4cCCrqysKMzOqQOTNPnkuRuNRUR3iMFTeKNqxiV2yZehe9uYzCPe0qdAbbmvNkU8MMyVM/eDLYRpM2uLLOPXlJMvKqvgRjyd2sMg4Y0fLipxfxer/2UoqX+cZa+p810WwSRtu8gSN+OF/x03VShoMhulB0IStOWmur6ZoODi6f8S0qR/pSb841WofEHJEkxp8X2qWpsVlWA4+j2lZtwHNHx5FVV1k075xtlVF/QFEJsQTg9Q6Q/ljkFqI5nuLztzKe8ly6u5qQn1DfB0Q3NftwzJ2jtD6lVwlygp3kx/yEw56xFWhN5c8VrvKKmUXW2WaCG/idVulVurUB2Kj/M3P0xEeBeG1niILy8Xf7VLHjhqlq+yoW+BNrwsSSdmNbrtNQEEC7ThjWVGdXIHgyoylqJPVVQGnEJvGdtm0Y62Zy1+ccBFVsTOwBrZ/ylNkcJJo1y74EYQ7c7lT64UknCpJe7pfzOoybbh0ayzS1K2Hfgt6qF9F3T+vohfgq9NKWp7TxsUIwBl41Gz0zEDylKjkv2THpRETI0522vWbzTieZQrPHHSBBD9K9AzkBw61GLoWyeFrtA3K3rQ6hfwzCMOecqu5TwqrszwQDQaQ2M3zJpvCCjVkHIfByfvOlpr1PNrsVhLO0EmEwEgsiySvb3nCHsWT3vZIwV6S5PVn3XmrsFDi2ae1P8FDIUYrFTbSRrWNU1SYHU9Z0jAC/gOCK+d5QjgE6Qq74Uw44kCYDyBhNxplpcYw8aWYrnwhdKDFO0Lo7uozXsWWrOLMOlj+UCrEG3jEpdZL7QecdNVVtKh+yZNcTXfCUnNwsKBcsmX0BKCgi6kcGRYeWIBZwtJYWu/bv4PwQkXzuMhaH54r2rEhdOlklkTXVVlUgEmpKmgMMVx3BxT6v+cUbFXf/5dDz60ve9+eftuzl64oCK/3nKuTvN6bPEQrj9vU04peB+EEthFiDolZWlOSy6MDwTPgklwxZ1b08bnn67BSEwRd84bhMydM2nJyWO2EsCrqNctfBPoInMx9Ig8Ohe98VraHq87yINz24MG3gEdFpSz6TsDhctvaBanpU+y+ipJv+y0pQuNWFpG6OumYhZo8+osqh8XskWtTWxeHI+utCbR3WcJWbhwv1LixwsAwYf09XIqvB6Eg19oDh9ZDerY3OSNj3hOxH4nBGIOf2vQ/wAhb2HubS1LbK2BW6jvgd6eu1hp2vVeIoeuhURyVDa53aKPUj8p4EDpjKkEteItdzLfWLmZPs6ALHURsiqWDnkPSuYL1rdLoNa0MREL1EUtqlbldjO58tqFvXNCVotXx/2rafSzrVSsbs14ZwAe6H4bY/kKgjgjSZdmUxXAgyu/33TWE3SdjFZzfCK6dSzJeHWkljmHumq+8x0EJp8cEJnWP567mEm/Jyne7D+xusHne+oY3aVnqpgjjZ3sgVpQsP0tIyhdVnex9SEjK6tnkgWnix1M03EMmMZiF4fC5SmImTtKycg1W7r9iWOd3RdykygZ3vbPKSQ9GHAGe/RP+Pbx/aiF9G1zX9z02OBPgrED2an8FGuBVV4FYUsWE59C7oBpr+/aNb7feP3HEKFuSzrKJXOFohS4b4OHEg/CJsREsGlCeiwpC0hfwNCa/2AdNDkHB8hiFHyal3Bkqs5+09VkbQbif0l4rNkuOH9rGSNb5CHVlQfjYcsfMsEedOkqD8KbTdVOciLD3+LQ6PINr+F/r6uGAdvTHYp5ENP0cQ/XE4ACnVdC3HgwNvs5McbzKGAUmp2JG8IB7pUGtX+A53gH2mck9k95jil5AXJzwqeIbfVusdDZ51ClRGc2mtKdadaUypE+6gkIcATjpgd8BO657wrkmXDcVMoy/xw38I10rk+eTQA0i6fxg96HseQZUxXPtHxwY8/cigv72eFVowes7nWbH0rQjwFIFQXjP0v0gqK9TrISrhK0fmhg8C1IHGuMHY0vQI1dwXluiR9qgF+pyJdc2UZG0qaNi0q6RaOvPL+vWBjCXteHS3WMZHx5mPzsCtO1+MGov6uonTHdGAXQN6QlLhUkOaQf1oNTzh0mWkMM9Is52HGwuSbltmd9FSK92IvhbCQA6DlR6wSXBjPf3ih76DPhWwY52KAhes9CEhKioY9zqPHi9ZpvrSZmkaXGkW+35sm+1F2VB2IWmS9/HS0YBrMYa24MKYONJ7jf47F+TweK7L0Ww+N4EDk+2vNHLgvXB9CwUXhbwOR2xzVqUPSi/fS0b+sWdXikEkvv9ywAB53bgap8Uec8Bo9Zci8/PWZbRfSKNAO/Pspo0W+hs2N+TCobHIPzfnJfmqXcvUVbFlBOhGqkmfbKSPU4qLQ/MLYew0MmNK4caxeDeHoAJ86AL4PIes2MBob/dsspQk6F5jGosH2JOKxk73NAbTRguUfVqUvbcF7Dhi9f4zOWrzsWUbdPn2OIu2gPFGlngVXlaJI9FpSOIuQk7OBChap9qjutobYLZI4Zjkw9EjN7H0jUXdMZ6tgbxpcd0mix34YPQ+O9//Or3u5NPfWa7vzSscZjtHOEdPQW5H95hKMsvfMryYBz4lytTncnb44RnideVyiXXVt5MhcOo1Jt/ktpHM5tlNDc9S3WFuFNv3zQMzgxP0ExYF+L3Zc7msCKJSRvOYvhnb8uScNr9CMJvfwZ3J8J4REsWb3i8jsqC/4t3u5LSJSXNAo68UpjSWhOF/jMIn2oulEYFR4uEl+jz03K0BeGH2bSqi6Noszu1+eOeMELyJGY4D2z2vJ26qPKHWlR5awIh8qbawdD7oIjP/L6WFReRIPdXoI0Iwmd+k6esjkVNBVHreNnHAEdVGQb4tf6RU/ITu2P6beJOyTyOkuofd6h/26b6jn6W7ZoKzb3vMq4KPQ2fSZE1VjqHlhGgOmVV1xTwKthI1w2DLCztKT1hlUl527556xYCB3GtFSRmM9qk9Yat54OqCi6AVTauvINy2/Ag3BlEop25ZT4xQOJ2cbLc9Aqj0n8hjWN73yCEwvxGphWjh3FxlAehvW8QOEfhDfuYEVc6aJsty4QN7hfoziH36L+SuwEgUdQ3BjisKnp0XS/s/l7Xi2UPxK3E9b4AhuGtAQs1e/PADK1p0Eeko7cTv4PwrrUvwLgbMTPBgIpJkbvDLaD/aL48CjSn9QJmaHEgCJ72XIxGnizZheTN5JgLcnt4jyug+mtOHhBZDT6CLaGk6anfEki2x1M327NcoX0aZ7hXUMVHixMu19B+Fw3XaF7Ls1jeyGA/4JWR00/D6yL7WJ3c4pb8oqRRqFlVFqBObGgRgmDBw6hXceWlNkywgdMlUpQX2hKxY5es2E3GG3kfsHujjuUytXN3aLOU4vf/21t4Eq0MfdVHdlOzMtijZyVQahgFQXi/Z9cXpnl9fxKEvRDGWhFi3XJZ+6ElGuBweA9Mbxfm03xG0M80An3mDHavqD4+L7U6uXN4j1WzmYuvIanPKWes2d7ke4/+/s4kp2sOFR+nBkuRRnvTGF+K1OKgXp23hvJaqdPI6AgxI3T+L6OBQCOAx6ZcrienjtJV3bjMCJOLGgANNxbbbkU5+29dYDLErMKBFfhhO714tfjmYS9eCfwPp7+Ys2rNhj1ctQRuuHcf8OH/Zh32/Cz3U5+KLgoSFRWYzw+7T6WXBuENJxY0mScub+I5Q3/lmMm/cIXkrH4+CJ4c0SWAG05TaYNa0T2tPZG4hnit9+ChyR0sxXlcBdPC/9qZ+BlCauD+is8S8gaXjuqitlFDQ/GGvhfDtaxmVZbktGZ3BQ1QzKIKjVqdqQp2z3hceeOfX3//929yoE+K2De4Iv+TJvXn+ckV2LopiTyz+eAocrvJqe8Qj4blS8hv9R2YbyICYvOoJY5q56HXNiuYn+bb2LdJtrA935ZxgDz7c/81ur5cspymdcJ4ZxZTNlyvU55BGXITUbOZ1BFmNOXsyXZd4e75WXdg42JzMY9zgvADGakDCsxhytaQbzJlFENEO97JLbE2oKchOuYavzH4phcn3ivaNLxqTg23mo87+ilGa8k8BR14SdPz4tcimS8g8uSy/BmjNQYfRCKmSY399ZccHHQW6UvN/V09SQTmplmS07R1fwcKSVLQBHcl2k5bxXeC30edZLABCsJHfoIQpb6pIPfAD8UHaIH2KZcA4pFHCY6DsLlUG5g78j1k2KmSa7786635FqLPkzf7JBekcNdMflHZvy7nFFbAukqYorv9m7Zhh5f6Wdwo+y6boEI8W9kAgJgLCO9OBZ5o23+5b0EOPPC7nCVpzaopzQ+hn1bJ8UWYiMs9POdBxXO98+xEvbnNhXGttQ/EhJ/k9YLA4LvVWQ1sR9CKHlmeoKKhcT92QY+bKFmOIZpwFMaLpoqYXdmVjBLFBaO2q5ehLDOK4G3E3kIWvAcD+RO/zeEIaGoFJ9QimcGYLCr2bHU89Md7Y3mgSBIPh9SjYQMZx3Bz6jps1EomYodv+s2ear+QKNFtyoCI8c6IIZdmuP26y34BLWkJsE+g1ApNgY5rYaMFTXK8Ys0loHF8SS9H917dv8zUnMyMG2gL6R2AbhpWDz1PTxCqmjNadqKMlkH4QP4QhoLOcNQd3OHbbblhLW3ftts2gYd+yG9kH0N2xotDxsoNpxRD6G3ri8kui0YJTpFUdjCGfbmSix4erV6zLR/oMnfTLhXUYOLcVh5GJoV4Wdy7ARcUZmBqD0Od+Y3Aa6jl9dEJu5M8xpPCWZOmsvnVJoCJ48bXr1VYxaYph1USDoR4TaPDi7r5BAwnd/r2FGWakWSlN32+g/BBHrjsLv2yjRQc1rVYu5Yhil9FkUkbxU3CdbUSqwl4zbLTpCyf14sgNGOt9GNWu+SKbcZh7DBwmnY6q057tGaHqMtALeQ5uC5l4H/YBa7zXsSoPGxdS95MRN4BYDUiOVhBp0VTPXGeA1OunQNvozcOMpt158ERTQVzpcZCia48l3p7hOut9UcaOQQTzMUuFYIo78iigMTnjLQMzYXvYgpW2xxUM9lBO7sOkEUW5aZBBSWfieSocUhi1EKSPHVBYJJ35o779BjNHsLX8rbj/FgY/XCFWXeI0bLguk4sn47rgJbK6bAJArEDMopxYZBEFSbDqFr2srKpmbBf7TiIrHC9Hj60lvw6nBTlWk8o5uVbDmuT4NcC87di0Jhn9Fj+DQlD4ssYr8PihBKVA2BdHNSIISgV8STPWXUFpwSYbFuHSb6OZWIWFeO5YqhKnInhCKY4PrkYp4A+hsekaTLPP4YQ2gKsqKD33YiT2Ux8xIOD0+5HEH6rgulQF4WYUKexoK6SEc3zdRA+dtih+kfNgiCkb4bSjnFP6kXR0WjesWxI7bFt6/5122lFasU3nWKZguQTT6DfqbM8CP/Uo0xKZrN3NLCAb323/W6dbMzz8p7kljt8O0qRlV8wFkf1sQrojurjIPxbdzr7aJWwEzVNQ6w2E4OSHZfWGe8P71TpD1+BJ3hK+Ek2LdKfpcqvfvhKW1KsKi/p53/YHy+qIzzlnnFZnvTNUsoXE5wz/80doGOyDcATiEhAWkt3ExZl1DKLeKrqv8x4Vc90msaEEwxEQrVZOCnKSuFftKjo0Zc6xZ6yB/TKgvCxwcSc0/TkJ4b9H/DG7yD8kJBmlhZH50nnl0Cics1Oq1FXJ7BR+hXBIwy4Av6cpUQylqSgM50lRPB0Hu/rljOCOxRheBe8bjIODwOjyJTBaIp5/ZF+0Qvh3vAD6Ba8ljGlf0YlBV7DWR6EZ47g6DlvsofyMxsdEVbvV53AHVPazxvXs7eZkL5Lc2c58bg0mwAPGy7S5g6x4bYAH/EhTJMjxIcK4vXL1uyObr9sCdjTI2vLntnQTCWa0dJxDabBwccauEbz/26tma+6XYe4Ej961US1JXFe3KnU9sWmxGMbJaS9ctA2um1QSxZVvW+dU34ybAg1tuqwr93RK0zyuiqgVqtSgqCfwy0Fpqk5qywGoc9Xrh+PVx2hcR+34Q0QnPmPnv3z0cjQ8izMJlDQfByL/2JFgAjr/g0Zo51n6JivWW+vdpI5q+Xr6+z+U3bd5ca/+/I9nszqNb6gkxcv5V4X9riCJMpmUFKvb4eBt7rPDUsApgBBK3vNkogBY+Nxz4I65IsRyy6elwp9VjPs3jVdqGB7mzclGOTR3A2V3eri35HVT6iJTRmjq8PrFQy1YNkDo0uv0Gc7TmmTRwsR9oBzEjzHjhOKMbOwjxF76PsmSDoX2hSrf5C+YWb3k4Wa8uDpfhL4+rphVq7fTMhzOCCyi3dF8TWjGCPD+6UvybeO0hee0l1nqavefWcN+84a9p017DlrmHhKHQ2RL2flfr84O5bFl02lBBakq4ZvpbTOX+0iVfBoBs0lQ8G9fwVbbRAORbj8wFJUsyj47Q/gvkNq/p3WsgLxlgWSz06bufJnzJOyZPWWFwTO9UF4VpKW5rX8a8GOfyU9axa0uqCmiO2Ypaxmvx8MtAEaQQYG4v7i3GV1HsyUNlSFHAZ/+K8l8FFuGOXPHq93OoQOwsHEQwNR3S1Xx7tmJO+a/st3rEHOnGKu/M07VkLrh/ZBE3fEofMgvGUmADvVfwbhRXHSlNSZYP1kN7MkTyDkM9vrvIWU4fJsRskRhkLCmRIcKMVV921wKr7lpxHhuy+1o6iWR4TXcVJYAuGrCoLuvCkGblWZAAkq1LxbsR5w6VQ3e2lyeMkIfCDvkjnNCJ3BJi6iZQ2JumQenknPKbYuIJC+Ko6TDDQeLTdaXaCO0I/zb5K8/vTx8OEXroBqB/mBSAQemmfuvMy0iLbqBO1a0wTMOjsDSDAL4kr2hQkS/M5xTjvo6QgCA7y8QXbwOOBYJx5Jc/Ftd7p2URD688eZNNTgDhyOuQO3pY/GkJ0b59XWaRi1W6FW3nLo6zFTr31vBb5hi3oBzUK3zLLWRisMntf0oy/kMId9dqiXgvfNPjsu+xF8WXL80EbuueMHjSM2GTzWVlgxDnUZdzXCEW3P5B0jxBCyODhuuWocIgzEySpYGJs5Gkzg2xhvPqVJtGggC6P34BBU+O50EH6hq7n73M9dfscHR00ddNTfGgjZibs5d0Danuz2fbQht4JLRuN4a+BgEqaaB67jRTgJMxmwx2F4SDh+WAn8jGA/H0cuInGsuTuI1NJrttsqzxVZ6aVZ/f34FWMI2wHdUQW25Ao4bMq9cVyPXOW+4xp5aomXwtYLtvfWSW7XGyDkcVb8jx5A0Wq5ElJ0tpmRhBQKuNWr3vwYPTn2G3B7IEkMeopLfojuG3TOeqfXKLUPqMXhb3tALS/qnMVx0tjsH0pDQAPyUzqyZpepChJpz6HxNEWsCLf94cMkqRfX9ENp8YzN3sRw/Rc6w94kCGWWDZHu/a7nsFpzPrgzCEFlzIfAyIvQI+2HVzzxIJ3Fskm6QdkeV1aQ3umWJe6YSkF+13UML7wRFOT2AITGKieFGUF92i/sGNrbs/nOOa/aMmQi8TEEu3CU2tlt0XXu4IC9aZIlTVle33SJKRyHQM5tQ4i8zLX5SyFk0spc9wA4WoCNZ+I8uk8FqQPBDKdI+6LRsl5URNDKrvegPcvP0CO2n44eF1wFmya5yfRqwj6S9F945tpFcOO6bEVwq7Ig1CO9y8N+pLcoU8mk0VMLvpIZ+N3sTcyC2d7kqu0UILmLzEI4QH6sJw/hyM1C0mSq2Dzy5SRu04M/WwEbH7XwX+twPOgSfmFFqThfXTKMa9dzSey+FGEnS3mSDts0cYDfWmLB6AK66XqXE+eEVjk4gleYu/Weyo0FUzg8bVHWSUbbImieSxIDyTFF/gxxJJ8LL3EIz2DCT0Bk5sVgUZjl4YEuaEEzcIE46tdeDMx7iiz3ikOoJavfjW/KH8LBQLEoSs7ddacwbsp1B/Mi2kBMNwnZ6HhyhjZSJwkWPOskdormKDJ9KMQslzOLKqBLuJCL439+1yNvM8z8xB44IOqX4vedseqhJ2mD+Kvbc9zz4EQSMlF8zcbg2NjolbbcXuZriqztuleIWaHQztPUkThC8Koe44tvucXoXQETk5MmDJb3y8oLRIY3l+TwI71IdDisB+1hsGq8PztKYrbpyFCoHDqusUyY3rGXKCq2LVzvtHW47TGY1056jujyQ6G03NYEuOqb163ZYnnZVVEuuIVKGep+Qyy6FEwlYlgq0U3NcUW5KbXq9HVNKFZs0P/4NbsYsLwHFrf+EBxgmjr6VSz8o/hJ9r85O8SZmEUpzKAqXKpPH3fqkQThTssYJY5iFiw6RB8DdR5D4ll91w/CoRXP6hd664i7KOXg1Cca5n+VPkGomHQJZQf4X8FXZxQG7hRB2OeA7XZ6jz97YUu1vbRPZCUO7WLnkLlvTZeJcry6bX1Hepl25/nMAo2RWDh9nxyFKmOT8NUSXsx2URAqVyph8ZDX1wVBlVZ9v+EAPQjBvakV6zmDD9lJEF41hJgisXMCw/2TItAS5rFT+K+j+rUduXpeYlbAnKAXKfmmW4w+yLu6DD5bhhy5lpdYJwjCJ7ZAYzKmeQzaALYJetJsecGCuu2OVw5p5eG4+dcGQnR1mw6/LwvCv9vebJJgWY9BefuA1PcxSexDBwWyvgiAwgRr9ZYDhxOJ3PlqJJHkhHI6gfNb2KpDBlXFDcGHYwXFX+IyqY0FKwQX8pwest8OJjY5HZAG4ZYmhcOMqMyW++SlNKxAt+7kyuSIe0jp7EmzG32KTFSpJ/F1IWHSL1d1irNYDGrw5c4VUP210/OvQ7cm02Pu3ZwFgQ+c1rBndXr2/eOdKp1WoF/Vfu++v7xbtQrj8Gr80zvVSI8OJfeKVd1f39mj0e8l+cW71GnV4WEg7zs4OhnIv39H90jhpMybKbcq/OG/VGFeOKr0POOo3+XbPuOKFTqf8b4n1Nj0kxpFoXP2TQ8K04TcmNIE9IGsYHvEiJneH3D4lCncBBVHEiueoyB87rpIrh1oqaTpET3hRJDJx0H4EC7o1hPkse1cVh+hzyq8xHlaMeHqjNnErhCynIn4jDZQ5SPwimvyqJ7Fs8lZiMTGnc05QupUZsE7i3/DX+c019QzBL5qPdsTyW1nyMSXnoUfZR6VJ+9j7jzNe7U6Qj5nUedGr7yuTqoY/jrfiSAt7jlC4hQ2SayqeoxcfxWMXK9MH9eee6siOIItWBIJCZ0WwJvA61+vePEMjnI1/9m3caxtbxaYF6l9K4ZBou/UTJ65X4AnKYRJB5p2C0LYBXmwCGD/HFypvheeX9/R8iZ4wgIDGftz/tdmmiV1zeJ/FtXhl0XObtosxDpT8YaWKeabfFb8oWLsOzB5V9zHdAaXO5jOfPBv5Cxpwf+bNNfIPFDKU0x4fEKomHTuxZduf35Hy++KmD3ZNtIrWj/DzwT4C6EZfS/Ndl9KIkVkC/PKgvCzoSc7ODgdEgfhI1feNeCP6peePYo45uThd+TkLJcgUAatTDj/MBEG5XJ/ZkdtEuPCRZrkEu3fOEeoep5sA/jDpUh9flUmP1SPib3Fl+enmZJsmKe6hXiqaMkA/FW0EJ9TNZzTjDhVK4ivCv0wzFOFgnj9sjUaE7dftgR4CSW02BYfoYSEaG7anNXCTRt/udy0pbfzZ901cC7FT3jNMpRjdveuTHKom/5kPpLvfo9Dkm/Tpb/naP3C8om+artgvH79IBygrjDCnk9KPBLBPeV1nTWiTeIVeokTB1kxjUQr4EBMmtJ68O/flr7c2I84WMzvDbOYo9rxGDFm9rzOl9vk6tlFrNOejjueWapxaeArhStcIWi7xGfFGUbRWUGgIJxVcLRI3B0CiDqea24bkHbtkYgM3g4ehQEinuBdHoXq/y+XSVU3NN2uwf1tW+k/olMWwtLa0x5PDXEwXEkyXEmiKjm7nCVCi7rS5HWSmszwr7tWXRRVGyKbN5lkFxNS4cRf0dT6Cv9qZg3Gq1EzVlkxsCeIoNvisCmFygEmfWtL8tRREWpqpGp3qWLVxEnCiV7hoVGlvuK4+pXB47J6hfg4exYJTLc3S4sjMDyCLmZdc0ElvK8LBG2r36L5RNCtIHsjdJYV7JoCRKX0IoCwh6uqFOME6gILz4KbHnJsnW/5ULPkmMXXLXpUYcblNy26GePnXQfXjDQIK8vRVTN/k/DRvG4Utpa4j+ThNr7gWYxkhWZVMRNSexWbDRkzUWJ33pdENEDMP09mmIzrmijKaLwHyw8XB5FbovTHEs+JROugcgrxASSO1jzyDRmikcw6s0ZRIQutFEmlo4SAXZw0K3p0RZLhmMSyogwONvBYibdMmHzDirJow2eCcMcStU7CBE9BFwXYeFzJHlChEwVBaIdxdC6E9q1j1t78uiWSEaU/GMV2SIMSjYY06MAvfLEk0pGxI+L1IYLwN6N1KIaDNhwFO2sQfrrylRZL0e9GQmC8D43yIPxek7vbkY6HhujAqwZtksqkZhQahMYmXuafWDcK5akOp0u25SdlIvU8CE3qZFQkpXbSxf0ImfBNrAuh04vRz29LiBU9AxZycDy44xMjl5AeOCRji071n0F42ZRipglZZDH9aURO6rHNGCA1I+EI2HJC0GCNNuzbTrmMLeleqztEMgt6SVXwxKACLiC9VTphm7oF7lRU9RCCHQNiw0YIegIIAVBZ8ozodtIbSKrlVeZw/Se2PGaGlPTDcHT+IWzY2HH5ochKmp4FPnY81n8f/c3XpesHRi0BwzbmtSTTtBVA4BII4P9PdcELKXhhC/alYL8veC4F4h7XK4hyB/oLzkVyXnzdSxXLwAZCI5HbvT7uRVi5optkNNaaixKsYrMbVvkeOT7m2EkutBJAH/Pz2u89YvycEH7FCF0CrYKmN8qqyZkWhUik/z3/Q0fiJRT+gwON1ktEAFVgwBgyUTwIz0lTHGS/08Kd2HFJ8/g7GlUF/0FR8X4jzXUa7ntte3FwcKr/DML7Ppz886/CP34geMqooyf9CuyJCVA+eDKvd39/WBYleGvIcCnk9O4ip6TJDP58tUqokZbty/jx+u1TEOm/VqKL90RLmbGqQbhSlmB3XcLbTOZEDcK//ezBV4fs5D9/9krByUPk1Q7C//6/pHYMzAjCL/5r+ZfxQPy3q9QR1wWVa828SngDqWKaPB68digwrMnKdw1LE0Fl8O///U41PPrZMvtJN1DheGAK/6//Pz0a2BEevL6DU3Ib4qTi49oCSORqx9ShHb6f7QHUN0FA6RT1S0F/WXMmjUji25qFSGwCpBOh+PHaZ0DiNSv3ltC/szlpPiUyr9IUDqIgXgByGu1Nnq5AR9mV/2YFNDqCCQJLScYA/B6i7RYsheTGyyRmBbadaAqhAaGrOcaxb5iBivqvy3qUIsYVxFe1tRRC0bDxPvGlyYDt8CED3wFIDwrKPC7kfxHLsqi4T/8pJCO7g+7RALiuhU8anG9XeoJidtmItcTU3nelQiSYc8DbQlA8AE+U/PuDbArJPc5mU45ZPrgzFhOSDDgFYF5cg3QRJZxZmoSg96FcdJSKKasnF/ZH1qIeDIZ4EpJxGpdRdncElmT0ageZN0kszh+166T/JLq9NLlQmGGO29AgIneJiOajVW0FkkIzGBGmGtkphLo1KbvfxZFilyz3hCegelxJjWbynmK9ovdeNbKsJFkc1Xsvb2phob3o1BeuMNPufkR62stTQdXs666rwPx0tx+CqrKmxzIr+5ozSnX35XavnDdT8RQiTrZfN0UmZ4ab7SRuaBroEGnXEX1HhLm2wEsZlfJKujdtaCVWH7mqiZDKFvA7Kqp2KCvNnT4IA88YLSHeqGiwmn5+Gwv0iRMkUiAQ5e/PKi6cSetFCHiaovsg03uODDWWAyrJ50BpO03eNBgEgZQIePiOMUQ5WL2Av46fx0JwAqDwV+iyuNrmUSRK/1WH/KTjV2T2tWg+twgY70AOGSAVBj/IGlg9aEaMGRNS/uw+f+qmBz91FQfhh3jY8iD89UA08alXZqQPUl6Ip3YRJqCxUW0EGr/bF9ol2vViOU6AhVL6V+/ZQoxagHTcpx4JZvrxXNM+lz91EsR/ThPK/UzEImKa5saNHJgIWMMerZCBCYNIZdz1GDTm1EiiCizKv+4lUe1KPVC9RORoTI4t6EtnrS9dtb7s1fqyrfXhKAeziEW8qsWCE2Xi3TACxA1aZhfXU5thCiZn81p1WoAQSV/c5JKXstsd2pKOpFpKuryjaASD09nbHQm0FokoAyzz8rmHnV+9T09gETwLlmiWlbcc5RB3VmN/veGQJjmQlW85JMooCO123SGPqxPXYwCr9OV++V2zSOTbVcEiImjTyVo9Z/U9d7A+vG/r1n3HjYEEkEwMmE03YsrmSX5OyHKwaRk5wOoXMtz9VV017LX8YUTaY1fWQ9yll+7T1egCoiKbJjl7vgK6Y0ogVCXj1TgGchEzbYfaG+9TLpK9PnOA8ah5kSUREn7bWY/lixlvn7OsqKsiJ4v2YfE/4306TbpPHpCDRkpm9I5xAUQsybSxQHKLtL+3egjIia2kBpcCzhn99zS4FJRn9Wm/0EoE1/lqv2kSsJShGfeVCyJ9IcSBucA5C9e61CnSz+EJHJOqbHFdpV0erd/oPVD/+m0FNqWH8qAwXwZzsA9yRyxOyHJvjDti0eQnDc1JzHLuIKMwuCMUbYUgV7D6gPRBn+WfrnxJxzmBFxuffl7WE8ezPzMwkGO3m4gd8BcG9QXGQloTQbeGI686y6Mg/HIVwgzpzKWRA4B7ktoj1cyZVHyi+cB3jXzPCTUH4m2TkYOrES1f9L4uprjYO4a83i2tKJM1Q9SF75oJEcWT4wOpujCipskFtRFFq7wSCVYQgxTkkiESerleMkfmt+K1mwzEppTwyXd9XCKnbkEQfuFiD0ni4xF+EQ0RhJ+M1iFDVKXzyqcuvPsNTeFjh8z9gC3xiYUFpabKtr0y0IyzJB8B0OPACXAU7jiB0tdLJAVpMxkoagR0NtW8Kz4WYtg+cVZf71wCBWuLsML1yFwkycszi98DVisHpQmg4VzRphox4G3K2fYbetJ2Dgj92Trb7+KQmd/FB6DHX1iAPufM6QgiCH/rQgxf31772CF1X9Nq9xZWe1ubh0cABHE+mCZf9uT+T6DJ+rw8/WymMac2I463BdqXv2MKesjeK5s0Lkl8zO/bgEOZn/bg4FT92Wo3LpT66z99kJ+FjqaX6LXlauq1QY9wRyKsvCd6rPeGH/GJJRIu0m1LW+VBeM+D12+33mLQSibuBn8+NQX9e2nFQSjXMy1hy/wNlRqr2opVDE7oNDdXcO8UKVe2RpA7ptykJlEB2w+GQDRFU2fNFG+ZDZPx5tMCQmMCHwYJ1lkHXDOBYlOalalV3mawtW4esxpeNGWzWmW9LXLZwfGBcL8Xi10wl0a/pF5s9yFasyb14moHkNcm9WK9K9T28Zy9cVMNtRt893VJvZAjQeZNVZwDC1oyBztRRY829VKhiLWynb5MGIVlhIrIfNEHCQqmUjZ4z94hq+3xC2HTgeMD2EF9dEfIBLUEhMwJ1Dne2VxDylgs2IJuWlJ1GIVOlpuWUN/12BcaxBf3bWG/h3TEUC1KkD7JlkNPIJGISQVFy77kJD1CB5F1FwCafdMlQPKwILysZF3CFzmzKaYkfZt80xTJ5BjmWDKEMKAsOiZB5yGuBJtYl5GXW8hoyaIecRMUBuGVwyWBw3Kx4sBfQXi9XewwrkrRO34kOQ8JT+rmujgkFgwIdaEG+IfoLP06vOrK1XTZLATm1ftGkfSrlV9aUojwLge3QOVFjlc3efKmYUidE4ROlihAwjGYk2GKcmG3D8JbHrGgVzDpqwRhZa05tv7TSDzlyH7YyUdWXRN4XjSlMAu8Du8pHivwgM+YM5H4mo2RNCtPBziw+mUbig9LHFocHJzKv4LwgZMqq4Y0VTo91nMnDBMDlGkSidQ6+gXuejOMidOATwaZuorKqPPpIBiO3nT0HSc6mXVMXo/cGb7iOOm9jmJDQwYyoM2RMytQn6lXlaqAYgk7NX4H4TMFw5SUBlPYaa+sGyHABCGnu4pRXmAaLjabFVW904eofGAd9poGQr9SpM243tGWxWLeBn87/mHCIfFreSF5swdOgGr+kr9bHeAiePyh52UlWNnWkze7rgxnk0vqgLblDbrnTHomAugwUurRo9fuxGg8dyZGGwGLPBxwxargtuYHw2BxdPjAU2ebxm2VBzDBIw/QgtUDfIQfKhPr70X80fmI8gcOurlBtjlZ9sbBSvfGZKVLezhVZuJmPZY7VRaEe22ZzFwATuoW2pQE4W4rabU5+0EMgX4XLdm9dYkpCcLbc7k+WFEycqa4KGn3Dg7kH1t2gRWXNCBPR+TJiDxyy5VURD6u9eUQXvV6s1feWcev9WRwXt2vSUSkrffKRRd9fb0nwMTmFlXh7kuzIFHcheixINgNd30sg6duQRAOchgm2SQq0paU8KqOxRwORZXd87ARArUY8BDCUr/vwaiK8axkgWZsZRcLwtBzETYmVL2v9g73PUgZNhezWZIzfqWlRuRHCWRmnO1NbrRlaH8rZoJQbrY3EXxxwnOhBHoiICyH2f2qLUDuFlEoUzzif4LVUN6qoIkgRGxvAY5nPMkPucwtycRacl4QKcKhLZzcXZCpJo+k+6ugdwRqWVZBXox4UxXAdiCZN0XDW46dSybVYs6OzsuSKuZHCV9c7H4m86xIYp2JcZmwoyvabzgZAMeeG1qZCuMUrXG5L1mTqTCzpYwROP4U/+iX7/fKMXRA4L/tl+/3yl948C88+H0Pft+Lf67wz+1y13vte95rot13vSsXiU/UDXoCVdONTiCjFNQlfYm65pKUdOycV2VK0pppxPe3jDylqM4gowjBjfa6IdUyhd5y0XW23VtQXcYneTs6MI5ps1eM90P2ZdEtcbO+iEBpE4SQkL5zVu5N0BG13H3ZL53OzNLdlwK7N+lKAaNKW97QmuzGu87AZOu14GLYjqGx4q6bTDShcxE+ONubnJeQdJJkZNei01QTqUhvpzaqT1wYYYYjbIlkuyd5tKgKsFKYpJjSQINh0RgPbSV/7RKmOpPGdtXed4k77lsp2PGgGKxOymt0wwGSariLq9SRHnaI0jSRR9BRU/2+zyoqW62zp4wg1n2AsC/QGERVs8D87XgKiRx4ChNhfpveJ9915LTFQCktWa5JfXrVlQXXTCwsrzUue2ogxICP6mN1NtvSyYqF64YDLWr9QGRUuyo4CfihMAuLJeOc0F1TOBTZRG7hCqcOG3d5Ps1nyvgnU11Le0Fg8rK0zAztHxfwWhopm837s4odl7+C+UbsGt6fgZ/fOWXlTDL2/iwr4vQOahpu50eh0X0ww9CgKywDNhjBfCOJbi6bBLDou25xwub4v1UaM/z/qlkqopjtQkhpnl5nmUgqDNo8fJ8YHUM3NUrYmNfyeFbEIn2k5lZwArzWWkVFHjbIShWE94Y8P6XaCumM6584qy/E0h0kTaYVrU7OSVde8CV+PzqJUnYW5iT4TEhcqfYRwttNsLijHUh5vvG5FwU+U47MAx1+xOhkAq8Y+ZQFu0lL3aHlRcZBBYFl0I4bDoA0D//rcE5lcCc4bFk2h0DfDmPUEdwKqCD8zodCvgHC4e+hynRYEH49DMvqcrSqrC5Hn4rRecr2RqsSsNHalJPMSG0CFoT/tlptq6DuOkDiKAriCKA383seiKhG2C181Yj1CYjHKsVTC0uwbkt/7mUW9gguipm1I7l56q2BtCdmTY6WgSZlj/1o6WOEWxnEblk0OTDO5MoCo41vmHJxpCyOQhQpbWf3kxM4XHjHJ2yrHudOruej3Mn1vJ74IT5JS/LrJ04WhMgrAIXNfgiopaxfgWJZ2KDvDsAkFepzDQL9hbeHqB7BTa1co1gWRzC33UJMFFbE7Hqfghna/6leHDk5q9viIFSkuy6+5lOvLAjXDZk3j71F0xyEN0w+5iJuKRyu9SU0ju+apeCAZpesGQXizAoaQrWPOIZsUz0pTvFhhmfTzPaW16Bp7fFK1wiV6akm2Nb+RoOTRTEVhJcNBB6Pq8ZrSfHQuei2VWpxXd+wxOiehRcaZM3qyJTESQVTFB4bPHIh2hc0SgO9EPmluyg9xUGNnOI7NhCdPvdN0Cd+nmkx+ItKa98gvNRjjr5plUCTCK/7WTYxaKyRPIKlSQbBzdzoj0ruYGgxOLrRApU3tOPIV22LzJXdF9FHl0TQRQEsBRDH2+lHeqGidbdOkIEB89QnCsJ7/qu6lMsOPusjWmVNuemQYOuBH75Dhutxk2Un4sT8tgdCqwpNj51Y0VLjjyBcwx8iaLb5VKx5mOJCK5/tTRSdR0sIdMct1yiD9JrFqb5wHni2Aht3XLThDMNwwcV9qv4MwoMV4BrHLfCQ5bwsONuN96xLJ8tUd24WyaAZEKngGVo1Z0H4dJAA3L7DjhONT4cBQHhSclMDiZHa+u9nJuW3xi+uPqThX43eUOdRF4CD993JZPLijPr5r+9EPl2zKrOo2f7+ThXJTKa4atOoZtXPQrWdFzlSY//w1c/ykG2irEiS4Vq1/vHdao3At6hHLv79u1GrI+GIk178Hbna1QdxV/of/8VKB5733XokrQu7R373bhVx2JD3aeT//G61SRfBZGm/5rt95z//8CX54l8//wHo360KbyNNtpdp91fCdAMLydUu8BfJm5Bkb12mpOUlrQ6RWa9YYlT1dSnAreWECOamorpuR1kuBZtEP04TLHWukEyU7HeM6RDYL9seeVVJkkvLCbOISgXbuR0ZpBa7Q3aCZ6JPBlFwioxn+y92J006TqCONz4znXHcHXwM+sXLfRnz/Rud6xwTi8itH/Ke8wSOzl3FQfi73pW0mjdIyNS7uC+xWNblxjjR9ge9osnbXhCE9w0md+3v0+5HEG4YKMMbcG+APx7XIThaFAzyLX38w4FrZMyxyGY0ikMPIYnQ/b0ePNl2Xdtu31sU9Izw8SDWfKZwkPpeR14WRmtpzEdD6SWipfg6SVgab+klktIro0k6LY5Rs76OY7wk2lEoJMQ6S8gyw7Rx5/AvwVF/jsApuTBCdzT5fDZZV9zJU6ps6XyRZEF4DglWo0WVN+k5YFXISJkUk9nF7m+SAu9vnxZfcN9f7crhzF3Yla8Bi2eyRH7Qjp7sAoEzxJTmc9CYSXqGkAwjoj6W7jaoH1UfEjBEzSYfEemNDG9ziZAZ8FwU8k1ZDCVIT2yUlE19FLUl54gwMIO3E0jnTJeeISROlvVs77ZN0v8VKrHx9wW6UxliNLUtkqyjzP+tSZBfiotgXyL97zRyfdgmRqgn54zXLP7dKoz8C8pJk9NsKo/jy2aaQswqRJ27yflFUjmTnv99YFjnU/If//GnyW+cdAB5ISwAv2nDLL76/ttdGdoo/Hu/+tO3ezvkeZR+U3/11Zf0+7+R42R3XyAgagee+me7xcx7i/uQWgA4+mHVE8kFTu2iINz5+uu//+E7BmRUX3/7D2uyV77aL4BSgiJXFhSJTbMIhm6qvNshS04c6Rf1/O2ugkQDq10gjWEfHckXBhqZj+UP8VXPyV/sOKkVDM9YHhxZftySqbZzzcJDMB9MPyCh/PChDaORkMHJsjqVK0p+y4OrWEXzw02PFNbqOx5Z532mXlwItl3n2OI0s2JRUcXrkm5ZOO4lqHTMwTz2SDCVd8FDb8R5OlKumd1iH6Gy8a3YeTwGxwOwVx0AzUroR6n0HDkb4hGaUG3qpkyR2P5PQ2TekhZ1kNFbxwTh92ME46P1FW9RYbJKhYlZ4R8GKxzhQE+K1aqZjVQzU9XcHeDXFr75kw0/5IpD9F6Tx8UlXjdT9PdSPgrn2uzNNL4jD0olhQzJaE7niuaWzKMgvC6YohXLFTrCLclkzVG8WJKJC74gkw1HMep7SXRRiJI4qgXLtazi37+YfoEL1Q9f/x7wZ3guAr9eOIiMIVyNuzmOURSE9/xXtQS7X3swgrEOpgX/LTpMED5ZoZ72poEPzCqMEG+BOw6gmMg0kIt4OmN1lUSe5pHCILw/dGVb/28dKKEIYfbwAWnH3+u+tr2F6/tKglJX/Shyf195VVvznguTTT1fFSTubymu6dmHg/D5KNgi7b47doGHSrzI66rwkXoLofuLtle29T8cJRwXJ4TvQmkO9NhvQ2neXUl5FYT7b3/h21xEc9h2lEkUhI9WvcjTqhrPumit1yMod1u1tAK/fqfLg/Dtb4uHGe9+W0Fa//Ktr8PvO3nbywaI9a1L2m/bvtuqN9N6hWtqdlziBgpDhDW3bfaBbSoD1bGEJ8HBQUYPGZFaKNxUlN+2UDPYp8NLHhyAJ+JTpzhvsl7cAqBDL7rz+hfIe14k2LsExn6BDiMOQwXqiRuFO04Mf+p+dozybjBUt+VEiBNUvxwMK0LubE/1HP2Pgt6evY+ipnF/OgCunqNl/C/BU59VFRP+f4r3XvlPCJcn3FSptjdJ+6XfhlRvHjoxbTaVKE3E9uKBE9fj6R+FCbL+bTcM9iNCM3E/OgLanV/gxLQ5BpN8njJsojseIJO20G54mQiwVPlk4krrPdrEFC0dxLmqgWN5tOidN7TY3asVixg4KOVFncwSEal72SDSr99MyHO7aJc8v2RT9n/bK9ntldhXvexd9cJRYtfzolfPfu+q/d5V+72r9npXTRwl9lW7dnPky1m5bxZhIEA/UcExh0QFVxzl/bI8XXcmNKjY7HpP4CyeiOIrbdof4DAWQ3TblxIA9Ps/JCnz5hYQ7NpfotNFsmQ7A3kBvq+SjFYnQXhFsv4TmJNlQrNN6awk4oCLSg8nuqwCYiuqXO43rUVfuigg8Ie8yJ/+vPv/fxurcvUd9r+snMmgT2WOxf+xYjYDsL/I3bF0oug9nGB4aI8T+b//L6t6JWZ9Ldb7tP07CF+85bVHqMb9n+9EOz/IOj/AxC8SP5vpEXdslnlh4xDeG3UhIlFu2yDz9+NBsUhF1fF4W1iRLYSk9KcTSaMOvm02Cjz1MhYn9AFKlMcJFY3ZL7tlk9cbfip9CntD/NjHKg/ky80y1RnovdiW7r4rfbYSFqK6EfPcB88g9nGeJlmG01Yr+tR7gcw17yPD994J5j5kI4gh30gn8l9g8u5jPPocKNW8FyAjY1e0Pwx0P/8T30Wi15lfwQ+GQM6I7630eSVF40qfdwaJ9tDFaqXngKg1G/zJSmk5O8ltPb2BDJcQV+NouGkmNGhpgcuERWzTFKJLGjgMwjR3UU93IHjSu2QHGGAjJl4wqdzWUh44RtkXvowIR4uEl13CCz8iCB+P1tGVfufDtj5jvDwcuKkOC8Lnq9XWiT4fvICO3RhIrcdq6AqferNNKBc0Hf3VeG4K78MpSBA+Ga/FHiuDYOhdKg3iNz54lmSFKB94xg4UhN4b6zXZE90IXH/Sv/guUJyuvGQMs6StBgzCyao12pPoCpfoT+79fuJ8sjE6mHfwtu6L/vcTiIHB29axQodusfqrfO1Dx0XN9/IC5m3v87WYIPTeVaunK/feFTIzFFU2OKW1mIG7avV05e9lNMnPq3QqHBNgaD/BLnK1+4nWf4xvvGEWIsmDcFmy4MAqV1SQmKLLE9EegopkGUSmZnngBrVpWiTsnhuG0QsKc9+NUdtCibrrRunP9MoNEcfKSGmt9EQ9MYa8+Ln/YrnQgc9THp2oCz7xXyBuYuEf+/GY8ANTJEnsZ34sO4asGCxWT+V4FegTkAhG6yLyp+oi8qfZRbRCq4toEtFF1lWhndPnAlDuQQ4WeW/9N9z8mva7u/uGVard3r5A3P+GmV9HbO4wwc4NR+YdEctiSTB7jFMiPLFQsqFnlTGrW7NEWF8xn9uXaPexL8EbOS7RHmBLJaBxjcQjuhyUZ+Xe9pAcbrjjAgiaI0FECHcZB2Xl3v1R0PD9gKmRHI3cT4EG76dAcL+7wyi42xgkK/fujUDgTre8GLjJgDQr9277pVD1PS0NUcvzpbqjdFLwYbD/jWCww0mMng3J6vK2yO7amghrXM64fYmra4MIRzwvmipiquYhOVRzf0DeTS2PRlDaVDNWoZh61tDsxxdFA5kqgMFSnCc8MnMHGalYJf2ckj42oc086zBtgjXQB2YyZYyB7aUpauaZTJjTlQHtTw8IhT2koBqPc9p/zoe9dEiuFEnI52x6/PGjRMYTybXwRQ8hlzZH6iIlQlJi31VtzQOYNm/SLRtTca0Gp7S9NrClmBOpga2VmUXpvh+ooW47UKPi9mEe98Qpc7QgBtf3q0rZ4J1A7E81BQlok5g77iYljlRT7TXtXf2Q9s69B8s4HXpuFLdXf9YTs0wlBzh0PLwuDsKHw1e3DzGCa5/miwGcoKQfeiCRCevRaB3tY41D2yfrOel20MGHMvKg9a/0jwYd1T7F0z6K5s77Q4axLTfaP5BTOiZtn6TXMQ9FzgV3mjQBwXwoi1UQ7W16ryD8kdoaPHJ/g7V5A/rFjgZTmQN8dxPy9m69jwhpvrn9zL1JKUpd0wRmgOuNXsS2Ve04Xcch3kQD/W7Qv9yXC0/Jg7A3o1vXtzd64EmdZ81IwzD/zKRgnolAFztmJvNq/8xk4vz9vU0L2EJ+64YMP698XE+b2E87DPNPoxKGwWaDT6MQjmm0V4d/Gu1B/dNoBx18KMc0ql/pn0Z1VPsUu26U9wkcGpu6wj+XKYR/dhBEmTBFaPU8G0kdaa12w5kmxbTmr9IORMQq1wDuILOXXPFG0kSMTnCUC242pfVa+fuO60gYtK73y4EfxgFHr7QNs7w+KZFfGy7ZdIvwMo8MX27dkhUlKZEw7IZLgNXdcUla8jWo1HktSm73JXCeNYcUgzRjW34x3npA7rvxofehD0cf+lBIbloSyK6IRB5Q8Y5HaNTtq8H5CUCIVW87BEa1ritRYCW7bJNjil530yeF7+69FB8p9El1c66aiIaR+Cg7YygYR6NVDb+zq+NpUkywaXWsLKkK8Kwjy4l4ztt+uaPf6mJXv9Xlrv7RygVdqUcIN/ZdiHf1CV3dPUtyz/gWkqGhIhCuj9AlWMW+ddsrxRs/8op7vevBKBSb7v4oDPrXeGWuLqTBXINRLgAlKTddAjkD3HTI2r7pqhHbupetFhLVYn9wS6DtN5wS17IiRfhS1rN3OZQ4qzfcMngMjwiew1Oja6FSMnySOx4ZDl90H7WaS+TRdTSKELhmWDP1LrS3tRLHmOKwv3BDOdzJUQzv7KgFb+8od3UlLMf3tAUJl3OEXRMI4M6uC1zLFgp6o2x7AIS33RoAQPMNVeB8UwC4phghwDawJCIXMj7NuksCn8UpcExIQtDFbjpvhc133yXptd+dIRQ+8vYQAlpwsApsqbuDCH+T4cUbTgleZLUNukki26h48lteMbS4X+podk2KjesX4zNv+cX44MYgROUZLzsvinMZO/6x+om/jGSvx0tW8dH8zgplp579RAcd0WVn+o4hM1Qvoe7KePkQz4bx9uMYb1bT9DBhjocYQbneX6HsGxrpt+sXguSrctxzHChv+9ADtO98x8Q5bjmAkPfathGD7Ym+ma4bjaDkzQIXSuxTkcq2/XPHBRxseGADWKk9NeBgUvAW58ohvQLS/cod0r65/ZDTlKWZ49ajOHnjB26cfVsTlhVpmrkSfo/B5E3vO2H2PR+bKJqm9SLJD52DZiWsvPsjP3a4tRk4i4BRZqS1HThna7e4weTqvRTb8p73HKDBrgqYl8jYNzbr6MjRZ3u5yrO9HMlFXuXxrqO97vYxgxNPxWY0qsemaIUafCJ4/bE3szGupxaYwY4FkH12XI51LBdO3nLfg7Msi28Mo+jbXKRbK10XKa5FSbP4wI0a7J/okrtMs8K1xgY+5OBMJYFjM5UD5pqpWtjgEoOoXKSEtqt77AG6Frfep5fY0a60527B/hs722+nB3O03jBI3rA3VBxzfL/lXlhP75qfnEBvEwvgak38wtkm/V4wqtz0Ud6OvIpyo4CjvX2yWjeeuLpxrzkm7m8xivP1uMlqPc6lIPU6k2NpMppW89of7kxOoEsl1ID2nY0Zv3QqZEMQebc7PchgU5UpzYqxwdkDudpTgga7PWJcc8EIyrUAK9T4DV2qygjKe0NHjzGrWiTu/j6CcrboInG11SDGU4+rCQYxLi1EYOzXNzThkubzRgS8O+64ClTeOPRCByecksZxyjAma7DbFxX61g13+x7I1bgSNDinFiXL3TusMZhr6m1hg4oQoGhC3J1xBaRrpdGRw81rK2DO5vVoafccoEEtGzBj/dvGuPq3wIy+mGssDYN8Lza2Nc9ZQaasqh03HMW5ls8OZ9/2uQnLiroqcrIgXq3nydAFgx2zA491TDfS1TF15EiLCuB4i/Zx7hZVuOHb0nzKkvmoHuTCOW/b4gbtHWa88rC9w4d12TtM7KAek5Wu3jsEcekxCBlceOBfIPB0j5ZVoK6Fx4AOfuEMGBdp6lqLH7hxg4Okyy8yNkjcSJf+oiPlTruv8eqg1Z5w1GbpRrqGsY5c6ebPd1e9+XOXZcjZPIAcbZ7nDiPSAxsYla61/KED5vrKozh391K4wWUMgmhHl7EeyP0CCHItEfccuEHdOWNp2ri0pBGU82tKlH3DKwaIlmWSz80LaTalo01jg1x6GoJG9x59lHNk0GS1sx4n0PnhOuDgWY+i8xe1pSnG4jxwInplzoqEq4VoeR6qlHQPnmyTb/5M/vDNH7969MQ4KJLT8pZdl0j5hhFf4KFgjHrxt2fDsNNDjulqEjTYefHv/bGv3Ue5Oq9CDdom0pTG1KPfjwNdXUIDjrVZPDpEeiBPw8aOhjW71yzzmJDGYM47zpwL1iDGNbhTOm9yVyOMoJyfW6IGFRwkRhYRxWMKjgfqeg0Dqq96oRc1+LEEffPoqZ4D5n26w7FTvR+TnKKKRpauGn1YVzdYCev6hD+usmr0QK4OKkGDG94faeKySA5iXBtegRkc6wAZ1RR6IPeLIWhwThNhsKlz+D30AAcff3Hi7hQPHaBRHUbiBjXTRZOfNDQnzvOiFZCu7ZZCumfBVaCuvY0BHdzbzKtiyVaw4rtwLiW1ww328nlVHI71chvj6uUCY9/qNyZE0rPIUNlTvzAInw5d2XvcFdEupc9G6/PzkyHg4ELSgV0T1ipQV28yoCvd391RnM2lQhVXa9w+WtbtbDOFHlzWWtKxkY5d1jkrjsdWPwfMtfq1sOFRUtajhnuBGX7DNBNxTCOP3oc5e4OCuebUO36k/O++EzE8R6XZvmeCHMW55twO53oFu0323bPoPRs2Op1ZGOfHRIx9K8NzEbmZOtrh0WFmwweXVESPaQQ9kEsjkKBBJ0+Zo4dynkBOIZdxb2W88zv38HpH7LeqAR3cEAr42A6hj3Kplwo1PIQBtOcybY/BnLOPgo2/5KjlUaHGqxo1l/RR3huOKZszmkZwZOCyIY4DXYqkBhx8VYEbe9U+yvWqCjWolbJjWuS9JdellbqRLu1ERw6+rQCOvW0f5XpbhRocCALkGnpjMNdAaGGD6w9rqmKVozoXzqVKdLhBZYpVecL2yYsVtHgFHX1CB875hC1u+OvTecpGXT76KNf4Uii8y6sZTTl7LX/tuHCD61gMjNtjS5QEDc4jGifh8DziBLreUwMOv0JRc9fsNQxyvqcADX5JkZx27Ev2Ua5lV6GERiWYLrq/H3qhAx9d4QYHgWLtHRsELpxrEHS44S4iYa45aRzoMmRpwFGnRA07uEoo3N7okZ4b6dpm6chRB8Ue2HUEp4MG7YIKOEF3oGFbnw/rWvha7Kof09VI7ru/xcd0vL05olmUjG03bIxruyEww7eaVq497yDGeSvEDA6kqMgyYK0fPQdzAl1zrQYcHBxRsWAV85xErIB0DQ4d6frwgQ88qP5I4Jj644C51J8WNrg2RMV86XRwG0G5dDyFGukIMeMLlrrMrONAd0dogYO9PUoTV5DFIMbV2wVm+EsuaD0f9xt0wJxfUsGGG3ZBM5Yy5/ZkHOhs2A44qM1M06JwveswyKXNSNBgj50mdc5c6voIytVjFWqw33i0/psGhraxsch44xNCBDW/7RG6DHJTmgAN4wqzlxvpWgd15OAmpQO69gGrQF1WKwPqmj3vD6NdB50GasV3ck20q0CHP9OYa+iUJtGioaMOih1ucDRQX4Dgjgs1UlVUJ65g7BGUa2Ap1OC8QauIjTob90CueUOCBudkWrKqblzHr2Mw15zcwobfcLaCO3UP5HzDmXO4rmsYiO3DFOvTZqZ4SKRApigXjMGSCiDLaNn6/mS0NIolX1dWpp/LYkE+XbGoqSpIGd5yhp0OA7poQG8NOcKejMGAPFjQFCCR3zAY2Q2QCM2Fg+TR0CDIeO6pS2Ek13JN747jbnsh7A2pMv/TsDdIdJsl+TiGHm8PYQ4ZK7eGAHGyHHzOaPhyGsePfHJZMq0YPYyLo3zgA6A3mUgQOYyZNWmKrLgDGOwVt3wQpJf+ypBqbHm+nuyABOHvx2sZQ7zwAQYeAIkOfVdpXXlnDAWddOIH+SQDd9e+4xhKfMmBZ+y+5TMnKD7W01/WXYTyw1G4mGP+ZRQ3AghGK5ATz54H6PvI8bGvZeAa7RPfGwHBF97yY3AeujMohwlkexARJ8vhW0QjFdA4fuwF9CeR516sR+BvSa27joBEb/U3d9dZb3sxOPO4msJ4kAGAeAhXY+sPIKmM0mLe5RFJi/nfGJPOModLQcsLZLq9+c4lbCdc95ViNL0cggzUPXSZvsiPAqHHN7z9SG6gHJBhH+Nsgba1TaQ2Am/75TD4NpxiHHfumru1f1hOj2/65DBkN33COFl6nynyX0bj+IFL1h+eTli/zPl22jDwy8UocLZ7NwgcnUD0EiCvQBbyILzhwuAg/a0lcWoGTmkQPnZI3dcE4bYT258MXABjMnABsB12nHKrIR5aIDi8IRU98iyYA7gRwNPRCvQRvxpaDXt7fuijzV2ACbTe9NNBzIDQnljMC/Xntb+MiZTPan9/STbfTT/299cBMP/YA1qx1cMEdMsrgxnEnl46aZws/dVGAxfSOHZ1Ndcs4vqazoZ3t9DAENIAYgjZ06Ek7Id54IueiI7MBTbCNWjsOkYAex65/+atjuS4xiPo90ban41GQIaO5AOJse3FWDOTrbHEQxpLrGss/YHobrD+FBqPrPDx8Aof+1f4eGSFj0dW+HhohY8HVvjYv8LHAyt87F7hnY89sHTHI0t3PLx0xyss3XG7dNuVWxO73YWdC4/9AvasbLXh0ITcsxtt+OXXeyLsRf27dT3IL6PH6y4Z9Jw1lyBOls77R244jeO7dnm/p/QeT+slbplzStZ7R6994cOVFVvKHMlOudZzrtly7DV37FJhWhWHEHilVOuSQiZGXBS8m4KM0lYFbEshurGPhVLMGuHAir+FfXjDj7hrieImy07MqzcHIGErw+5pv1Jb2M6mqtB+obawHTsmEv8Uz7Puk/9TCBRrdV0l8znQ0NMaYoQebfM6PjhYsqguqlcd9NmzZ68PDgjB/BMRQ1ZfwtPiCC5cvHrdqlCq3pJWHDPAwv+kalLVEZ2AdVMmkl2AIVx+ts4AhaMYRgaXCfDu+hF0Kb6iH4Lmf4D476MS7d20EMbPW5YQc/gBKzsnSa2Oogxp6z/OCcyYOeDsh7BwSb24ZiFEyj/Zekg/DNTJS2DfhaH87Mck/5EeHCxp2jDS5JA5Pmcxge7XKwvCbT+8PoFkeYEfAM8Kg7lOclC6/UBIZrukKcvrmwaoboAjub3VdVOoijfs4qJkFa2L6rPPvKI7n63borzI2ZuGpr27JPmyOGSOYs6qes0uXlBODtnJbbvcbIxNW0w54XWFaQJvOGSQMzkI7zkkRRUzSARcTH9kUR2EvfeiHGL9HM0EaQ/SgtbuO06LInVfRKuKntjfUzw8IJo8edMwsqB8EYS3PCDx5e54pF1/uOtBaM217YeIVhsAiJc0u7BoSG08qIIgvO8Bmr93PKiBhulAomF8VSQcLwd64CC87QHJHuh7WLMj3vGguk9ww4Og1sfRJN3HeeSH2B132w8Vn8kcMzBcuwa755SZr7rlxHQvuu2Uay/zwAAcHtFqrnUT+dt+lhZmfP6bbox4mW23sHtS86Mleb97bbgQova7LtFQS0mI1hBm95w1eaS1g/hp30eBjKfcdELEY7plYi7ecsq69rntlLcTgvkdcQ7Un1/8tr9jCxv4ji1GvMJtt1AtNDtu8dD4bEHax9jyIsSwMW8DZdrLip/2x1KggY+lIK7hp2Tmm2w7MdqLmJXgKjPS3i1GPIVHWBYlobWndmNG3XZjuo617gZQa0R2At9n0hHiM3nu3a23TySgyWl1QthxWan8xqd2Udf1+uBlwpN6yysWLXnfK2fHLGpqQRijxpFQ09KkZhVNDw5Ojd/dZ7Fg5mxkCfXbfKwgxY+8yNWKUjNem61glXRrbA+KbXDbJzWX4J5Yf7TnLajqf5V+YfeVXRfgU90ZAIgHeziA0J9NaTVS4ek+j1nQNZMNNIe2LdVvddfE/FhAZptC5D1iGctrFq+1EFpjkfUVtHK9ZrVb4SVuWY327ZV1g8wBx7tt++XibdUg42kSMet2VlE3yPpgY5D1xeYg68tdg4zL8wvZSKfG7252tmD4IDfdMnMAWkLnRxBebWar2GXaR+jDzY/Ql4tHeuAHuAZfxepFVRzlhB1Dgh3xXP3C7uNWNOEsNuFWUbfZLKsCTBD2GtMWu8aBaegwWnbihGSwpa+0NyW0mjeA1zbO1iU0qoqu3gdOEBbq3cT9hLOi0kBuSJLWxhN2zWkCoyIraZXwIjfA113gbusl1f1ukjILuknKBpqTlC11fRyJcU1S6iZ5UZT9kaKGQe9jHRyc9sq6YeCAG8PAITeHgQOgv5daEK0OAQ9llnSN2IMaU3FPai6IPbH+MOozp+wYvrLK/nTNLE44OSqqeL1XCqREc1b9XgoO2Qng2sFgtvmANAjDVarA1360ClI0wfNVoHpzqCaV72V32x2fWK/j/2vvO6DbKLp/p+/MzuyK9N6bnWoVt5DeK4GEECABRbZlW0SWFEl2CqEHQq8h9Bp6h9Br6L33HkoINaGGFsj7diXbsq2VDd977//OeWGOifbe370zc+fOndnZ2dkGUGWTxs28bLzfawqy69cjK6vpAkxTXmbu9V4aqghGkqHKkNVQRzZeNK4dZQJSyvtk4WSqri9Yk+jTbMhqxms6ZDVjZupukLdvhxzmnM2YmfL1sS0d9jIN35zUOA9oCW4yD2jJbjoPaMnPLFEzLY7hJAu/aTjJAsjMp2MaVhGsDNSGk377fqTeT6xF5lDEXkVrVon8HIhEqCpiGXhFtbXYOCQHMtusw3q90OpjmW3QgtY4s84CT5XQVQ8IxBLWCn7XjGsrUjXcqeU1MMLhprk2ITTOBZoD7fbo5cBsOmA152YL7DamSeRrRmkM7C2gTQJ7C27TKNSCnS2S2U8YW9ZnsBO7adsPdIJl8/SycCCyLEt56x2jLNTynqsFrTEMZYE36ThZ+E3bKnVPnl6OaDZzGNwE0ziNaXLd6DHNYE3DUjNmpmlcoeVufyIaT/qrg+FYMD64ylosqElUpZ5axYPLR49uQcrLb4Qtq0vUWV/IzIDVk5rC4stbwFKkprBw80zrSXn5naqqaitTnwW2z5m17riC8W421T5zNkVo2Cg7vKqqJuxfESyritX6E9U2LxwqS28PiCXKA+GgPxaKBa1jNIfmBNsNWQ8dkQuaqK3xx6MrEm1EJ2r8CeuBdpvR5dFIXQN6ZE50NFwXtB69tlF5tNI6A3hlG9HBZNNq5rWGbpOhm7ZJzhLEoyv8kWi8pgGdnxsda9TrzomsSaT01tSGGySG5ZQIxoKBxgoW5MIurw1EkqHVQf/ykraZLhaoaJtmq7g11jfWg+UNAt62CIQqmsiMaqNMPb6ojfiqQLLa2gLQljaoF6sMJJJtM1NVuLZtblPV3HFz2sg+v8QfSCYjbbdRhkyb3Ke8tsYKGm2qZnlsVRuVRiPlGT6ZE5sep+qxOcNmIF5ljxb1YE9bwDXBeFWwbWUJxKsyY1BubEVFpiN2zsQ2Ol73THLT9uxis6yGrYgm/cnlHn+B1S9nN6e70/TOTejLS1LkgmbkIv/sbOhCJ7LbIrtbkLPq9mVX4suuxJddiTe7Eo8TOauStE0KmtoqUlcZ82Wh16ysp3dtQg8t9/lXJuxsWzIiYVuiWzOG178yLdKlBSdFby7haZBononH76DK489OdzvSa2x6uyb0skp3UQebkqy2Jicx6xlVJLjCtGmRWmvvVCSUVPZlKGFTBtgXqc1q1tJXrb1FqDwaqbA6aUpPRxtTbjl0zOvxJ6P+kNfTqQXR+rdnippWVBmNrwjEK+xZQaXX08dm1n88vb6brYqUV8ej1irLwKz8YDK9/csfsLB9s4HiwSo71FofR8/LBagI1lmL1eXR2kiyf+vALg6QrtnoVub9sjGaWDerqPXZ9sHZGOnyJmpjsWg8mfBHY1mr1xxmvbid1ZppYGrjYzSWGNAKyKrToFYwqb2bQ1tBVQQT5fGQvTjdGrSstrIyGPdbdxW5KhGss+6TI8EVuQqYAln2zWq4jKwa6ju8LUBr2EiEVqfnxK2AA+FwtNyGj2gbPFQVse7LWi1JSnGKktUKaXBjJ8plhZpgTSMwl7qqBlRW/8lAWYeSZHXsNMZqmPTvrB07DUu9/pgVkL60AlvTItfUhpOhLPn0cUbZ2fRqyg8mA5kxqn8WbrMIlQVS1QzSPTvE8r7OLVlW4Qe2JLeMDYNbB1mRYZAjLL1X2mZkqUbz6NEvJ8SqzYCciFTkGJETY20izvT5vJzojCiTG5ih0dcS2Lhd1YmVxYaZHdPalhFNJLM0SLaIM7R1WH28Gd46tDHaDGsLOB1rWilDZqTJ0qgt4kxvR0w8mAjmMEyTIJTF69Mw21OzxaBMUGO3y+KpzaKUc1YZscO5VnboyOLJKbuVJ1fWn9iSWkyyumHPJujy9FzH+rBePFjZJyuzcV7XOys/kkY0G9fr2YEy6/6o6YJVJiYejFl74LO5aEFbwJlOkt+KQGMjD20FmdHUg7JAW07sWtquKapvC35qhhYLByJ2a/fPBUgdgdPSwJmQ1FSvZRs1mQn2a8lOBdZy617TWsTtlRVRGQwka+PBRKcWXKvsLQvWcpxoacbWJ5AZqMxRomUlmg8SLY3ZYgQYmQsSXJmM13ezhO1nQ3LBM0aAnLgMv23ZEdK4hgAQrUmNQ7FkFr926gEtK97C9Vs2RLYo6KioMb61dOlm4a2liTMrF0s26+4tvahlMHQslrVslCpWSwfODJfFFnf06PJYrbUJxury1q4we5aUjAdCycSYsnC0fJl9W556WSeFmvCP5ZrdkLY54yL/7H+VcYPcv8248F9mXPjfZuz7lxn7/vuM/10b+/7bNvb8yxp7/ssaW4tU/ybjRrl/mbG12PVvMm6Ua5axO4uCzKhth5bRozMGoGxFzSKRcduUKkn7qmDEn7SWteyHvaGKvPyOldG4tfQai0drYtbTkXggsqxTmhiMx6P2jDMWjSSCA+upje+f1bP80UDI3vmVZJU1SX9lrFuwZkVVrHZeZFE0vmxKNBKcHLWello7Qes5CyPlgZg1EldMtbLpXU+fH1xeG0wkp9hjSINYn2bsiak32xr4DRnODcQmWveIDZwe9ZyUxjnRRLKB1zXFm2zPSRbYK9ZzoxW14WD7TEZKsAlpkm3nHsGa1GgZjFhPs633H623/EI1oWSiZwte6vGBfRZav4pobVk42NfarRCN+K2NzXZzjUnRx+Xld68IJoLxUCBsPX5K7Zrz1wXioUAk2bEi2PBgynquZi+FtyS6/QUdmhGtiN6CVuSf3YJWmJXmzkJrqc+XRdaXRdaXRdabRdaTldZS1t3SCPYCd3OivbrdqRkxtbSdjRoJd25BtRe1m+u1V7RbYu3l7JaKrbXslho8/ixEd3ZiTZ+KYE0gUmWdd+qvjQRXxoLlyWCFvzoQqQhbW7N6Z/CTwXhNKGK9wNrA/jvtfLFglT8YS4TC1m/b0Yb3zWAlkgHrCVJLhjUlyUJOb1zIqsrqupHyYDZeeXU0lJ1jPbBNhqwJaTZuIHsprP0ZWdGr6sntaiPW5pRgRd9wNFI1btzgfAtohQUrJ3vnoj9am4zVJu3dQVYXXeIAaPqGdCOolTekmwIHp4uZiAXLa8OBZKguaC2cJav98UAyaIdaa4vAgCywxk0WqQNLuzhg5maj18TC/oi1l9mfsDe0pLdXtQbLyx/WNm0V8UBlcnpubE20otVsa6IVefl5bdBjZ9gWYFmwKhTJbwMwUG5tC5/dCjIQ8y9rvRYWKi9/aJt02TVpG9SuSystkoamatOK2vRZDHYJZrQJ2gbQCCeMnU2Dx1i38MFEwrE2TdH21ay2YduCcjRMCmSfkJ0uoaOTZUBze2MGMLc3ZgBT7TcqN7L+Az4NLx+0Yvt6fLpmbdRef6hWsJW2qse3pa3qsW1BtTFb27TD24ZNWbcVa9V/KadtnlqPtq/aiLWL7HXAOkeZvPz+jjINjTWkHlJeHUydHFEXjCet7dl+e0dk/cEfg5xx6cHIWmnNd0al9VgPt63TPnLos4br1P7bRP/UB+37lkcjieTg4ZlT5DQtv2O9ooDVYa3VkGgk2C1NjAdrosnUSoz9rCGS7NXACSSiEWs2VFZbkdoKlggmezpxrXUcR6a1juOo1y6PI9c+yaS3I9f2vx6Zc5Z4MBJomIPk5Wfh2WO/xe2c5jUGfNutujYhp89tshj1uqwTS+t3fNevb3szLJ/aBt7QKRtJYxpnPtYkpkOTG5r0ERlpWvNZSvc03WqleNTehpGMxu1tqwPrWdXWy8zxVbY3p+6FrMNsrOlUsmEmlAJFo+GEP22jxrvRfi0xqdeUGhDdmyDSqhN2YftlZ6VOorE363bKRFjtYSsf1pxaE4qErAdQNV6rSWKWx9t2CCSS7hbYNMDa1Ji6+bPsEwhF7Pu/cG2wh5NETSDW14lXn92Q5oD0Jzmb4wqa4+xDmewXt1Ylq62ul1xlHc1Sv5SQaJFzo0AwXlObDJY6AlLnPdntlmoh64V9e44dsg+y8P4DyXAgaYkkmvhGyt1S/rd8RTDitb9UE+/vhGlsrr65IOWxmsI+ToBloZqQf5nXsRxVoaqATazz9nbE2G0zyIld/x0rf53X72lS0ppEVQs/H9AM4K8IVVY2LkVZV4lBLTBBey0jGE9kxJ+B1nd30l9DsDqr1RItSD1sSqgmUBW0ti5Z75M0LGekeKlnOauitcnauvovBuXld8vkBRINnyDNy++TwVlRHUrErJdYIuUN/EytiWQw5s3Q2j2TF6pq/G5QUzHbOTLEBjTnJZMJfyK2LDPbodkwVcGIZdqKYOpXGpqfE+pZEairP70pt9IUMq20ryM0S91tQMCx7p6Mug/M4MWi5cuCySyVdwAFA40f88nL75cVlFnEzHLEQtY6ZmM5embyAvHAsmCG6l5NmBUV4aD99bk0t38GN2LNCuLWqOXxZ9Qy03o11qPjqnCopiYYz+p1NdGyUDgYCSbrChv4vTP5DXEja+nTMaMua7VrQjXRhnL5a2q6O/GaZ1kT9QdqK0LRrD0oHA7UBbJ6gn08mC8rywpdGdn1aMZa5inMWj3rJcZ4JEMws3GqayOragOZ3MzGqf+SfCIWDJZXZ+1+aYjPnqFGI1lra33XO7t1U5G0Lmu5U7zanMzsXSbFDGStcPqbt/7CrJLWx0IzPbVPM5796VJ/IDs/HfYz5ftm53uyFq08GrEW8jOcvHsTbsa34/LyOzayGp1zgTVFT03G00tfZYFEqNzaJhBcOcZiDrfJ9etfqaEo4+12azVyTKOS1MwxECkPhq07gVBlqDxgTQDap2mBcvs2pjy5MmHYDy5WhJLV1mUn+ypZHYz4K0ORUKLanwwklnWzqWnZFNN66lqeXNkjzUkfzd+EF7DOYekbCUerawKRyOjR9rQiUBayhle3x19gxeZkIBSuf4d9TCM0Vc+EtRPermmqKwTCzSDD7RzsF6BSx0+klwVT73KNaViPTPwTcPifgEP/BFzeBnBj47cFnNZbHbDAA1sBV0fjyXF5uUHWym1q+bZ/bmAokmwtQ/tt4HGDcoPSj2cG5EZZ3HFDA7XJaMNxB/ZUO5I6fNC6Fbd/1i93F2RCM39XBJPWWQW1idR7wdbLGYH4smC8sBWBQCIRSiQDqddgG6QGOkml+nXqqqnqSCC8anVqnp9IP2IsTzZO0FN6E3n5e7dBquFt+dQRRw2yxf9ENhG0JgHJaDwvf/Q/kbNu5huzdLdNNNEoMSKHROZl6m5ozD9B+9OPVSPp++bx/0bYjlYRe7mnLfIZcHtWFQ4H00XPy/dmk29Yp7Beam1Oy8svbUUmdSpI0J+sDkWWWasdwYh15FZFXn5JGyUbF0oS5VHrddmsLpdT0Bp+rMdPefmjssmmV4syKpim5OUPz4lvRugTiMWaHC7T5Dovv6M/48lwMpy6m+vShGhvQrTpPbPQ7RHLOn82m1BwZSjZPQu9PB5IVAcruvlbPJaOBxPJaDzYpSXH3o3VL5Mer7V81G93/VC97iY6y6uD1iaLQChcFl3Z3u9fEUjUpO+Z7b1q7dKk1EicjMYTht+fSFbUn5Ks6q+sOUzDhZVNA648HE0Eu/j9sXTVEsFwZcOY29XftB4V0dqkrau/31++cmWgLFTntjp5ujnsnVSR2pgd04ZkQiqCsWCkInW6RzOwNxPn99fVhPzl4UAikd67HKmMWgvv9scBy4LW476KRPIfyATKonXWuerJcW2QsU77rI0EaspCVbXR2oQ/VlsWDpXbe9Y8TcUTbShl20UaCjm2dZEcZRzaVDoWtdsxU9h637rc/hRZU2hlbaQiYMX2QDgrfFRTeKtVbyO+od6jW8HnqHReK6INdehpA/1V4WhZIJw+FLDCWiQtLS0tysX05GCWlORgFvtyMItySRblkizMVSBvLrXeXGq9Bc7M4qIcFvIVep2Z3sJiZ6bHW+jILCkocK5KcWmps2Rxic+5nsVFRW5nprvQmVlU6nO2UFFRDvMVud3OaguLS53NV1jsKXVmFvmcPaHQV+hsvkJvSQ61BcXOtvX5CnIwvSXObuItzVEVrzdHY3sKi309HJk5tHrcOTzTXZrDeu7igoJejkxfQXGxM9dd6vPl4BaX5JItKi3MwS0sLXHmFhSXFuXgen25uJ6S0pxcby5ucU7ZYk8ubmFO2UJ3Lq4vhyULPL6cZfbm1OzJ0YIFHndOS7pzeE6BuyRXvu7iXGV257SGO6c13L5creD25vIrtyeHTxa4PTnrW5BLc0FOjy3I6ZMFJblKVZDTkgVFuSxZUJjLkgW5endBgTeXnQs8OTV7cpbZnZNbUNLbgTuy1BrXfN0d2UXOLI8zy+3MKujmyHIUKilxZjmXvcTrzHIuYLFzMYqLnVmFfR1ZXmtQKMyh1rmcxTnK6WzI4j5OnCIr1hcWOiotci5lUYmz1mJ/sTuHtYtyFKjI7yksdTuN4COLipy9rKjIWW2hVSKPs9oczVGUwzw+5xy9Vo7OzVWUwzweZ61uS2uBs2iODJ39w9luhVY4KC7Nxfd63c62y2HWQmf/KbT8p7jEsQcVFls9qKQ4J6CguMS5exbmYBU5qy2083X2h0LnXl/os2WdW73Q5yzr9bsLStzOQa/Q6yzrsfN19otCj7Os256+luYEFJS4nUNuYY58nf2x0NEzfLY/Ovc6n+2Pzo7hK7UL7NyBfM4O63N2WJ/tsM6N4LP8saTAeez0OUdEX5FVJWen9BXZup3bwJdDttCWdfYAG+DN4T0+587gy9FMVnAsdjtn67XvUJwd3ufcj3zOA4QvR44FdkVzOIazu/ocJ1Nef0mB2+1oBq/lzTmGWG+p44DlLckh5mw3r7Ofea0hssg5Lnqde6XXas4co6/X6y/0FZU4V8breMs+0ut1bk+vsxd4ncdQrzWG5hjUvc7e7nV2AueieJxbyuMcUjxWSClyDimeYmsBwOvc7T3OTe0pstZtchTLOVB5nO3myVEWr2P7ejzO3upxbkSP3YgFzmpzTEo8zmHAbY0P3mLnIrmdB0N3iS3rbLscA7jbud+5nfuVu9BfUuBx7pduq0sXOo+G7kJrianU2YruQueO6c4xtrudvcTt7NJuj71q5Rz03J7iHLzCHDxn13Q7hxe3822Iu8DrGAncXRw47S16wB+rjQf9daF4sjYQVilSIGk9PBzknz5n3qSJc/z+RG2Zf2ZqM6i1PdSffs4ZH1kei/VbNH3fhan3Ymem3khoSsjLz2+OWBQKh6fEo7E5gURy6srU07r5wco0MvVCbStIACBAAAMCKKCAAQo0wAEFAlCgAwkUMIAJKHDZ/L1AO0BBe9DBvuoIKOgEKOgMuoCuoBvoDnqAnqAX6A362Py+oB/oDwaAgWAQGAyGgDyQD4aCYWA4GAFGglE2psD+vxt4gBf4AAWFoAgUgxJAQSkYDfYGY8BYMA6MBxMABRMBBZPAZDAFTAXTwHQwA8wEs8BsMAdQMBfsA+aBfQEF+4H5YAHYH1CwEBwAFoEDwUHgYNAVULAYLAEUHAIOBX6wFARAGaCgHFSAIKgEVXY5qkEIHAaWAQrCoAZEbKkoiAEKltv8OEiAriAJloJaUAcoWAEoWAkoWAVWg8Pt8qfSGnAEoOBIcBQ4GhwDjgXHAQrWguPBCf+x7zpw4n/se5KNOxlQcEpa5lRwGjgdnAHOBGeBs8E5YD04F2wAFJwHzgcXgAvBReBiQMEl4FIwBlxmS1wOrgAUXAk2pjVcBa4G14BrwXXgenADuBHcBG626bcACm4Ft4Hb7as7wCZw538sfRe4G9wD7v2Ppe8D94MHwIPgIfAweARstlGPgsfA4/avJ8CT4ClAwdPgGfAseA48b1NfAC+Cl8DL4BXwKngNvA7eAG+Ct8Db6ZK8A94F74H3AQUfgA/BR+BjsAV80mCdT8Fn4HOba6Ug2Aq+ANvAl+CrBsTX4BvwLfiu4Xo72AG+Bz+Abem6/gh+Aj+DX8BO8Cv4DfwO/gB/gl025y/wN9gNAEzJQYgghrRBD4EUMqhBDgXUoYQqzTOgCV1wL9gOtocdYEfYCXaGXWBX2A12hz1gT9grjesN+8C+sB/sDwfAgXAQHAyHwGXABfJgPhyaxgyDw+EIOBKOggXQDT3QC30NJSiERbAYlsBSOBruDcfAsXBcRulSaTycACfCSXAynAKnwmlwOpwBZ8JZcDbcvXtOA3ou3AfOg/vC/eB8uADuDxfCA+CiJroOhAfBg+FiuAQeAg+FfrgUBmAZLIcVMAgrYRWshqEm+MPgMhiGNTACozAGl8M4TMAkrIV1cAVcCVfB1fBwuAYeAY+ER8Gj4THwWHgcXAuPhye0qAEF6+CJ8CR4MjwFngpPg6fDM+CZ8Cx4NjwHrofnwg3wPHg+vAAuBRfCSlgJL4IXw0uaaRkGL4WXwcvhFfBKuBFeBa+G18Br4XXwengDvBHeBG+Gt8Bb4W3wdngHXApmgIUwBHeBTVnKUp/uhHfBu+E98F54H7wfPgAfhA/Bh+EjcDO8CTwKF8LH4OPwiWY2yZ6ehE/Bp+Ez8Fn4HHweBsEL8EX4EnwZvgJfha/B1+Eb8E34FnwbvgPfhe/B9+EH8EP4EfwYboGfwF3gU/gZVA6aP4db4RdwG/wSfgW/ht/Ab+F3cDvcAS8E38Mf4I/wJ/gz/AXuhL/C3+Dv8A/4J9wF/4J/w90QIIgQwigECaKo9To0TQxpiCOBdCSRQkFgIBO50F6oHWqPOqCOqBPqjLqgrqgb6o56oJ6oF+qN+qC+yAX6of5oABqIBqHBaAjKQ/loKBqGhqMRaCQahQqQG3mQ9x+Xx4cKUREqRiWoFI1Ge6MxaCwah8ajCWgimoQmoyloKpqGpqMZaCaahWajOWguug3ug+ahfdF+aD5agHzAAPujhWgjOAAtQgeig9DBaDFagg5Bh6IQ9KOlKIDK/nG5ylEFCqJKVIWqUQgdhpahMKpBERRFMbQcxVECJVEtqkMr0Eq0Cq1Gh6M16Ah0JDoKHY2OQcei49BadDw6Aa1DJ6KT0MnoFHQqOg2djs5AZ6Kz0NnoHLQenYs2oPPQ+egCdCG6CF2MLkGXosvQ5SgErXQFuhLtAhv/ccmd01XoanQNuhZdhw6C16Mb0I3oJnQzugXdihaAp+Bt6HZ0B9qE7kR3obvRPehedB+6Hz2AHkQPoYfRI2gzehQ9hh5HT6An0VPoafQMehY9h55HL6AX0UvoZfQKehW9hl5Hb6A30VvobfQOehe9h95HH6AP0UfoY7QFfYI+RZ+hz9FW9AXahr5EX6GvkQd+g75F36HtaAf6Hv2AfkQ/oZ9tC/yCdqJf/zfWvmX6Df2O/kB/ol3oL/Q32o0AhhhhjAmmmGENcyywjiWWWGEDm9iF98LtcHvcAXfEnXBn3AV3xd1wd9wD98S9cG/cB/fF/XB/PAAPxIPwajAYD8F5OB8PxcPwcDwCj8SjcAF2Yw/2Yh8uxEW4GJfgUjwa743H4LF4HB6PJ+CJeBJeAyfjKXgqnoan4xl4Jp6FZ+M5eCmYi/fB8/C+eD88Hy/A++OFuBM4AC/CB+KD8MF4MV6CD8G7dx+K/XgpDuAyXI4rcBD7USWuwtU4hA/Dy3AY1+AIjuL/k5b9fzvF8HIcxwmcxLW4Dq/AK/EqvBofjtfgI/CR+Ch8ND4GH4uPw2vx8fgEvA6fiE/CJ+NT8Kn4NHw6PgOfic/CZ+Nz8Hp8Lt6Az8Pn4wvwhfgifDG+BF+KL8OX4yvwlXgjvgpfja/B1+LrcD94Pb4B34hvwjfjW/Ct+DZ8O74Db8J34rvw3fgefC++D9+PH8AP4ofww/gRvBk/ih/Dj+Mn8JP4Kfw0fgY/i5/Dz+MX8Iv4JfwyfgW/il/Dr+M38Jv4Lfw2fge/i9/D7+MP8If4I/wx3oI/wZ/i1WA1+Aw/AdbAz/FW/AXehr/EX+Gv8c1gI/gGf4u/w9vxDvw9/gEPAz/in/DP+Ar0C96Jf8W/4d/xH/hPvAv/hf/GuzEgkCCCCSGUMKIRTgTRiSSKpGJVCBrEICaxRgYXcZFf0FFgL9KOtCO7wC7QntTgGtyBdCSdSGfyP936//dSF9KVdCPdSQ/Sk/QiRag36UP6kn6kPxlABpJBZDAZQvJIPhlKhpHhZAQZSUaRAuImHuIlPlJIikgxKSGlZDTZm4whY8k4Mp5MIBPJJDKZTCFTyTQyncwgM8ksMpvMIXPJPmQe2ZfsR+aTBWR/spAcQBaRA8lB5GCymCwhh5BDiZ8sJQFSRoKgnFSQIBmHKkkVqSYhchhZRsKkhkRIlMTIchInCZIktaSOrCArySqymhxO1pAjyJHkKHI0OYYcS44ja8lacjw5gawjJ5KTyMnkFHIqOY2cTs4gZ5KzyNnkHLKenEs2kPPI+eQCciG5iFxMLiGXksvI5eQKciXZSK4iV5Mf4TXkWnIduZ7cQB7FN5KbyM3kFnIruY3cTu4gm8id5C5yN7mH3EvuI/eTB8iD5CHyMHmEbCaPksfI4+QJ8iR5ijxNniHPkufI8+QF8iLZBl4iL5NXyKvkNfI6eYO8SX4Fb5G3yTvkXfIeeZ98QD4kH5GPyRbyCfmUfEY+JxvAVvIF2Ua+JF+Rr8k35FvyHdlOdpDvyQ/kR/IT+Zn8QnaSX8lv5HfyB/mT7CJ/kb/JbgIopIhiSqgBDEApoxrlVFCdSqqoQU3qonvRdrQ97UA70k60Mx0GutCutBvtTnvQRagn7UV70z60L+1H+9MBdCAdRAfTITSP5tOhdBgdTkfQkXQULaBu6qFe6qOFtIjuxrtxMd29e/fuElpKR9O96Rg6lo6j4+kEOpFOopPpFDqVTqPT6Qw6k86is+kcOofOpZzsQ600j0pShq1kjbP7UiuZZD86nw5GH8AFdH86xKYupFZvdpEr0AG0AqcQQdyI2YkW0XbkQHoQPZgupkvoIfRQeij1Uz9dSgO0jJbTChqklbSKVtMQPYwuo2FaQyM0SmM0RpfTOE3QJK2l/9M9dU/ak+roCrqSrqKr6eF0DT2CHkmPokfTY2gROpYeR9fS4+kJdB09kZ5ET6an0FPpafR0egY9k55Fz6bn0PX0XLqBbqDn0fPpBfR6dCG9iF5ML6GX0svo5fQKeiXdSK+iV9Nr6LX0Ono9vYHeSG+iN9Nb6K30Nno7vYNuonfSu+jd9B56D72X3kfvpw/QB+lD9GH6CN1MH6WP0cfpE/RJ+hR9mj5Dn6XP0VnkefoCfZG+RF+mq8Er9FX6Gn2dvkHfpG/Rt+k79F36Hn2ffkA/pB/Rj+kW+gn9lH5GP6db6Rd0G/2SfkW/pt/Qb+l3dDvdQb+nP9Af6U/0Z/oL3Ul/pb/R3+kf9E+6i/5F/6a7KWCQIYYZYZQxpjHOBNOZZIoZzGQuthdrx9qzDqwjY7ATOwZ0Zl1YV9aNdWc9WE/Wi/VmfVhf1o/1ZwPYQLYfHcQGsyEsj+WzoWwYG85GsJFsFCtgbuZhXuZjhayIFbMSVspGs73ZGDaWjWPj2QQ2kU1ik9kUNoVNZdPYdDaDzWSz2Gw2h81l+7B57F60L9uPzWcL2P5sITuALWIHsoPYwewFsJgtYYewQ5nfTktZgJWxclbBgqySVbFqFmKHsWUszGpYhEVZdxxjy1mcJViS1bI6toJthyvZCWQVW80OZ2vYEexIdhQ7mh3DjmXHsbXseHYCW8dOZCexk9kp7FR2GjudncHOZGexs9k5bD07l21g57Hz2QXsQnYRu5hdwi5ll7HL2RXsSraRXcWuZtewa9l17Hp2A7uR3cRuZrewW9lt7HZ2B9vE7mR3srvY3ewedi+7j93PHmAPsofYw+wRtpk9yh5jj7Mn2JPsKfY0s+47nmHPsufY8+wF9iJ7iV1LXmavsFfZa+x19gZ7k73F3mbvsHfZe+x99gH7kH3EXkJW+phtYZ+wT9ln7HO2lX3BtrFt7Ev2JfuKfcW+Zl+zb9g37Fv2LfuOfce2s+1sB9vBvmffsx/YD+xH9iP7if3MfmE72a/sN/Y7+4P9yXaxv9jfbDcDGtSQhjWiUY1pmsY1oema1JRmaKbm0vbS2mnttQ5aR62T1lnronXVumndtR5aT62X1lvro/XV+mn9tQHaQG2QNlgbouVp+dpQbZg2XBuhjdRGaQWaW/NoXs2nFWpFWrFWopVqL9rzgNHa3toYbaw2ThuvTdDWoYnaJG2yNkWbqk3Tpmvv4hnaTG2WNlubo83V9tHmaftq+2nztQXa/tpC7QBtkXagdpB2sLZYW0AX0CXaIdqhml/bSragLfZKxAbwOdmCrL8NYA1cA7egpVpAK9PKtQqtQgtqlVqVVq2FtMO0ZVpYq9EiWlSLacu1uGbNzRNaUqvV6rQV2kptlbZaO1xbox2hHakdpR2tPQGO0Y7VdpDjtLXa8doJ2jrtRO0k7WTtFO1U7TTtdO0M7UztLO1sbS4+R9sFx4D12rnaBm01OE87X7tA+4tcqF2kXaxdol2qXaadji7XrtCu1DZqV2lz0dXa1ZoBrtGu1a7Trtdu0G7UbtLOQDdrt2i3ardpt2t3aJu0O7W7tLu1jeAe7V7tPu1+7QHtQe0h7WHtEW2z9qj2mPa49oT2pPaU9rT2jPas9pz2vPaC9qKdss0SLPpLWh7IRy9rr2ivaq9pr2tvaG9qb2lva+9ofem72nva+9pq8IH2ofaR9rG2RftE+1T7TPtc26p9oW3TvtS+0r7WvtG+1b7Ttms7tO+1H7QftZ+0n7VftJ3ar9pv2u/aH9qf2i7tL203/lvbrQFuzY0gRxxzwilnXOOcC65zyRU3uMldfC/ejhdo0+gq0J5PYR14O9KRd+SdeCfemXfmXXgX3pV35d14N96dd+c9eE/ei/fmfXhf3o//T49Ve9KetCftSXvSnrQn7Ul70p60J+1Je9KetCftSf+/pf58AB/IB/HBfAjP4/k8nw/lw/gwPpyP4CP5KD6KF3A3d3MP93Iv9/FCXsiLeDEv4aW8lI/m6+jefAw/kY7l4/h4PoGfTCfySXwyn8Kn8ml8Op/BZ/JZfDafw+fyffg8vi/fj8/nC/gCvj9fyA/gi/iB/CB+MF/Ml/BD+KHcz5fyAC/j5bycV/Agr+RVvJqH+GF8GQ/zGh7hUR7jy3mcJ3iS1/I6voKv5Kv4an44X8OP4Efyo/jR/Bh+LD+Or+XH8xP4Or6On8hP4ifzk/kp/BR+Kj+Nn87P4Gfys/jZ/By+np/LN/Dz+Pn8An4hv4hfzC/hl/LL+OX8Cn4l38iv4lfza/i1/Dp+PX+P3sBv5Dfxm/kt/FZ+K7+N385v53fwTXwTv5Pfxe/md/N7+L38Pn4fv58/wB/kD/KH+MP8Eb6Zb+aP8sf44/xx/gR/kj/Jn+JP82f4s/w5/jx/gb/IX+Iv81f4q/w1/jp/g7/J3+Jv83f4u/w9/j7/gH/IP+If8y38E/4p/4x/zrfyL/g2/iX/in/Nv+Hf8u/4dr6Df89/4D/yn/jP/Be+k//Kf+O/8z/4n3wX/4v/zXdzIKBAAgsiqGBCE1xY/+lCF4qtAVIooYSLGcIUpnCJvUQ70V50EB1FJ9FZdBFdRFfRTXQX3UUP0VP0Er1FH9FH9BX9RH/RXwwQA8UgMUgMFkNEnsgT+WKoGCaGixFipBglCoRbuIVHeIVPFIpCUSSKRYkoEaVitNhbjBFjxFgxTnRg48UEMUFMFJPEZDFZTBFTxTQxTUwXM8RMMVPMErPFHDEWzBX7iHliX7GfmC8WiP3FQnGAWCQOFAeJg8VisUQcIg4VfrFUBESZKBcVIigqRZWoFiFxmFgmwqJGRERUxMRyERcJkRS1ok6sECvFKrFaHC7WiCPEkeIocbQ4RhwrjhNrxfHiBLFOnChOEieLU8Sp4jRxujhDnCnOEmeLc8R6ca7YIM4T54sLxIXiInGxuERcKi4Tl4srxJVio7hKXC2uEdeK68T14gZxo7hJ3CxuEbeK28Tt4g6xSdwp7hJ3i3vEveI+cb94QDwoHhIPi0fEZvGoeEw8Lp4QT4qnxNPiGfGseE48L14QL4qXxMviFfGqeE28Lt4Qb4q3xNviHfGueE+8Lz4QH4qPxMdii/hEfCo+E5+LreILsU18Kb4SX4tvxLfiO/Gd2C52iO/FD+JH8ZMoZT+LX8RO8av4Tfwu/hB/il3iL/G32C2ADnWkY53oVGe6pnNd6LoudaUbuqm79L30dnp7vYPeUe+kd9a76F31bnp3vYfeU++l99b76H31fnp/fYA+UB+kD9aH6Hl6vj5UH6YP10foI/VReoHu1j26V/fphXqRXqyX6KX6aH1vfYw+Vh+nj9cn6BP1SfpkfYo+VZ+mT9dn6DP1WfpsfY4+V99Hn6fvq++nz9cX6PvrC/UD9EX6gfpB+sH6Yn2Jfoh+qO7Xl+oBvUwv1yv0oF6pV+nVekg/TF+mh/UaPaJH9Zi+XI/rCT2p1+p1+gp9pb5KX60frq/Rj9CP1I/Sj9aP0Y/Vj9PX6sfrJ+jr9BP1k/ST9VP0U/XT9NP1M/Qz9bP0s/Vz9PX6ufoG/Tz9fP0C/UJ9BrtIv1i/RL9Uv0y/XL9Cv1LfqF+lX61fo1+rX6dfr1+v36DfqN+k36zfot+q36bfrt+hb9Lv1O/S79bv0e/V79Pv1x/QH9Qf0h/WH9E364/qj+mP60/oT+pP6U/rz+jP6s/pz+sv6C/qL+kv66/or+qv6a/rb+hv6m/pb+vv6O/q7+nv6x/oH+of6R/rW/RP9E/1z/TP9a36F/o2/Uv9K/1r/Rv9W/07fbu+Q/9e/0H/Uf9J/1n/Rd+p/6r/pv+u/6H/qe/S/9L/1nfrQEKJJJZEUsmkJrkUUpdSKmlIU7rkXrKdbC87yI6yk+wsu8iuspvsLnvInrKX7C37yL6yn+wvB8iBcpAcLIfIPJkvh8phcrgcIUfKUbJAuqVHeqVPFsoiWSxLZKkcLeezveUYOVaOk+PlBDlRTpKT5RQ5VU6T0+UMOVPOkrPlHDlX7iPnyX3lfnK+XCD3lwvlAXKRPFDG0UHyYLlYLpFL5CHyUOmXS9hSGZBlslxWyKCslFWyWobkYXKZDMsaGZFRGZUxOy2Xy2VcJmRS1so6uUIewlbKVXK1PFyukWvkEfJIeZQ8Wh4jj5XHybXyeHmCXCdPlCfJOrKUnSxPkafK0+Tp8nR5hjzTTmfJs+U5cr1cL8+VG+R58nx5gbxQXiQvlpfIS+Vl8nJ5hbxSbpRXyavl1TLMwuwaeY28Vl4nr5c3yBi7Ud4kb5I3y1vkrXI5u03ebqc75CYZZ3fKu+Td8h55r7xP3i8fkA/Kh+TDMskekZvlZvmonR6Tj8nH5RPySfmUfFo+I5+RtayWPSuflc/J5+UL8kX5knxZviJfla/J1+Ub8k35lnxbviNXsHfle/J9uZJ9ID+UH8mP5Rb5ifxUfiY/l1vlF3Kb/FJ+Jb+W38hv5Xdyu9wud8gd8nv5g/xR/iSPYT/Ln+Uv8he5U/4q17Lf5O/yD/mn3CX/kn/L3RIoqJDCiqgbGFVMMaUproTSlVRKGcpULrWXaqfaK+sJbgfVUXVSnVUX1VV1U91VD3UX66l6qd6qj+qr+qp+qr8aoAaq+8EgNVgNUXnplK+GqmFquBqhRqpRqkAVKLfyKK/yqUJVpIpViSpRpWq02luNUWPVODVOjVcT1EQ1SU1WU9RUNVVNU9PVDDVTzVKz1Rw1V10F9lHz1Dy1r9pPzVcL1AK1v1qoDlCL1CJ1oDpIHawWq8VqiTpEHar8yq+WqoAqU+WqXFWooKpUVapahVRIHaaWqbAKqxoVUVEVUzG1XMVVQiVVUtWqOrVCrVQr1Sq1Sm1mq9Xhao06Qh2pjlJHq2PUseo4tVatVcerE9Q6daI6SZ2kTlanqFPVaeo0dbo6Q52pzlJnq3PUerVenas2qPPU+eoCdaG6UF2kLlaXqEvVpeoydbl6ll2hrlQb1VXqanWNukZdq65T16vn2A3qRnWTulndom5Vt6nb1e3qDrVJbVJ3qrvUXepudY+6V92n7lP3qwfUg+oh9bB6RG1Wj6pH1WPqcXUteUI9qZ5UT6mn1TPqWfWcel69oF5UL6mX1SvqVfWael29od5Ub6m31TvqXfWeel99oD5UH6mP1Rb1ifpUfaZ+ZZ+rreoLtU19qb5S1p62r9U36lv1ndqudqjv1Q/qR/WT+ln9onaqX9Vv6nf1h/pT7VJ/qb/VbgUMaCADG8SgBjM0gxvC0A1pKMMwTMNl7GW0M9qnUwejo9HJ6Gx0Mboa3YzuRg+jHW/Hexq9jN5GH6Ov0c/obwwwBhqDjMHGECPPyDeGGsOM4cYIY6Qxyigw3IbH8Bo+40VSaBQZxUaJUWqMNvY2xhhjjXHGeGOCMdGYZEw2phhTjWnGdGOGMdOYZcw25hhzjX2Meca+xn7GfGOBsb+x0DjAWGQcaBxkHGwsNpYYhxiHGn5jqREwyoxyo8IIGpVGlVFthIzDjGVG2KgxIkbUiBnLjbiRMJJGrf1XZ6yw/1Yaq+y/1cbh9t8a44iGvyONo4yjjWPsv2ON4+y/tcbxxgnGOuNE4yTjZOMU41TjNON04wzjTOMs42zjHGO9ca6xwTjPON+4wLjQuMi42LjEuNS4zLjcuMK40thoXGVcbVxjXGtcZ1xv3GDcaNxk3GzcYtxq3GbcbtxhbEGbjK3kTsN61p/61fzfRk7uX6l9A5sMi7YBZGrJpX0uqpfbSuagzOt6PY05NWq19NVLteSkfk2j0+hdxt3GPca9xn3G/cYDxoPGg8ZDxsPGI8ZmY7PxqPGY8bhRrT1hPGmEtKeMp41njMO0Z43njOeNF4xl2ovGS8bLxivGq8ZrxutGWHvDeNN4y3jbeMd413jPeN/4wPjQ+Mj42NhifGJ8anxmfG5sNeajL4xtxpfGV8bXxhnaN0Z/tJMsBd8a3xnbjR3G98YPxo/GT8bPxi/GTuNX4zfjd+MP409jl/GX8bex2wAmNJGJTWwSk5rM1ExuClM3palMwzRNl7mX2c68VWtvdjA7mp3MzmYXU9CuZjezu9nD7Gn2Mnubfcy+Zj9Tp/3NAeZAc5A52Bxi5pn55lBzmDncHGGONEeZBabb9Jhe02cWmkVmsVlilpobwWhzb3OMOdYcZ443J5gTzYnmJHOyOcWcak4zp5szzJnmLHO2Oceca+5jzjP3Nfczd+L5Zl+6wNzfXGgeYL6rLTIPNA8yDzYXm4vNJeYh5qGm3/SbS82AGTDLzHKzwgyalWaVWW2GzMPMZWbYrDEjZtSMmcvNuJkwk2atWWeuMFeaq8zV5uHmGvMI80jzKPNo8xjzWPM4c615vHmCuc480TzJPNk8xTzVPM083TzDPNM8yzzbPMdcb55rbjDPM883LzAvNC8yLzYvMS81LzMvN68wrzQ3mleZV5vXmNea15nXmzeYN5o3mTebt5i3mreZt5t3mJvMO827zLvNe8x7zfvM+80HzAfNh8yHzUfMzeaj5mPm4+YT5pPmU+bT5jPms+Zz5vPmC+aL5kvmy+Yr5qvma+br5hvmm+Zb5tvmO+a75nvm++YH5ofmR+bH5hbzE/NT8zPzc3Or+YW5zfzS/Mr82vzG/Nb8ztxu7jC/N38wfzR/Mn82fzF3mr+av5m/m3+Yf5q7zL/Mv83dJnBBF3JhF3FRF3NpLu4SLt0lXcpluEyXy7WXq52rvauDq6Ork6uzq4urq6ubq7urh6unq5ert6uPq6+rn6u/a4BroGuQa7BriCvPle8a6hrmGu4a4RrpGuUqcLldHpfX5XMVuopcxa4SV6lrtGtv1xjXWNc413jXBNdE1yTXZNcU11TXNNd01wzXTNcs12zXHNdc1z6uea59Xfu55rsWuPZ3LXQd4FrkOtB1kGt3q/8d7DrYtdi1xPW/AMvQzq53SgIA",
+  "compat": "H4sIAAAAAAAAA+S9+Y4cR5I32EDrIFsSKZ5VrOJRF8kIXmJlFdnqaoo9akmt0ag1rVEfg5n5BgHPCM/MUMXFOLKqhAWxC+wTLBZYYF/ne4F9jn2IxcLMPSL8MI9IcvQBDXz/kJVmP/fw8PDD3NyO//6LX/zi/9n5xS/+38u/+MUaT6uwjIuaZ8G0iZM6zoJZyfmv5vM0Cdg0L+s7ScJSFqR5xJNgyip+dBSWnNU8qHlW5eWHecFLVuflVsZPNsM8TfMs+LHKs6Oj18ovz7+r/Arimqc6AEmevx4E4SkLWJLkITyEn4a8qOM8O1fV0dHRkydPrgoENLPnXg+CMGHZPAhZkgQ1L9M4YzV/L+VpmBYfideJoiBOi+RakqTBvGTFIgjzrOan9dFROP1kmufJlvqySc4iXh4dzXkdHPOzF01WxfOMR1vxkydPXr7DT4vZe1VdJjy7Ipo0b1gZBSVPOKu4RmPhqyYu+S4+A1+k7bXPPnsRLlj5CKlQ7xq2Na6wbfG8yZsqKPOT6v5o+2ZJzuqX99U+XbKk4UY/I83zz+Nz4CGidypeBxlL+UX8VfJqwQoeHEQXwiQuRHdBN10IgugsY2kcBiGrZNm0SbBn9bKH0WXR3CSfB3FW8zJjyYFsSsHnQZPVcRIUrKzgNV47OJ5/TRtV0GQWZ9UFSYXaWRTpz55EH+LvgpdpU/MPu2amrL6pPKh9ePs5Hl4RQ6XkQcVSHmBt90/mRXN09Ps4i74u86b4KqvLs6Oj1zrB8z/Astn0rObVfWKQvbZonr8uumhRsJKl1dFRFiw4i4Lj5TWScdOi8nQayTJXLOZs9k6YV7N1ZdgcHSk/Hqvj6dUJzw7qusKG2mTPx9m0KPeIV7NIl7ThDwvJJt30ZTB/xYZea3ld+/zdxDlc5nEkJlMQ1LAaTFnCspAHbFbzMoizipf1ix4As+uq9aAyd7XsGFr2ThVnsxv4YWGBjIJZXp7AO/HTgmXR51mSL1KWZUdHOLnYNA6WB8H+JHh6dDRlVRxis1/0MGiFyvoY657lZcrEBHyvzJssmr0fF2Wc1bOrYlDxE7ne4kS7bC8SYogvY34STKIbxLqe4pq6RXw88WJJXrIgTd9J8vlsPWVBVAazhIUBLGg5i4KQhQv+QbtqhKx+IqbFn6Y/8rD+Pav4C0H4Ik8L8Zave57nKw08iG7/GGc/sqOjWZOFASvn1dERz6qm5EGYN1m9O7LpBK+OlzfsKmAlLPJKLErwAxbO6+oCJl41y8v0vTmvebbcPeHTedEERVzwJM5gsTQoWssPo0v4Q13SLsAC/vLlVphnVX3PPzeTX05solXIEn5ZG8I8izz/AnLrkmVVkVf8o6qexgE0ev95wt9hdR5/qg7wBasWQc2mCX/RU0QvB0GUByUHxIu6bPjLy+aQ2Y92ZQPCBauDtJr3y21L6TdoWBdZyTOmr8lI8nzXV/99M5sRX128ZpkXHAfu/6dUyIsqTuBvXIMfbSmsqmZlTTF4FlHkJK55yRKyKv6q4bAqELxwkcc0p+QFr2OQLCguo1uR5WSbWXbWkt9PxOTehFlY58c8i3/iZVAkLM0ncnSK0TZlZRnzUh0WUy4GdplWOII/7HbwYBJtyNmAu3sAm438C7ZPawLMZtleL4uUfM5PYWcMF2JwwYAO4GOCfBOmxbkqE0P6o/m8mQWzOItA4lDmxX50v39KEObzZYLynUnz/H94yxWzW/dvOVcw6JSrhPi0f1XrnDBPC1ZKmaCK52keR9uWTCCWe5ANYCywemcAIYffr40pFUQ8iVPg2dOt53n+uSCoFnNeh+/WLFvMpGTGqtpXC7W702ub6Pk3zM8fwxjpF68wz5bBJLoeBEW9KGFbBbHoNGiyJA+Pf9evNEse1nn5Is5qIZIetWsMq0D6DU7iehFU8U8cIA8ebcG/L8WaOCsOJkGdB7Ni//m9UWkVAC+vmu3B1gyNkIjXLAYhhp/y0hokc157/i1N2hHbQMGDGYM3q87Lz540l3B0qiv5uQBkxHp2IFct/PAgx5oLaite1nHKg0ZuOFUzFecLVdhEuXoRZ/VF+VWzYHw8VQULuec/ljtRFFcFTM4g4lXYb1Aa2fPPL9tZutnPkJJXTVIfHeHZJyua+gLO4Pqs4ChsfIw/8ZsskbpZlDw4mVfJ0dFXp0X5R+jmo6MMZdV3ivxkpsvZ+5HoT1yPTkTHR3zazDcrXi55GdSsOj46eq388vz7unTBogDqF79nJYjdIPjx8lDUd7wUskcQVctD5ciWpwWsnPKgKf72/NvETIjTtMG90/PX5OoaHsNWIj9nxeutgc/Bi8rz97R6WVmyM6gduk5KWJXnX+y3/GAas+qcOISw6Ia9BsdZEZTs5CnOPac4tGSJWJOrBRMirJSVu36ozrJwUeawk3j+7sBrpKw8huXm8h//+F3w7d/6JdXz71mydMnTfMkN6fkGLShXnr+pdeu0mc1AAq+CRV7VD2s2n3O5Y3Yj8jVB9fx1ud+V+UlbS5NVbMbFFKzyWR2k7FQ5bcL8ypu6aGp5/AqiOK0oAThEAXhHE8Vw4a5z5QT4wPNviPF5wpZidBZhKsZldUsduREP84grw3YPPsuCZRmHqV8EcRbXIMpkERwYJOe20YfQ/uqEBQWrYRE6F1cBf9WwZF1urlWMqzzP6kqMHyFWhglLi5tUr8OIhAW63TyqcMFTFsTZLO83D4Xo+YNjH2TVbTFil3Ed5AUeEHWC5/dyysEk4XIFbqawPHXHSfHT87epbUET7y9qK2gciWkUFmfb2gunvGbidYtE9HTNt8wuqRGBnx675Yr2/SucNRPW1HmrClD/DvMk4WEdFCXHFSwSQhsM+N+LUfVDk8CZQfnl+V+qs0m0TXybdjpVNRP7FU+LhIUc22swrxvjJK6CkoelPNskDU4BRQQ8iNap0QBqsmvKZJjhNnvCjvnQUiEEY8/fbzHYCFCJFEmcKacHg+H5HwZSppjFCf9VELR//jJvWkVTk+K57LzcSJJG7LazOBFaJOLAxuo6k5tzfAB/8DQszr56436elXlWG9xfFiy67ZJUTng8X9Q7A4JMkJewG1ztzpy4l0ndaP95DqMDKXcGS1bGDKZztxQ6OP2RDOWMlDNF/OtInn8epLMFdA0u7X/55+Cb777/49FRVZeevy+33pJXRZ7hUiva/5pmeL6peYorWKCudS84i8uqfcMb1JiDyVK/O6s4P77GUzgefoGzu9OXPR+TDmWnii+Fey18qd0av2PNe1nYoHj+e1UVsmx2pxU4cLoqAoicvr3OE4aifDeUmKAF4t3em52Ucc03iK2k5LigXNXWEmyn52/1B6sgqPKyPpAD7otEnNg/CoKTkhXBLEzyiv/ekr3xbzwJOWVvHXIfxCo5ZsQqiNurQfP8Z7o8hQOEszQI8+Ks3R9MUqsohpOJ7LQqxePEB4qM/GEr5wT8tG7VL0kT8HK2IX5hf5W9Xj/LI35dGzyoZJryqr5j6yHEKjAvWZqyco2UpXDpgdaXZV4GIMqzKKpnB54hRPZyE6+FSBwcB3F0Wu1ga6RsLQXDaZxFcTYP8iUvE1bsag2GPbQb81VTFHlZ8+i6vQGBoP0hnkMy0Efw6IMgQGV9FdezqzA/upnxg7g8+IcVBgVKF64hsZ/WKdx2sDmHzaso8xCkpKOj1zTD83+Z5HOpQF7mIZvivOf53F+h/14FKauO5b6Ou7z40HiUgWUZVwTP3zJl83oBgh6eRvC7XZsDo6pheWr/bEcgDKgr6mE2iOKSh/V7/LRI92fv8tNiMhsSZfBSYeign/E5q/kQQuyLXxibX8HDJmF1vORBVLJZbW+PJsLz10il9n/85xNNEsfuEeoZ7J8XXqewga/s+RfrMk6Dk0Vcczw0flTVJQxYoU9+KL4ILnpBxGomzy0FK+uYJbg6wTeEvdEh25f9iUo5nLzu/kYNnzxCsrIMpD57ycMgyutgdjARa0MywTOiWDTidBLmiVgnoniJu/49W7RrpxawW9GQvkI7QY0VqCygWz5sF1jY0d4/EbcWH1Z1Weenwf7k2W+ev4c/kutyV6iSvIZexbnn+e/DAW6azW4LaT8tDlpZX5xT8YjKT286FVGzWbbtZIIsE6QL5tZjAeKJa9rR9DvGoVCciIKS5yXu6Qc4m0DvBLJGwlGzWfKqnWc2x/MvaR8WJqnUndS8EBJ59UrKPahgwZPYbFbx2tKXHEo1QcpZJory0+K92SxpqsWtiPMCZIVgeShGZJ3nidy6KlWtOC9ZFtf8EE9FMG1Ed01BxlT22CoOP0/m3+dJHJ492lrl2H6uFVrfD4IqhssX0Mglcfp+EIR5Fc32vv76r3/4jtfs6Ojrb//2ov/VqZ2C4+WvujPQp2uG+FHkFY6ddU0rovy4rjG6kX1NPW9iH03jGu4Wx7e0Mq/vW/t9ktfdRt/+3SsPUUxIeVYfHfFTHjY1fxRndbsYwUs2BSj44Ig9j+vKmHYjYP2aWx9csDadb4dULUSGVw3L6vgnjmfAV58GT4PD00/PtbcvAg17IKnRmfN6naKDXHOgDHSxNIrZIgVxguP5j3EYim1zdjAJ2pMtRfb8jwKQg3gWRbN6Nnn/JCzrPJ3akl53PR47JT0dItat2ZaupPtenlZxt/o8ijz/l0V+8sUqatSKlzFL4BLC0qVGTVo8W6WOzgjj6OhkwWrP//ItVfwwCo6OXsN/nr+lDP18Pp9WQTDPYTzBElywOb8p1rslh5uiTkMjdz6fkkVe20TPfyAHPyqUA+VdXhsUz2/vWPoL/e4a/363ih4vk8hcWVua5z/sV1u4qk6sNbijtmIPHOD/1d4btU0xkDYReKxbGev5+hSJ+DKYnuFC71QswV0seeYLE87KI+AcHYVwH1jygoXHR0fyqXXJYBHAtTp4dRg8FZ/8JC+PcaDv2CddkzIk27HszPM3e6mr4kFTzz4NYNcu8jjrDxXGLUp7btzDmaxp5fB+Rk5usZB/ttImk+P1p73LXBf3xN1N8SM8KfqttIJGEu8FwQmLa6HiqHi9o4qDJV/ysuLGcfKuCol4VZf5WcDqF3JHKcocDR/E5lRUUSvLlAn/uNuxAqEcfk9IPlfaS5mK1yC7xrM4vOlUigYJv9FLSgFoF2GnSnmal2due4M05yAorYlJiRokXsKlhjgwPRozAQBZHfYYflpUt1w7Iu7MTm5YnAXHUvAFJVW3RMAPz98xjyuwQVbwB/RW0FQ8WotfTcR9KJxcgwzURdO8KffmUtywDm6vW047wcs8Segd71vY8dyb4aElZh1E9t1TUfLwQnspCp+XlboWteRzHAF4FGRRVPKqumkvDD36A2kixbI5/yU/Lbbs83rJqzxZgkppVuFZR6hRS87CBdzDBGWT8Kqd4erxCJaqIIOTfie08FedzCL/9PyLuualvhAEFRi4BOIG7AOYUQUsS2nhMlj4ki9jwmBhwKolJeDvV2dVmGdoCRguSjnN2n1JbEa/rOJsUztqFGWeFrVYNOHSQ/JQKX90tGCVsNK7ZzBmMU8ieTzu/vb8nQFx4K8ZA9O0852B2y2hAEApMVw02bFQWsoV7q7J7TQGPcnzL6TsmAevCjEsqy36vnEGEwQVPRMAiFkf8aRmQSa3EmE4RnEuiokIawloF05NNUQMdybaNIfJ2VSeL3W5cR6g+k5O7CxAszzP/0ReUoq7xLToFGYk3fO3HHhYO6owL9vLDhJwvNwyDmbtzBCdkxeVEISPl+Il4Mb+WneC7q67ZgeTc9JeKP6ouwkrkqa6qGtETm45pOGAwT2hLisDOeLLOORvsHF/a2zcQ+oSYfi7aa8PIFviVG9tMcWMT/NIdAN0juffUxV9JYengXmXMMvh6ZRHoJyr7tr6QHEvnvIStFzCBPQmKwpVvNN+dhqDvODZ+SBIqkVZxwfvB0HC69nkXBCgNju/p58D0YYB94c4gt0I1IRlHHGhc0iLF/3WLMReoZ0xjkKtMg/JQjYA8jcuYcPW4PEKvlQySyei+2pWorqR1XEOOvEmA+sSeT6tjuNiyzifArr9SiWfxaf3leWqmyEWzfMfSpoc3yhv9kiV6vnvVNPyeL3byUC1Fb86DDJ569PKHGEOu2mZswhMYN5Pp2Wdn4TXLZuBOKsPJmCtOHErYl4dLx/0K0zK0imz1p2e+hEQWRkuUABZ1wUTnhb1GUrjF9qlqaxgdXqgCipSRQHCzdERarSxPjGXqt3BRUwYWYwvdO096gpqgCWoAVbQgC9RA37HUAHCoQFXFvmx11VJCb4ZLBJJ0t3o9hUDHlfu9jJaLsosYgXY5oKtqXbB1mkgSrxeRPlKNA0+TBTk2TUJaa9mRW+tx6/2KflrsqcoI+DKAZocBK2FzIskz+b3Xqqntmppn9oEzfPFlXudF8GxYveTSvOOKs7c8tvhR63shQNoQ7lpgtUCLZzDpqrz9GJ3wSZGyzVpVLX/XBhVHUxgykjtWdIIeARKFoTr9w5olAeLyl3iyqJ/Rssg7tXFxiCwZwV/YSP6uSapIAfFcDmsEzz/3VlaB83/5Lafj1aSduVy/nAlMAth/3ow4M/w4oXXcmFP2bC3YtwomoS3Thbi2CbE7jLdI7xJLNJnqkVieyNbiflrGiyabM+/IdlskQdhXsI+eSymt6r7bb0Qgqo45lmISpjlfoReGrsKrsjDY14jkLOM1y3wfBC8QuVyud7bHOJWA3M5gkP3e8JaATZ7WNbyj+QtHfj91LOLgTihBymvKjbnV7R7u8+j6Ac+s6/t+nXNcW2nA5659vxBHfn1JovxSB8WdQU2DikqP95HZWGTyDPJT2K7WzSzWcqydVND3VQLnN76QUXd8z3//sBB44/5PA5Z8jnYC322itqwv/WD2+ruh+d/+zMoLgNehazg0T84haWELVnQLMCyLoGFoNMBqz89/zFWwJoozvUKThZxVcDbwwcVTfH8zV4P8scDIaZUccTx0Lpp6fJ7y7H7iuWYPDsK1Q08TFG1vAvizsx9cxQuefjEfdgS1JKHTQkGZXjRtKnd+Qqtd50HRcxDLk0N++0cJAa8R+SntcWcK8wtXXjCrbPbPaDHNA8P1fpDbkyww2hmN1Ne9hdkIFNhB2z0HmZg3gdPCCI+Y01Sb/diD0+S3qupJXj+homAt4CrmjLdG5TCWFEkZ55/kwCJSqJ4uelkhoW7IIsiU6wTTLEsB9OSs+MoP8k8/4Z5u4NCPLzIzpA3VZAmzPOHIMcCct2W9mDU3tOVYg1qlnt3A/Hb89cMiS7h2bxe9Do1w2vn+ISVc7D6KfJqzVSzyz8uxq8mp5Vw/IT2wH3Tg1bG06+00yIxtKQ3O4WccJPUFHEfa5dRVV1+3Ps5iPF4rjVdk5YusPpOoo/lJVTNyyKHXe1SJ8M1oHcJ8kI6TDVp1aQfSTPGBmeAcnLfj4JisUGd3IUW+AbFwguMa5aiDo4uloa+bm1xLcV+rWgBbttMYTcpdPxS7weW5NE7cKA8h58irE/f4eVsRlkZxvX7UR4UTR1+0KooZgeTZ6qIJgxRKSdQjeX5Q26b/0srL0mDC2n7/5qg9gKHoXPIPP8hKYq8JqiefxmFjixI06LMf8Tp84iSV+YcfVYjLv/COV3xWrNy7P/+b2jfsMoOGKOTI4x0p6vMZwZr2MfZNrjbRjzOhdZqEP7H09MW/PPyXBDUOdDeC1CQcmlP/8xIn0AX/POIUfD3TkK4SL0v752FrkQuATBZX/QMKG1fuHYu3G7TOh3isM7Dv4et8zqIXUUr27PUWYUOOXCJhQNuZJ+7y6g7c8EzltQxr/ozYqsVcF4sAaVgcfkCrRk77RfInO9JOwpY9Y8TfkfIE+hahtNb++3579c5niM20Vqxt+rsf3n+ZWnSVHJhw8uSRFqbw7hbsuSC+LWI5wswj7gsf0ao98QHSsQ0rtG79JfVovxltUju6moqeRayzGF1DyXZEfeGpmg/ATcc2vYir24roqmQwjVN/CNF8JQbPFpIpxxNpWteTll2DF1Zxqcfw4QuDqDaGjeX9f62Dg8cnYvTtU5CjYLqLKsXAXzJW73cal7ulezEuN0TnYHyyEX1kr7gGVpMgQhY5U0ZcrOyKykLWtvZVky7DLRUI8HbiG1eEt6BMbU75rkcxJEuzL5WfnVKqta4UaivNHF3nRJaoR2XdQZBAruSSyoJLzJ3bQHW0gluat5qqud9J+KlKSt6VsqK3ofC0NQojhD3WgTKjb3M3yvpsNFbtCiKQj3en5iXp72sesx5sUFy8V5r8E52OXgnu1wzZVs4erGSXzPpeMli+u8Lg/UAbQJMdxvwBssitOyYNUmyZrDh6g2M2aQqVFocBzxBu6iXL9tL+21bOMaxXrIT6bB003UtBH3zYespB4LBhqk9hQ8pxtU9yozFpm0kcGuuqD7EmSzJ6+oqssLJiUq8cByncXB8EAjdyLoUuOdJPmWJYrHgjytRt4QmtZeglyCE1+V5IUGXnPdW42CZv97bC56xMgOBqkSPrXPyMnt+UVGRghqz14uC10tebGoG5dIxJ8hQFJKOQnl13bgWk7bCup5T2npLCxYhat8m9KViVmGL1gk2GjdT5cSihuV07SxcueNOtG2J7yCkty0CpYiuv4Wzg7ifUzGef4tAiVt9OA7cMuV6tKrFazY25+11/jxlp++i5us9cW29SQWR4ClL4nm2juNaLL9iYJW8AknwHMj7ZX569nGUwF3daVfkI/BXzSsu9sEbUTybiZ4Fk6/uRx/tRV+bv11JIfp6BZTn2wrT/sqyOKsXUAHKHJ7vDUBx38+adApSwtA1KKvzNA5vDSHCbf2o0ntadbLEbfKI07H1EBP4AD1ujjBL8vwnpgNkWuE8czhDXtLgoFv7RNPnwkkYVC+mnrele/6/k/QHlEgcLlgrEquucbBqncCl7sIAXpWHMGnuLCQnEe8grE9b+8ywPgUDr+52VT0x6Heuf7FA4t4WTfCJa1thaSZsPbmY1/y0MCr94a0q/eEruNxJguosneaJUeWf3qrKf/nrn/7y1ZfBF//4+Q8/SxO/+uEreF0wGIrzzKjyklQ2oqIfJ+E/9ab7au26ETHUnoqtrZZXQTxMmTyYwoIKKEdVdkPHq3qiumvFVYDWghg+KEALJ1kp/Dt+hIbABrrB1y3Ea3NozmthOeD5B6qz6ZxnHK/sFStFi+b5DzVn1YwlZz9xnFaA1357/lMKi4JGJjzjWXLCzqpAmEtBVBpwQ0R5Gp2Q3w+CZpbkJxeC/pokCIs1M2xDXZ6BiP6rAC81oQT8OUsCaVSfgObwfBAIj7rTQwgOdcqm8XIfeh2U0+DQXFXCFUhYe1UcxeQph7kfVfWHaqFzJ6BAz5rUZVQNS8GIUXULsW9tWoVP1K1Gxq2NDnCe8JUKXCd8dxXWWLar0CbcF30V0suut97RhzxqVKu6bEJ5mAcxFmffSzMOgNsZEX1xjfgAW5pDbl7Wh4YW9pNhpYR2NoN5tadWGGd1mUOtRqVfrhwniWq6ZAdYyc9x8wTLx5wruqYE9c9Y/2wmldMzllT80VZdNsC82F7g1XmSn/DyHfDq2iO8Oi2ScAg4Ff9FN6SRb5ailY/iF3a158x5LZuoOu1P+XXKdHH/+TtVPKvXqgWbPHsuLerAkk543Zi3iJ00csNgoCodBb+bhiFknNWwtoAhl+fvSOarhjfyrJQ1BSip0A0TXv9Wb9eMJpRC8GuKCE1UPMPyqL23yCLQ5rOkU+/ccQPxGvIlycfTe1Hmc9jzAumvYBM9/wFdnDVZuBAGVDiN0fVHs4iqX02Cp2A3a5L3BfmaRkZLYJv6PPiWoD5zUPdJKlXvIVnDIVnDIVnDAVnDRFD1V86Ws+LQJqenknxZ34Jghb6qXexLTd2QdeyfF/Fs5F77B57g/svAzmkA9x067J8XklGc1fKvBT/9lfgLVuuLXbDUiCe85vWbXZSvtD6p9+rCYt5Yp05XqSVvwJlPiEArPVYt4HjwH94+sBOoDlpLn2KVapBTsdMgytP+aliIQlbtr4fQnv/Nz3Md88Dz11Gp22nshZ00LBD3TT1xRRhegyk9qU+Oo2sWHZR7Ar3gSYE2d/M5BivL51cMOigDhF1479qk/vT8m2mcxWCJnB70DkSB1N6/l07BRPN8Oq3QVrM6n7LgBG1pQQ8NSuio7LsVtcK33O4k1f5zRX3d+ZNUdRTnBkNYWACj11FH4HosQ/NAhYpNBtYDGoX2Yc91JzNpWQreZTIElYwlGrKihmhMMkjPxDLlqPOAFaD3iFNQhiihrOoc98uHw5px3A7aI8d7Ikqgr9/uVEUaVOKodXRUl2d4EzuNQbHxhY5cnE3LOIoy1uNfjyBQ12wa8Uuv/bs9pzuXmCQ0hmhJYhjGcNkJn6ipuD9mk9JRH4whe4PU3RW82w3vonDB4gymzA5Fl7cN8pVu6ZBOtScCPdy3QuTSJr+H1FFRGL2ibq6NRliq4bh8p0mxaf+ypyIjCN1BtEFr65TF4aKBqGkW7rp2FQHayISd8bK9oQCBr7+GgF+e/3LslmGY/1uNLUalFi/ZyfV8xcBGt95hUbRG8VgUmabQaeVwIrkzcC0CU/eewUd1KCj/dc+zcRheYJg233qguzn6IkYY324cuQjZisiwEsj9QaQSZq+T7lcu0f3pKJEWqzqvUyWwi1fAYR/fJXDyNgbhILzzaGfo0ioLjpfW0LAabvHx+8FECuKo6sIr6fzjmyYVbcykrf82ba2FobPBP6gzZWvvq4RhsFgar6pXVe0llWbc1f+947i0Uu4DtwchuLW7EGj75lOeAK9touff0i3NcpkmQF5kr5nOmXB1d8zPbjl8cUU48DsaV1idgUEfhNwqSjN6JJ5Nj474qyZesoRn9U2KzUDFCRcXhskbqNSyaFtSS47RXLLAcpe/Yng2FJwf+yYNjxBFGadgVtYrXfu4lDoynmkgjwT1iM5Snq4Nkyr06OsSBEEigi5oRHWvs9tL4Xdgh5NA+Xg3TueonwT5IBFB+ZQAe6jt7B0zcJMyHDNamu52XxzbDhyCphr4wfVkczDRCbODydWO0Pq9nRUQoEonivAmu2qkqFkCGicM6tJUHN324KLi1w5MXrQu+hQPW6qGz9l/LkwKl0o4v9028BYI09C4vKjjlHUkaPmlLrheG99HuP5lwhANPezEFaRwIka1GSxk8IArhJOKMBxUGgtajda/+ArBVOIO78vSsBjAKGhD6Es35XWSGTWFvGzVwu5jPBvSybFqnRzvEVex7S80jhd9uWFdyYLEg31yx3Z2aQ1PsJG61aWQo5JkzbrMFZLLhkWX7tYF5WfdX+sS5pjCU/8U58wdmo13rTDrLrf3utJfoHNekiSZ6SJBJaW0wHl3dhJHEC8SNVNCDRfIySuufJWdIDgWe9VthYH7S/tBMJRctWayZbGrgi48DwvpDnIFiSAxdJ6e1Q2xk7RnCQV+U7mFbg0BOpHjf3J3o3MRDxMYRjuOO/Fe4OVrBAQWgjZZi7TE7TwTrDiyHcfzd5xl8MCquhq1RyshrbSuRq1id8HDY7yMa7W7QTTro2bbIJyG0ay+N35lD7fSozC4ohuOjQsaveqZCVDOLy4W3Ea7AsQpYnYb/VMaKqMRmEny/I/1gLa8y29jRjg+5mdgtqwycbW7b5C6H8blT2uigHdhrY5AjKTX8J/n36IQ3Tu3BgytTly+e50HKP21PW2aFfSnDi3wPZ/D6xdWbP2e4flaQH759Vxh9Hue52+oPMyW0TWi/dyqqGrEVrZYnv8uhvoU/my6KkBdtmD7g83mFh1sKkwwoL/i7h6csYpN4F4BThcQX6/1IqqermCLLorJnXW4wOSELUFeayqWSKux3w563b0e4Hr+HYULmsWwSJeHwXOp3wBrmp7fur6h7Zu0OGIpEVAdjcomkTSs59Jiq52uHyCZZ/A2f3src4dpCXtt7TZ5+Je3q7bFEKYjf35ruwy37cj3b2mGIay5qmZqXif/8F+qMMuJKj9b1b5DGAkYpR1vOGod8qZvuGKF5Buu6IrReRE8GsVjyo5n+5MmeXnX4behX0mPojA8zk0HCoNZ3Qf7kvbqvckwhkZvNfMAzWagkvNBsEzRH+hKECxnwn60O8p/EMBxRBiYfgjGBE0W1rNoNjkP3iUoa34QBHUigzSex7/hrw8UsxRIotJM69mBCAM8Qxf95Dz8KLKwOHsXQzsqlivlCYY0EXVuWPS6PCsj+OtCz/oxj7MXuu2KZbbSOm2CYBWHgsOmOUR+repfr1h4Bvp/xS7mTQxmuoftiBRsEQ9LPIb3mge4PsWt/yK0IRfHSOiwO//69fd//T0eQb7Bjf1zcHn+Xly/f8eKm+Ce8y9wKvhT9udmmsZ1zaN/zcvjL/OMI/NLNEYX8b7/vIDx8l0eNQm/bjLFUy6hFzX+KUMfK5QvxQXuxz1FuFlfBsLnYpeVpTYU0jfZLP9Dyfl3ECKmrJwuSQsWvYFLErz1G8C/kavtinBwJCfg/yGVBNIyu5WchO0OGKP3ubd42f38jhXf5RF/tNXP9zybGz/9z/psbU3Nv5fZzr7kwuYXvbKdPM//jsqJ+KBfCnqv6CjozZFEWPHOO7NbDfeN2rRWEFTP3+4dxeQnPzp6rfzy/M+G+q7PokOyPf/8SVhh1M7qVydhlYk/d+We1hmQJkmQtRvdg0dbKCXrGHjj1tTopMTF8G86QosMZG+a2GVZnrUxyAv0hcI1Vn/w+0sR+v6qDJPXZgnCOecIKI4JB4YCincAhyMc5Dxye7HpEEcVnSeZu4oO4rS0m5ejlnYS4rT2U2yPaWs/CXC2QanA1QYJUfJtCYlBBnIwBkpfkyHCHajlC2PDblXdbWWpcKVUzAPR3O+swhS8wfesXnzxt7+I/RyfiGprZRvvn+uKZ2WPWoxnpXtjviDsE1/0+nTTMFHn/Fa18XOtLiUXyQWMxcVh1BgE3VPfzKjxmWF/eNW8h3758p4/4LKp+ZidFRA1I8Dbnuv9hwRfozahpDMoiKFGwTs9lkXojVlpkUPBhi9oCqPh379phDHtKEYEGnukeYzmDUR6zOFgCrYNc2Ocfr6yxSUqbYmIwftYA6k9Fhnfkrp/Jr6xv0IJER/gqXLNDTFbHwjHry3vge8h4hGOiwd++/+Xy7isG5Zs1WB+s9WKxWKe5EIXap0YXmtsb7iSeLiSuK3k/LLNQPqP2o6vJnuUdsHdpE/y/LgphEwJZgnGxH9MVIRidlB2XhRCvsCZro7jFpw1qQyMIHjCTrZkiTEsDrTC6tEXTWODKYjGRplP7DL3OqvhiGd1XJ+p9hVXW3tbtGStc3RdvtCaxwRpfMqjm4brsvZzh7DNlUrKVme0obk0ax7N1zVWp1raazOiKQEOxIEelMD8tC5ZWJ9HLyvovNakVx4ZRABfadJb4Hg4lK7QYJo3j2cYDPmaIKUsOoCNCQONxtEdQf2xwFsQ0TV4LgCz1iAK1xz8DWlBHM86BWeSl2h+LVlSGCmyuVxQSnZyRbpjq/GINiUNrovxkqPqArlUZjT91uN8zxXDKMAbr0UOeh/TEhm8VkUKo2sGR2ybVGhElAzb1EHXDYBUy32hRPBvR0YIrmfSHElPgkghPP/T0TraW3AUCFmMxkO15//OVRCNngcejXzPfz5S3vHYq5ottwTpRGlDtm5YfaP2vmJLroebEhnzxH7m+bd0a/DX6k+IC6BxwfV9k7QNFzneaINvvDRAfcptki9tiD1/24wVYMS47FvbpgZQf2JrMQSyNP2C6zpIM5Lx00KmG0nOw90IGoW9i/Z/6/I+F42861yGfQ6mSccAO29gwP+fqoxnkvHMZBxKxqHNeCoZ4hmXRALIgIV4GxTWpxdLloF5bOsaaVmiU1bgE9IKXNqyr1GxQEs+u2HQD4LT00qkfOw4gD6tLii/DwLt5ySormjm4LBDsOQPKNvgRxFyztFRTwmEVXYJJ+uhs/M9/wOpwoIAwIr1+PeKtHR09Fr96fl3B6zHvwJvq7g+8/z3i7yAK9p3iqz+SZqOw5i4IP6E5GhwW3StNyqXmiD488Uq4pQ0/hAW4sqPl29u5q3+Wilsm8O6W3dWWdHi2pkCuI/67/n/60q22xluKUF7V7Za/B2jkMPo/ber1BXVOWsvZcu4aiDUZ5NFg2WHEmk0afHTW5XVvXLNep1euTrwcsZgzajLmLe76rZp+P5aJ3j+b1aI1IcX1hieL5bHRLAPEDFWpFgCBgKwS4mrqk3Vir29cJRixVVl3sPNNJrNX9bs3DFq/a/SKep/TsLqvXRaJg6jdnCcJxlwYFqDGHUFaND1aCx3gR5nYINY8vYcV4kTFe9Q9wZt5QOwYo2KMN0ZgcUpu9pD5k0cCSdPpZw07EBNXZOJwM1wot1QICJ0YYk7AStrwyIfukEz1VcizYAlc5Pwu71BPtqzFAfCyqFtrni2EXQG6xX2NFe1IItxGoX1wfObikm+Zeb/jLLX758Haf7ArE4q0NtuX6dKwYlhx4pF3eUaiWRAgDUbEmf1/vMti141UzXntV03w5hMHOWyOGpY4hFJiMXYEW4EHfBSF2KklDqTDYVijJGrCgvjCAF+r/VaGApKuW2D0BCZswLsXvOm3iPDWxqgT0iQCCEsdBtIrIShTL3wAc8StJvg6siRPhtyQsXZHOIJTeNXDVoNop8YXs1DnTyDswpEtKsuIBEsHRn8db+LbmJ7b/fxzzwfQnLuP90b8NUAEXgOFzCP6XBdrymy5/9aJ08xwxrtzqHwPH93oFxLvms7e7w2SZpLR4vqbJ2rA9PfAw3/II/BawcHo046ynT1bjqjPGH4dAcPQgxAbjntEQQmBKd4fMRsBvaW4vpMLmYg1iruJ+XJ8fLXVrT4nmpAn5NQQb3VBZaX3iMVxEWAxC+wRVyzI7DGP/E1jZp1x88Nja5FuNKjXykRruKfOOVh3UVYgUXNIwCgd0fTUFV5cosARrx9jgxZ1WQiAC92gmi74U+DGyHkNauDacyqGwQ3zuCG5Q7Bae3c4elrBB+Cb1226UaAL+H1o0SjNX19IFh1F4plm8YUZT7lYsRt0ogpn8fZI5LXfkCDrHn14DBSvXWkG8BTFQQWO4f8tAD5UTGJ6Z2lAtbmAVBcljLhomP6AWlxd4tFfGD7HT1WIRmEt8H4ZmbeA9lULQ4a5luwa/Qp24bXNtHz1/rlt8ukFWe1/5u6bPhL2QPqy3Yo02ut1bDr+b0xjYbZvIcqZNFkZw0Dh7GsIpyyJpT7lnBfMr6PtMCaZZ+uXAQ8EDO8xMfCWtfOi3pCfM8nGoanKeuzpxDwZ5pPGVp1yza8kD3cL6joh8Kz0PO/1ErJi4JDo/HyDlNxuAGPl1aYrPmDVSpZhHBAmKwC7TsLVgqy9oliV9Z/wrsqlOGiT4zrDc1hTjOFXNNYvQvBPu0QZzq7dQwl1J9ZAmMqgN7sC8pPLo5ORzzpFESXFmmgDuEB1V4yfErhaa8/nfmQ4NEN7DY0AysyE2w5eeADmMbZCICdeiSAIO6RQHndFlQihsBtDSTM+BXlvuWRKD0VzTy/mkdi71kGaPjUpreb5cCIdvOac6QRtbHrOYKn95wL0PWcASCIX4z6P74eQXj+bwedDcnyXdmHpNMfVaZL9GVglW4xfRidbegev60zLKT1UNWNDszVZrkNMNLW3zUBx9Jt9+jodfsn0ZJuCW/dFiWiS5sGgQiPjsTfYunacCM+MVgyq1j7vgYdzygkXn3ceofB3hBPgz8f6wz7WQrZ869avpPzV+yaQYS4Xwn3dSfKkqPvYH+lDnfFsE+FrV9vizRu6xLUH9S8lXtMGKqx0DQ3iFuXZBuDgb94D1zTgV0YfOMhEa+h1Qmf1WKzgJOfFHDmXWTRSIjelTwxx/Viy4Yobx7Xi6s9QJaN68XtntgnZMMcvRmwN9zsj6XXKZ7AQMF9TXVJFQOhZCcfq1TYrzdVgthyO/CezRMqFOnkJCJP2iA8M8yKPYfjKvYJaPpBO+DyfxU5wAEh+6RfxbsooeWSd1kjOrbcMcT1scnsTt9QdpNkijFMF5RGDndNpj0O4npxzUAJW3n5AYSeFDpqSyW0MWll4GFMNLxOAaDkJsWQOTANt2BIZGK5BQPR868cLwNQcIv1Df7y/A/bgLZVXDfvizy7/mXTQ5jVekbXLM+Q3mTxq4bjQdfzSRdfQIKqlHQPZpXIE2R6LPds4Up01fAPxtydm87MZ311LS+uggYcW0K0DSW4aCEhuHumM3IibpEryPvUPqBNaI3BqyB0xGv5l+ffIx2Ba0iypjoWPyVhaEZVJHEoXMnUAnS9KZrqKsBHJCwROYZAP63WORkEZ3wuAiiqRR4PFhH2Fj36AYlmURRb79d+Tyq/SfvuchtpnaNfa789/0kLwyjvSu2Y9dWg9ZlW9PjaLGlHQMiKStiXdV7WsENWeRZn82sKCG/w0aXsfRhLnBUX41cHcPOKyhi4fhW/u63nY7hmlQFMAnjjS63uvIv6+0lnAhTFVVjyWkRGL+NpAx8FvBZeqtqlRyuEnEbLMnSKGAajRwSWWBXc1XxvGCxs2+693BT2RoZ6GN7J8z/EbkvF8vwx/ugv06u13gu+zWwaJ0l+Ynm+vyI8318RCedfEQnnDdyMSEw/k570Bx1NJkEAExADrXM8f7/jdJu72RCNoT4FRk3CpTOCVkTneP7tLnOPaeeK0/CS5ZpyQWbUBc1mVZdr+FNs8aBogI0/KOryCkE34gTsP9cJ8cHkkkaAhf3DjnLMzwQeb0PE0/dVX/8KHSKCJJ4aQQB6hucfOqIDFNIKH00ATKWs7yiEGxOEEzhshaArfXbhkxgiqs8OJjc6GgYDU7IOCxd8YUaBSY8g2zhM/asmA5MiCKIMzY7/iejt8lE5i9e67MX4CLh4reLsuJJR4rlYaETCctQdg/bzYpfoXMTzuNb9lmIOJtAUMdYTsK+Bpa2N8/9xm4BTJgKONlsCrJjxvMmbqnObvKRHQ8i68PP4HIiecEP53dqQim64bHPWu9j18LKtXzxo9yUjXbbZ3D/FP1Q6WvUI+rc2/dCiP3Pgnznwhw78oRP/tMU/NelU+wX90KJPlOeu93QR2LF9gMVoa7rRM6TFUFvE5rRl2rRcfTSMqzKJQM2VOGO3tMwCuMuh1WWAVinrGleJ7X+LCo3RDWwxKqOzrJsXaBK3aZHxeZikXIxYPGEIXee1LnEYpoHFdLD7z23qdKZT+9SxPRUwLbWL0VEH+9E+aRZtvBYUBqkZT1I7dOCOmM2F/ebsYHJBQpJJnAb7kcyAxjLMf64HuJCLF4aYRpu+XYpdQoyFqm7PBI8ojEyIwpcYheYsCxdlDndTZIY1mOaTiGTNkXWbYqFXDkYbMTJCtPd7eUFmkugbQyXmrazEvBsESgpx1wlWxk+o6Cf6aoXNvkPBhIYXjnLVjoPfZo+If+JDcVZiGWolbEo9WAr4OWN2bTL6ypzXf7Fjr4hjZd/1Mvzk0dHKUN9GyhfB/V/CoeyWhiQ6zs64BxoMO5CLMhLsImiEQIWF2V8h3Yce5sW3SqC2BdctpVDl+XqXSx58Cysp4ExaZ0DBbReza8FjDSEWxrBut7uqi7kjtvYbBFrU+p6ITH1VOJZUx0LfJvbWD4TsCZkXq02MeVTiEmviLs+n2Uwmfw1kzkmhDtjydPfHzr2m++PdWclPi3dnYN1wQYS/bqO9vDtL8yjZR2lKHAsg2AJL9LNMm1myF8vuiBLWCUEgPf+9GVpeXuEpuDMKx1jpxHhZD8IDu4MZlyfD/w1qxPH/qzpVmCaaRJaFPLnOU5GxBWQm+G4R2shsKmF7oqqWFz/C1PNap/0SIa/5tJl7PqR+qX+qeH0xEpe1IM+WrDz7VSRkoOoshT9lmt8PWou9evbpu+FZmPDzsKrCN0q+Vw4BwkpBZPh4awfTNsINGmqh6If1d2llhK0iyHdkXpK6jEcsIF8qiWuwLgxNE7D6oprOJv6Jt1FQ1Fg7OKvFeWGDYEuTq3WCBR4pp9+5st5EJZu1WrmB5DgqzPO/HoaldTFaVVoXnj/SKs7mCT8YrUrARmtrr6lHahMwJUiRAhMjFDPilfm02nNAZKqZJE7jutp1gMTTxNG/C67Eay00TBuASAZKEj78Ja/yZMkrORrAeE0sX707oBk9Sfx/1aCikHlr0EOwDS/UKYOCaRNh3BQ0jIuEs9N4WKZ6PhqWqZ53UYaoQEpNVscJypX5zB9PzoTq1eHcTBIpQj2tABQa2jtDQM6PR7NBtb4Rdq4nJVftZ3b+qZ774oXXut7BivNUCyHGyqor4GBsqtHAQE4ueQYa6biK622ah3YE07OgZvPHKiIks/J25D68EhXE6rWTp2Ty1TJZ8bQA/wePZBJEIo2vdDa6ZnNYFF2XVHHf0oUEbqenTJLVZe6cKPR7WzTICJDV9r0W/kqmcvyP3gsdr+nqMoZw7ORuozizD2fBksD2fdEYRwgm8U9dlLUusgFe/rfd28fK6g3e23haOFj2TCAaDh3qoPsmqJsOGMALoqti5KtPnDg5//JSOJjJqX3HjS/5LD7ddvLzosbT+k0NIYaNMDmcpRMt1BjG9zIIa+pvKQqCpNyu90T0r25QXKdykgVnN4jgXyesTJviDsERq6Y0xyP4uMk0aXombtOUytvQW3LcrSmxxJpPZXJJiB5Jxxjrktts0/yId4g1HSHdtJtP/6zTjRHe8cZGuAZUnyWuD8Xl5JMVopxFeWfCOQwXMc5et3/CUjQOrzJ2zI/eLHYaeF9nmAtxPzowik6WiWpfJ7LE8LTIS7xUKedwt0fGVsPnYdQjVLrfVEBi6nZGl6kePU0J1daOF82IDi0eLuCeDlea+5ODT5+ea3/+41tFKKt5mRou5n99q4pkQgbcAllY89Ko9Z/fqtYszzB+2g9fGdX98e3yA4ZgcWkFd3u7ZIPglcRqkNbI6G5vWWnbffLobFT67//FSoWDIln1230gdnJMV/d2wxESdBoVffd2FVXg7GZHBny7fI2tIVG8NF/z+7eq708/iOSPECDQqBDzG+phjWQEtyarTIAISWTUcNsAGLFsfiWUDaBguN7Z5ma4xh0v8Yh2zSQLdZFFjSrhKnm7D8qHthnGAw+1vI6Z/C4YwCWIs/b8b0REuTua3RHudodRMhbfeHg9fOK56azCe6WPwFHk+aH0wfqNmrgRZSkphWASxyqGe1mK7Pm/s0qyct5ggHarsM0xUkYSKSkt0uRNC3j+XS0tpfL36/6HkRzTSHQptCsFF46WMvgFBIQfKCNGkmRKpWDrGUAV687FHQpTf5P5Nzus/hh/MP+mirwsNKFSE41atkuBkoD5LOZJdEeltNnPWJxMc5H/7DqO/iJQLiIhEvYHGH1RBDrs4ytWs8l6EGBSgmDKWlVstYhTz/8Ag7uEizJrIDpjCSrCOJ/MPu7/DhKI/WPHUxRBE6/2dLiuFurHj3uiIFyD8CXxEsOm9C76FwO4u0tYNgfJOkjOBUHaZCkrPpK2GCjklO9j5sLZ5MNA2iSClcalIMAU1rl8XR4BBWMWaZSiqU/CjvJBIC7KISADcOfc4EZ4Nc3L8lwQRPGynh38Vo/I2GaNBQsaYcukBGaE+64QpdaMVzWPfrdKNEdIZ9FkLJ3KG+qimSbgZcMq/i5Ehaumwb//+z9PfkO61GW5sPP9TWct/NX33+5LlwmRU+Srf/72YC94Gibf1F999SX7/i/BabwvsxVVJwyb8rM9YuZ8xF2IOAnBEmF7EDEnX5skz79ho/6VxfXn2dne11//9Q/fcUjE+PW3fzMW19Yq83uMkwyC7NzQ7/aMkfOIDnxykpfHDH304RniYIw7Qd2UWX8aleGMPzyRLw0O0x/JHyLi/gfyFz+N6zsnhgUm5hNtfbA9/57Jl8F1eiMbvA5xwVSdOquO75swFgoeXK+29zN5Ud1y4Epesux408GFHfG2g3e8xNAvW242KE9Svj0EwLCfA0+AZWaAXbDyeIA90vyozAtX63orKdcLdt/LVUX/pVydL6SpdigJ4nWILRJ0IVBefRqghakgy1wbwvAHyDsauWqmcwixCT9KCIKMtqkaBO5oa7CdQt4NjRdHfcXXTA5SryAV+yY/qQTtDtIUCwOsQ1gSA3/D5PePv2aykHoJqXDEnsjHXlUp0YkgrsFlmxqcVgaRvW7SRbjZK0BuFx+57GyotB+ETYK8uLuis/qgtiL6raRc7ilf8xpD6l7u7wDb4hf70Ld/hR3wcv/7O1Z8DvfRt3rS17z+AiSV7zCZ9w8gQ6xroXKxmeKhW5ThhLCYKHmYl9G/DQR4lYunGbrWuXjqwL8YNf8sld4k4sF2KrkN+X6tCZ3CWm9ZIJq2GnGQpR60xiRxVcjYQFUIqfts6r9RROOtOsTYW2lAO1hpF7S3i7pqBCvVAXawUrt/rWClOuQPVhXdJmvmBBdVgMdlxuV5DKMS0q/SBxtzvIoOcEWgXbDSneldhzii4GoRaKkouB3AUQGYPtdDFXQAuwI7xo5RgQ6g8t2nUhXk7AUdQlXROocNVKFC7NeQduR1fux4DR1gt6H3V3C2QYfYVci4nFXtHtqtPUbmmF79zuuOBawAyFjARgVULGAF4oxHrNwC0fGIRwMaD72EAlCiCVe8HokmLGezUQaN5/HXQJnNvkzJIZJLH8H65brNQ32SGepYv3BzhDo2ygg3ABi/A2U+6cv09v4xeBlBqCmWyOUMj55vgM+atGjeDB+8SXswquob4NM842dvgudVxd4AH8KZ7k3woM1+I3zERYYQRzhrqdDoacLcyBg4X75hMGyRtNmo5MXbVSLG9ed9YbTYMnJzKMX6aatDlH15JBi3XIHqMl7Glp5UaUhvRiXDA+s2VF00TGNTfOsasNee6LHJ6RqCoKryJ0aE8H6wPHGFFzcjs/eFdY4yHgJ5AhE2iZaMoYptBnOkEmXVsiuhRqZRSZ/hnahEZ75wVmJukVolwipxVy0MwSghRpcZOVzFoLcExvx90VPasYcJJxcsixIuri8D4W1pQLWH2pHDcSqta6tDjNA52Hv8ceVI4kI/H9eLlENyFrQ2MASsQ6xM6muMSD548YEmkS96ABR6iIWkfCIzSvRRy3vjkSddPHmsSmp70a4Yz8V4cbAzBJCWoxhzvItpL3SqaMQpt6mmSPpluAMm8TQsiqA9/IC5uLGo/PNQAHKxwAxHIVcxnv/9WFD00fryN6gwXqXCWK/wD4MVjsRtj/PVqpmNVDPrQ7ezSrgYXhE2cZ1dHVi9vOy1m4u8fJPI6jjHviODuA/OXl6Cblqdsd1CdYWobarT3jJ6qXho60lqPPb3+iPUN1mhH3CMr7uqeKQz1DjyaZwZtXxigg0Tbx3t+U+MGPUueCzgv1Xh9+jjd0ys4bCAbLTh7dHaWcZ3E569VynWbksUuQHEhiF86mCJAI1JtTOAEc73k60BCJulOd9wAz5uWQkXRtodNizqqjdqC7JZdEVhtcH7r6k0YYhkVALKwrl0RgiL+obNYmXJzjx/g0oOIHrvnSaL8vN1eSYMfNfqMk7BURp173384vUuk4C4L6maqTCMvW4wBLW6YaQaEPeCYEb+NyvPgK5WslUoDrWSDryq5yYQcdtva8TW/6EL0Pd4IDvB2cmCl1qagg/FKiu+8UfyB2S6ZfUH3S8WtX9DYrX27yiezc61GdzgDxTgt6X/gQxlGaQsY3NoQwWZjechxOXHDAJtHF2MHb4MJmsEebEMJhR8EUw2CDLeYMehTJIgooBB5L+8qttoqJ9O4/pjwY+jsBbZEeQj/u2L6Rd4M/jD17+H+s5VmQh7c1Xkz5bxVMs4L+P67FzF678sSn6yYeQZ6AzvPN/MadCHXzQLKfZ6P2gsfRz1rJFxpAOfEWkDIEpVRWccQJbn77pLyaHo+V87MHhxhJ/A/Yge4/mPVqine6jnAuOOpAD3CKC4DlNAvyFAKa/LOHR0j2R6/t2hkl39vyVQ4iK8ZPQDWq7n3xss2z1iNgiDf+lhxMa03DqQGkYyPD31GtJ/iBpGslT3AgcUJp06Bg9wPH/HWWbw08INXZm7cm0IJv1pu5Jd/fdH84AI1wuyHWS+kC5pB5o0e/6DVUt6PvV11NwgTQVWufpTHC+qlsIXoGYckXfE81+OAEfym1DPESFRjBG/aQO7DC/fK7yfZdzfVHKf4O6uTu8Nhdm9H/zoU5m0yVQw0FCcYmytet6PYMEXYSLrXGQOlKcfvfb+XBvU+VcKi3zNKslHXvNl//2FdxMoYo95IO+y4cMI+paBkooCVHmhxcxtAzADMyh4iaMjvmTJY5KdNaktJC9Z4jvRfURZgdx1IkW8GsCYb9hjWj9QQD2iUWgHhPF8+p99khkaPPAKEoFBB5opEu+QSHHggJpo/hQj0gCf7Pm2xfb3hSL2920rKXlV5FnFO0tIGI/9QLXYIFoJY5btUchNFwLCzF0zmDCTsqgtIlMHoW0dZr+B3xs6cy7CgECkvi71k5Dbu9hlbRsN3x5lMrfLrZ5ciCC6oVnUrs3dy+yQ0FagRDlv2wHh0s7U87doBPSugPgOQCEC74uzC7pMPnSnWMK4YtCqNi/GhMayJoMo6SANilUAQktl+ofWi4j0K10eKYOZxXW/qJupneDt9kgeg7THmAsAm2I8GaN0liAGwSC2MkN1yzm6nuZlPYTgp0XeJx2jEDjINkxAn7jKYmG4GQ4GY7sUSzMo6kXB1vUJz1+BJTe0Q1/6AZU8w1jcl3UyGqHqJAyVFPOTyzIJAibYE+a6f5Qkc5dBonJ/4dxMESjTi/7hZ6ns5ccVm0lpRrjgflA2oKfB8GbbUnSQbq7toFYm+gXt4Lh/XfRTgNdoc95264dCASI8GK6WPOToy53X8Qxj5uXZZS0FVg15tEzSfvD0kpmC61uLsm9RzFLPrVLPCIpZzzOrnkOr1KFV6tAqdWCVmhAUs9S+2R3ZclYc6iQMG2SnGDutIMXYFYJu07JknUxFVvLZdYtBkieCfKMom4wrKqJAjrfqSpe/EW5wxMA6hyLdn+vyap8xDFVNeF+hpBvjpwXLou9YWObVDyLW65J/0+YWcqUlk3/+WSS8GEF9k4VJE/E/xAnfHYECZseNaX89dkJAm4Qv8yWfYXiHPKucydWEqPhlXHIMqudsHCrTRBfdGkjA5vk+zQXBBot/1cVc3KKR/d9XZA63AERKeZ21Jx3G+SkPG0wXhmEzWhVhFhcFr+84QRGGhlxzuIlv6ue71uEVa/shy7PHP++1zj+NVbn6xcnvhy4J8jLiJQcfB9vyo+2J//jP371tFXIr+N/frvyDt73fINPEfb5y5j7bZEyQ/+G/WsMf/wsV8NOQF2iZLLe65RtmIlzp+lbLXCi7UZrBJAlexK7eCV0CxLyKhWcYDvF/XzEJIk5aobCWzuDWWBdhqTsvyOrf/odVvdJbO1IvhpA1aaVP7863KM4AbfCL/1ylMhEug50GkFK0S5bnGF1C3BaxH//b/6Da8fbnLz975cf8LP3ZKx0C//y9j34g2Pee//P3PkYBEzdvX6yUdhPcrDDCE9HVnr9Sus1utTo6et397fn/21st6G+7DWB/GHvK4EQeqqvNfD24jQxU0O+m371lDX34DvXvf/oZapM2Y5+9ZVXS3PO/Yozw/VsWdrJ+85YVsvr/fsu0rm88bx3TVWpoheWUbuPwd9U0XSz4+2taN+X/rpqmM/+vv6emdSr6ey//z7+ndrWh4P+Pv6dGgRr/3st1M+lyZyVgMoQpDigE92iWCLpT5yLw720TpP++a7KFniJI2E9nwTSuU1ZUnn/DRMHtRcqjmH2kca7gLxlONYCwU3l2WaOxJorze4IkrR2Y2N1t2l96S1nUp+vqQtPG1qku1IHXlUqxgyo02CbIoNa4ZpPnvCbAEPNzwyQLywUMmEGybCqoirctaie3VyKukl0OHr9pUhU7lFs2TzE3+avJ/Vl6+or8qQbt31Yyh8s3wvBYMplxkVcPXbnFIe9ws0xU9ZQTW9W8ONCxL0exkOWh+TSQKR6msUz2DfG3DyafjhYPy1zGgJomQoZGv2FnrvSuoIzcZOVKf+oqmULi9HkSpynXtHXONkLcuLBIl66s7M4nwRqOaWSiOVef9GSFBPDyMYB5vAK8p7tbo2eXn0LL5pB80FkA04P2pMNhIN05j1yFhNWrPsrc4IjP4rA6WGn4yqSiK/X4LD6FaOTxT3yldkAUexP8iRMs825i8qcVxpmGF6GhS3Qjh+W88vzbdkEIvXd0JNxnxLK64AnEilnGEc9xXbupknE5yQtYMmYM/PZVptivlCVn2szEWinu2UTyLlB5bXRU3JCC9iKI1XInEDHr5Orar+BtHGTIg1Tmhaynzw+m/DJYSZ4fN4VY9DZ1FrZXbJaev0HwsI2eL3ZS+ZIYyiPaVEn9e2OBj02eRoCeXVcIsvHix0XxNwoSAPwCf4uu0r74ySKuMMTk6xGE5z8craOnfufCdhH7quJ44KEqzPOfrlZbz/p8sAAbezDz/AdjNSh3LC5oFy5QRX/lRLOSHXNeDzSuhXj+J+O1QNQU3oZqfzSON5eqQXAfENzzv3HB0zjNBX3gnXqQ5zsfrNZk7jMjcLWl/+Iq0CaBrgrO4R7d2Vod6PmTVWs097AViqgtd34/EQ+n0Qakc7J3oSnd7ycQA5O9q2OFCdBh1Vf52oWO8ro6yHLYNp3t6zCe73yqUk9Pdz41zDMwvx9cAjvMwFOVenr6nxV0yhNCKkfeKlJ5B8RBfHQk1nm7RsFZpUasAX10lLDEMn+jMJ24YjHy2Y68c6owQmDnK1K2WRrin/hjJyTMs5DVbVA2kSPxnZTF2YWUBSdsGURVAPKH8hNWr6v9TzSqwVQTN3QipgETjhQGHK7q83IvZa2jAUZfl16GIrcBeOvBWeEeDaqECMRb2C4Nw4jYLeYujWktECRqh0apbXpBQ0Tko1dNXPL25DcrWcplkllZ+Km7cBtbn9U8C8/aAp+4C4iHGPiHbjy4sqKo2mI/c2P5acFDyA8lW0W8CoyJtDhQh4j82Q4R+VMfIgrRGCIKRwyR9ZZY9hcp+KyLkMI2YWH7bPU3PPya8rt/+oZBVR5vFhDPh+ZGJQ7dIJduK0FVR3FucCDonpSGDQ60juaI+IXI2RAcbIBR3ZrBwvry+dwsojzHLIIPIoooDbgDLBDEqZl4wpaD/LQ42BriwwP3KIBIESnOEPCUcVBaHNwdBQ0/DxMgnow8rwUNPq8FwfN2hlHwtDFIWhzsjkDgSbecGHjIADctDm67uVB193hedg6o3XCUroouDI6/EQwOOIm5oWGgBS1yQ+EYk8FkmYNeYeGzlrPKLEINemDhWiBiVLQ1D/GhmrsD/H7ReTCCUhahsQrForSGYferRd4kkTCPFaEofcob2PQFRiv/A6fzMAUXngEXjTKf9LlouVkLegAYyWq3IbdmyhPMhVGLPMuBdiK6QiDOdxFPfyUiH0Asu10I6NRpzoOTovOL7HX8DwyManpoQI3qmjlR3cMBTO+dK/zU91bB3rdAmO/boHm+XdnRkUUy3qCiOsSoCJOLWiDfBlnNAqLn36OQNu2mTioSluaTNre68bTF2bSMoyhjdrveB7+Tl/f8T0ZL8DSuA6Acp7ysjCdMC+Xzw30LeDZMYxho9y2k9eLTglvfA3EW6QpSZFY9COI7y8tbfRjZ1rGq6mS+asfmmpRNGwKRdUveVFzhtR7MXYi/bTN+bXUSy2QXUoJ8ZiGkQCi7gGJ5/q67VFfzAKZr+y0TU1ZKDSS3K+uZ3CKvgmkDSp4ABmRXzV03UEHdJlCj7K4xDy12wokexCxjdlUJH3wSsLsnHZjsvAHNZUU8TXI8f8dZpnuqG9I92WpYWrGhdiO7K/2ZxeapnMTBMdF4le3594dLd40YwXWt+WIAF1cnbLhBgPD8B6N1dM0ah3Yts0JO99DBRnm+Nc7Vku7ZoKK6Vjy2USwjnw82lHdotHsiJ2yM27XEGpjHEKh9pk5da5XDbFCLVRDdY6xXEH7PXQ0OvrvDIE8k0WFAJjpMoN1PE/zuadZHBBv/ymyztSiFCbVMhElFLEqI7araIwOhQ3YeBfS7wWjpxJM1vudbK7pRvnvQPRJ4vDRWpGGYe2VqYY6FQGUTK5Ne2r0y6Tj3eJc4BfJbGjLcXtlcR5+YrR2GuZdRCcNEJYOtaRHEMmrV4V5GLah7Ge2hg40illG1pHsZVVFdK/ZplLMFnm+tVG0J91rWItyrAyJwiaDls+56VNpOdHLeJ04MniGk8Tssx+BmX/Inq+PRNMcNR2211h0GAoW4mFVbA4gc3uKxEwD6cEVo5Fno+SujIx5qghWN1iYcAelEtIeDMF0YcveygRUTzF8RPtTbgITdxT1oACE2t+Hn9TvVGFIEt4eD/1BHRxwc3/OmfuSEdBmUyK3GBRb7hPu7aEmczLXVjdUWPCdM1uj+0mZWqJEvrcO1Rc6JXKk+/JyevwFI9L+r8ZKr5sJyoqrL9Y4V8ZqHPWKtY4h4JC0d+6dfNX6NiV/UdeTXAcYiTuPTx+PQcMGyjCeANip+bqGfuyqmoErF93t0ytIp09CCkrAzXnqjuIkA/hmBqJwAnYJ+r9jzRu4VdeBV+MlKNEERXwZSLAuX+GUesikmpbmoEipeaICUVcdXVQIaJfFTkFd1Itinll0ohmrN5GO4Dl6QdJ7T+GleXVHpszgNqmZm03hh0UqCVpTcpoEq0qClcaT1yjSv1pXfUlMVcIhPQzPA5FdjiMA1oB7CSaZwRBAGRZ8n7mXRT++hCwk3xEXMQw7KJrHErRFY2HI3Nfoco7CJLOw4iRWeyI1cgBVXdqxXpwRd0+ht2EDkyjduMuHrr6hh/0XNlGSO7ZYzOrZV4AXxs23VJRmi9iwLF2WutFOaTVcBJJrIZ6Crjm50CYrgfo+/ElbGcOdicTDyBHAuSw4aiAvN78caidWLthG8boPp3uwpEKAlE3Md2lHxeqNndklyKoG7TbJE4TgrrvVsmWkVVue1nipdKSuM+HTdogfhkoctXIb9Pa1DcYF+3aZDNmACjqGiNnR6fVbEIUuwyCbNwmIOHu4L6wYvLwJhbneDYmB12xSnvfLCSsmyyLltc8DEc54yfIs7bjY+eoDvevCxs9HHo40+FpybBoenBYSjFBXvOZha3a4ayE8ATKx6i2Bo1VIlkXFFZ+BYu6XTCp7B9Q+vBPemiwtjwVkUm+m7uKpJSXusG0ZiU/bGUHCpOVoV9oOz4dRgVLghuG4+dbDhAoFkXNbpxIBO4zKHBS9YTsS73nbzR4pT80HlU+Ou4+OzNx1MeLCrID7VxaSmURpnjnVDcIamoEBQH7KPHovj87aTiw9+4GRbI/TeKBS77u4oDMboeGXUMFRgyDb2CLzRP63DDYIsV/Z1igVr8G0HQ66hrnLHmxRDrmFrDt5Ngt7NFKohyuClnteyqUbiQPEIRhs4DR3EZErviuo5CaT6OirN0SfM3GF7h+hKxQ2TK/Ics9TcQyUHva9IDrXJSxYOBaNf2rfDIblB86AZDha6YdEsSmxoediSbQcPF050QTC+E0+L+ozqFMGg9jvBUSeUMdai8owUo4AOTyLI8M5ELfh4gk7tskjH9zQZcSVXVrMmYKALA0GnhAhkWGvT1gAIH3tnAADdN1QB+aYAoBZmwcA+MCQNfBsDHS5YnIkWrlMc+FTXSAYJJxZ8weiDjZINwKbdpThWT28PofBFtoYQ0NeDVWCf7gwisHPJ98DCayQnijZIOvWlqK2nX9NIkVFhwzdzc4lPpHDxQ7jZ2LA7bja+zFWDj0RtvuOpCeuSYplUWONpXA6sgpezLkAjvrE8Z8IJM0jZqedL3UTWpAy/qzwLZ/J8LceTSNF7ivnFZAhF1AUthM3IPRJl0bYoGCoI5X97FECqDOFxCPpEBZ2wZa/tiHioNk6Y0VQr4+XLHI3gB7gPhouqr/pkGGq+9G0VLh355BE+qoLs5hD7rs5MjmNOdNMIivrSHcqibVEw55duAeZLexromTD9Kom2jwNl8x+5gBT5vgNsNnNbxxHtG0DIht22ENrvHZOND35Rlw1/KX/s0pAZS6oOs2VizFfRBgH6RFOvM4KihkqHsmgeBRO3BmldKH9uOYHUmGoBg2MKAlitNFRUIEXedYDV5t13YMwW+iRuQnyHFZDyZZ44kSR9zwVX34fuyYn9QuaLTxOepMTrjOLkyzxw4AjqDg1VX+MeDTFfQoeleZKkB8Q7jMHkK3g0zCZuk0C1/XdJhNn8hzqKJQnkhzsmV9OVsPJFJgNYB+eRu4i9qj0eA2vr2wM32uyQjzWoMKtWCBzcl8DgYWSUEjhylPY4grpDQ92jtIOYb6VNXLzBJN6ABJmkOwRIbdAuwR9cyfDaExyuqZXsiRNJ0q03aOHO9UkFjXba81U67TnROKvTno902nO7Ndc0TF6I6zW9ZBbtEyNuh8AYlNs2RG0fUcOghFDyGQvrsb2/Q1m0LQrm3NJbgNkkrW/gGxOfbxBD9Z/EGJTbNsTZf4I9uBkC5JCfFmPLDIWTjT504Awbrlea+dmbFOrswh64CtnUuzRUdtVrMT19q7c0lL3sWRBpqJXwRyvAxHFoNsscL0+A0UxFOKw+fqNC/groRSgtRVZBhnk6jTPu6I7BdRdjXCyTNKeOc0+cSJK+54I7110VNChSSeCYSEXAKJGqh9nEbRLoFKk6hNl8az4cYHQQimq3LetzUTgPHSqQIj90gKnDk7X+qVhK1rIxxjR6tjpamUf2gBssZa2CEj66qh7Q493+ZvRoT3NurU4H1ki3RyY5zu1ZMyZfWCDZfBJkku4QIKcQIvmDp2TEPDM6lNK8kEDnyH5Gdz2Q7ZH9rO/80ZH9zPpQ9sjWMKMj24keHNmDpewR+4wcPPZaNKqRsVGUVNahLBrxTVfQyGhA+d9kAODoRuLTO4vY04FQ+FgvPVlt+5hQ28eE2D4mo9vHhNo+rAEwoWfYKM61tE3I+TWhlrbJ+NI2WW1po5RPJMgkWavWZGTVIg5y2jdUAnYNr1okkFq1VCBF3nWAnUpABWO+ivaJClJdNgSRzd+yITrhlgVQG7ttcQe/P7poj21tFogaJC3IJN0hQM5BIvmDCypiqO14BEUtqB3KopEwW9d13w3TtFx2VxE7uP0ClN5lBOV8zQnxmpMtCqZ+noMBQHuWA6Jq9D5ZtYzYQ6CI3T/EWqG/+SKmF98RFNk/Lcqi7RokatwNYig9hcQYlD0bYo838+Xo0Wa2iBpGgxhHq80htIgnt22IU7si2INnsoJl80bYPBNtXgUqm/7UDaUZd50F1PfxnSjztfRtiEVRwjGqK0nedYDd21CPGVzf8xKjXwyv7xaIWt9bkEm6Q4Cc67vkD8p7ecEz+rJpDEaJhT3MJm6TQKdY2CEGdTeAYnFAr00rICktj4Yk6XsuuFPLo4KGh5CphyKHkENZRYJM0h0C5B5CtGLKwowteSaGWvIkxqDctiHOJU+wR/uXWqCHQa7+ndjtndwlQPbWcs+Jcu8tEma+33MVk+VpHAZTXtb2ANZ5T2iWq4i2IGY8b8GDpzEKR53GFBxB3aGhztNYDxnuKp7mdZlnwYLoKo33dKgYde5/NFRgcEHrwWMLGo2kFjQNSdL3XHC1j511asLmbCaFzMOV4GCRnWGSvNaDky40qBxogePD0cbRw7HDEdQdGjowHFvI8EuwbMrj+aiGg8KRL9HjCOoODXW/RAcxX+KSBguqE3ZVp4i2XdGJ+LWv6zQMGpM3NUWOs+KyTdZ0YXqeiWGjDReWMtowsA7OPXcRtVMfuGGDGg5MCj+s4TAglIZDQHTCLQvg1HAgd/BEAf+WmWtvWAVKnSh0KM246yzgPFFoqOHXiqu6ZMmh8XRJvU8QqWMpVeUBWeXBDg11Ts8eMri79BGux3YXGkntLhqSpO+54OrrPB0BKXER0ooFM+a5CqzWA6PmgjRysAcmjh6Y0D0wZI6jglZ6oaf7q77QU8o0hnyhp/v0Cz3dJ1/o6f4KL/SUMJm5ZwLDYvSo2cNs4n2CRo34URw9cTscQd2hoQMTt4UMHlsgx8PoscUCUceWFmSS7hMgSrS948JRJxbJH7QHT3nNIN4+RMwIpmeYkPx03YWwGcccfH7KWySjre+6xcVo6/qmwZOkoTQhIyhKx9mhLBoJG1F16zC3qrvFDQ8lUB2PDiUTRA4lCTJJdwiQU88jwrKM9rqFInu9RVk0felg8WqOEiSQuvhSgRR51wF2ahwVzKBYCM0CkMyNEJzweL7QrQZbiBoTZZsCiFdMEoyO/YJEIE0G3xWPIon33IVVGtkK4c7LigKCcNylEJgcSwAgdspcvzZQUdhp4Kjm+WSXzMBwVAI8ChDlGYf4ODW6jRHjsgWGCx4et50QxWnlQwb1ly9fvrz3aCv45k/BH77541cPHukXQDiO/DtmfX36QXSj3XDzNZlJ/E2o3RWG7ywwuGTg32OrQQsySXcJ0Ig+TEO59WESNnhxhX8fji0vNopaXjqURSNhI4u6DnMv6i1u8C4/SVjEHGrwcSC1pKlAimx+iRbsXNIUzNhgi0b3JwvkGJGRPSIjfX+SIKcII/mDIivkY6T7fgxGSbY9zCbumrQxxbuJoRTvEmNQ9myIPaKPtHGrvsZWmGdVfe+REj9SKiQEw7/rql+rUkexeZNRY2MERU7mFmXRtiiYOj72KMCg/uA4TmNpvjWmFnFAKbWIDqUZd50FnGoRDTU47hF5POrlRcCocd/DbOIuCZSvUPIKLMW3hzD438MhhIwSmEizikfjWEwOhXcpK1R8HMmK7S9yPOaO9mOcMXFvs6R6cTKAdXBc1VPryUrYkaZMnE3R15kfVzmcWCBq8f/RPpz8aB1OfrQPJ7sEf/D680cWUxZ0gxhqFZYYg3LbhjivPwV7cHMFyKgewQLR/StAJukOARroX+QPijYidVFCbmOPXECKvOsAOyUWBTPYqYszY15SnWqBqE5tQSbpPgEaVc6oOKrzJX9Qu7hosrOGZQHpd7ICktIuakiSvueCO29SWhAtha0CpTZYHUoz7joLODdYDWV2/yGFxCDMdBOQtaZxWCXzQZcWXWbA0sbTvMyXfAXTagpHKUgVHEHdoaFOBWkPGVyF52V+PLYKmxhqFZYYg3LbhjhXYcE2G/sbHSJz38psQa/dTIyY7i5pvfCKaPnqzwfR7kYNFVM7ZrIC0PAt+XTlIobpwKOhgoPSeQ+mRI9VoNTioUNpxl1nAbUXPxlDDbnnuPFG//nOUit13grLqQ6lGeT4bdPnrDbabfTQaO/QTh452tti6nciR2ALHDxISfDYCamH2cRtEuheVos64/np2NGNgJEN62A2cZsEOu8DOsTwcl/Uo2oNiTEot22IeylH9vCXS1KRk2SkH20Y2Y8dzCb6JJCSArfdSLLHW8SgedI8SQ8d4tUojpQSehxBdUCpt90ZgJIjv4MMj7AkpdTGgxhyFAqMQbltQ9yjENmDUTDgsgNjxD/RqWmr4I8wL6DV0k+H4W6mP1hQfZXHg8jBcxWix85VFog6V7Ugk3SHADnPS5I/GG0PMYcBq6q4qllGGUGtjKei7RH4Ae6D4aLqm9oDR4MO3rEI+Jha1kZRatkOZdEOKJh8haLMf4TUJwVET27j9je1bvxmlMH/ng4AxDtjoqG2WsxRahcY3iEAdEDZpo7ByB2ig9nEQxI40kXbQ4Xss6uFYE1VxQxSZBTH+0NIsjsH62ZJ3RSQ/iGKw3oFZJiXJQ9re9QdELa3BGqlsXlAdT0JG7n/02Hu+78WN/4Co1YUNsr5mqbkhDR7OhnSk91wQn7SDIbxCl4LNQahY7UhP2NJCEbglIHbOJDSFKpAirzrADs1hQpm8DMJ3NhnslHUZ+pQFm2Lgjk/UwsY1APyUwamECv4WdFISg+oIUn6nguuvoznAg1+CQEc+xI2ivoSHcqibVEw55doAYPbiQBRu+0YjNpOephNvE8C7VWNrnDsLrcDDp46eFPmqzgaUTjq1KHgCOoODXUeJXqI+RKa4ouXWcwPg2fEUFc499xFnGpvHTbckxI62pMEjuzJHkdQd2iouyc7yPCsZfOEj0YjsFHkrG1RFo2EjezmOsy9m7e4wYNPVHJGmZiSIJN0hwA5zzSSP3gBF+V1dZDl9ahtEQmk9l8VSJF3HWDn/qtghjs2rytKjBgGkb0vQSbpDgFy977gD5pHR7OEVYug4glmcBPpWO7aiLFJYaOoSdGhLNoDCiaUMCJ5dv83WePI/NFh7vnT4gbXuojzouKcuhAaxVFrnYIjqDs01LnW9ZDhaSdh1FY/DiSnnQKkyA8dYErrtjuEpcxtbEwXu7HIq3pV7IKz6PEq2O52g/zihNzhU7iDUTchGknJuxqSpJNf68DhiLE3CKZkMxU0aG/UAicihsagQZALSxkEGVgHh2wz9R3GgUOzwPEVJvTbvcEsGDIpUTDmF9B3DnFPj1Hja5F303hWGI9pp00MpZ2WGINy24Y4tdOCPahKj6YlddE0iCEbKzAG5bYNcTcW2WZjNcfisOSs1hUQYZ6mDPL+jI1BEkiNQRVIkXcdYOe4UjCD61qYL3jJHcbKKyCpdU1DkvRHLvjoumaBqXVNBQ2enSVw7OxMwKizcw+zidsk0HkF1yEGTz9hPl+SoXpGUJSg16Es2hYFc+osWsCgKANrWbXgCWVENg6kJ1APpMi7DvDABOowg2tZmMRUMPJBDLWWSYxBISDDA3rB6vl49CYCRg7oDmYTt0mge0C3CLP5N0xUl5bebErKE07qSseB5IhRgBR51wF2j5geM3jmnCZ5Tn2hYRB15mxBJukOAXKeOSV/cKGZxnXGKZ3bCIpaaDqURduiYM6FpgUMzk6HCnCHwBiU2zZEbYqWPmzKuhxveOl+28GUneYqC4kKK1dZ2XJfZ8eQv26FzZtGUpu3hiTpey64cz9WQYO2Yz2Q0umtAqXMzHQozXjsLECJJHeH0dQ9qYZasRMowWQV6HAnTFydMHG81mSl1xpLYzVlcbho2GisJQVHUHdoqFO30kMGFzjmyvxzj0RZtC0K5ly6mCP7j9GksI6p7IwjKGrN7VAWbYuCDTRcAAb3N1aGfDRioQWi9rcWZJLuECDn/ib5g2ITK3hZN5TXzhiMEpt6mE3cJoFOsalDDPf4bIUYkRaI7PGZtfAj6Q4Bcvf4jFzpVUnv6KgqEvDrzyPu+es6BzXbwbSZ1XoRNWDBpsbJgnnRCBOSyqwOPCKWccgrz9/VGOD+IB308yUvyzgCzJaGATs6zCg1K/mroApZonWFCYD9ekPjC+1BkPI0L8/0hon+wa7RGdhlIghBW1nKiqOjJksZZNJl85RnXVA0ZPV/a2QIFyD+bStK8rDXWsMPz7+ksSDcwlWNMi/zk6DO2x7HN0FZpanaLDtXdB5/FZTpukUr8goy6H6uMUoeNmUJbpMy627v/eAAeP69sRoyhD0ag8HHE0l7Pf/BKmDIeuf591eCBslKVZZV8NOKVZYrVpkFMAv+f/a+Aspto21XzBDcDWfDu8G1vRxoqJikkDZN2dXa8q52TZHshbRNmZkZUmZmZmZmZkiZIfefkWxLsqR1+33n3nPvbXW28bzPMzzzDs9URAWz5xX4Dh9NLl2J4eK1tcEntqO9Otyzr+aUiojgVpFJFRB9Qlfg6KoSh25NHJg3zpcCi6x/aAqlV0sPzFH6aoI43apaPJbnSYhrPYHhjAVbV+JxXzyrq1lFV32KRlubJWnXVaU7nulN19bN9qN6y31TB97iks/GldJirjcnkU8mSw+deXNglR3rR4klVUXf1IGaZy6imtGr+KkZD0pt3eKBXRmI0ehHCAhAbfEuBA9btpoxeSAWKPNhf5IfEuC7LR8HYpk5GRDGUl5O8yTF+9wafeGAvAEI0wd0AGhFLd7nVnZeVEsrRnyIfhkMHPdOFWDHlr2TBiCB3B2IE9czLnXh4EC1NyEQB/qqJpAR13qCvYgN4IASL17cWk4o10n1vlwfwD+1bcV5AJJZmv2Tu1SYx/lyoGbySgpHQAIIZiC8EtsegCEOHHpa5RQp6ajRqSVyha6f0lfoJIumJJnpiBpqof8NTDElmWxXYt3AsINa6PF190RjajJpwJcyq9wyXQUdptaSWIl1qvC2TrcS9gKLrYC3TVMjNAVRAtwOsmbvFk4KIloKoK6c4xmxYs45mbYaP84fB5V9lCcM67C3y6VuSzCu9I3xw0H1H+0HxrUe3zDF/K0p8fhUL6y8qnvSymWesbNVKX/crFGe6V6qUB6FwCwlxYpUWzfSiwPr3lwX4tkL8URr61oC7QaAMzwwb8+KQ14Xt1wjeREcGsmLABNwsifuSsFpLhLYORbVlV6fTkAAbwDCrAEdsGsAd0p6s9PR7p7auvCA3OKhl3wu2h3VM7nI37SixfsMt/Yqt2NpJnfBhURXcrqLmJMTALrVntMiHAPDSYLyWlzOTGrxSmidMaW2rjuQFsuksuAJq/T0GiMXb2vrgbsk55XszJ49e0FbWzQKVxljahQ2akYy0xvNKrlOF9FdcJ1+Wam82JuUyg6UjCWGZylwOlFWcty10tx1aWtN3LXSTgDNiVs/WzhsT8b6YqBBcLcWJTSu9fg7GwuwqMTjXgrAq1HwKv6eSeydQgGKzUbwVmw2AlQP7tbPxKHaX1IGKQOofjfDS9W53RiAUF6uFJ+moIAUu9cednyA8kqilLchA5Ac3Ws/kqmRfTmu9sTd74wH9Tvj9n6nu1MZD+hU2rByheidzl7FKrgfGA/uB8b9+4HxAfqB8QH6gfGgfmA8oB8Y9+8HxgP6gfHK+oFxj35gvLwfGB+gHxgfoB8Yd/YDy5WiVepSSaW2zheFjZtH0R6wDxkv9iHdAXO14e7K5dmRcatXBymrqz3mtlLDXYw9W6Ae0AJNr4wJuiwVOdpdsaNmP8idne6G2aXey+epAwlgTnl0AGG8Nwbno4HjQThwe5Q/PrkMSmbMlS/bzz18Sf+Vrk9VmfNQwZSnSEm5+GNK4QJ/JwaUSrUXENd6PP2PedOVeHyiW16uRMa5KU5zmQvdPeaSYunX7n6U/0qKlyWfTXN5Y6bWKitIvv0T+yrWWC+oO2rkMrrSUV64g1VVW1tCS8dBzHLD3Yh91qskNWszXDqFTlrDLC1j1b7OjFFqph3S4pCsKAVXn5dzgbR4s72La/42V39H+TMmuqB4PpXqd9oeHUCpK2Kw0rujVBQWp5AKQneEisJi18HJhD/N8Izww618McsNuDAerjZbkS9cLdIGHqBKgVwp+lSE0rAqg7sawEtbxWV2G27d4TC6DCg85OXlaOE1L3BFoa9dLZ0tJlIR04zCY2A90Y414EUQXVPaQSJVlzNhEz3cJQdbALp7VpvSDl1JpRQ9mtO1jg5VBzUUXPfpVbUBdYCqvaC2brtK3I1G82mQJ5qS1Naq8L2FTEwBB/timWz/PMiBMuDfeKeLugpv8Igp6bgGlERhL0cBzyq6AV96AP+CJfi8mo4VBj3eJD2fLOgaT0K1E4OlCewvcNlR4j1KOqaCGYBY9wgXFoup2Vw01lmoO1AnKalsUo2bXZColuscVMIcmyeAoHhfkAEiNc4TKF5p4m1Py3UOLQGxXF80k+tUdc6UgSsnLA2XyOgpuCkZbhQxOpVsYYeHeQ4TPkBVfDbCKmB2JZOPhIfYpTkV6GyHyFTIVXYRrLz5SLhYI2xiMNOTTxtKQnVYKW32sDJJNWJKVo32dmo51cgqMVWw5PAuUKs2lWYaYPfDq92c6cP0FCt+ZL9mEjAraiYLRKtkxFVYVrS1qjVmsXp/0biaUPLJXNSx1bfYNTQ7WaDTYCg9prL3p8DNUoAy1kXJ6pmYahhW33qCC83kc6CTqqtGJtmjRvVMr9t+iaHqPa4IFBLWMrpBWF6tXWeFUUURVPtyuhLLOS70sQoy3FsPO8bFHfZWISx0rMG+KqtSwGjBqpFJF25jMWWgaky0C6By0tvazKQoRKkmgAL3cY0LICjx+Fgv2NwzZqhrxvuj6pq8kpzghcPY5MHqbmmbVzkjHc0bamm85kUwM88oVmJQWtV0HCpDlwiklqUulLiSzam64/GqMU4omdGVkkqt9gG95MCfGU45fO8Ggumolgb70uHVno4xXjm3jFlVHF1BJQd7DkZOr+oyMumoEetUwVs/mYJyN8UwmVQjp8ZBRPOqMbtLS3cpbW3QFM2n42pCSwNt39a2rkxWW1fjTweBqK2r9ScAv0GBzmlpo7Zusj8RPJDUoyTVdG6Mg5TLZ5NqyavRTjADIg8fGlKz+jA3BmJf5RQW3BnlFmeyqg7a+fnzfaEJ80e4oXQmDUt4mS8g47pVD7EBDjO4xc5UGu2GFcOKZm3dSA8MxL22bpIHktHjqq7Go5l20DOprSsLv2KAW9Q9kkMxoolkRsl5+9ieySS9LSm6rvTX1k1xQFYe5dzmyT6sfFpbk1fBhdidtXVjfUhmPvp55EzRCT6sUqGb6MOwJX2NP8XMgQCCmWDOemJmiq3SFQTuWJWITvNkH1ZA8pVIZvL5OaEZ0LrZfR/nQ4LddbXfL7BBWVBilbJgpA9DcWWODSllznR/irsS1PhTzWxy1j9QxUsJNskTc0Z1vCenFNEaT9wWmakOQnevonfYiolldoelSHNk/xhvjhmZGm+wFFJnpoHt3m73R3kxTNcnekFBKWVRbAnhLJ6JfDpmSwfT6C5ZBZLdNNGT4YjHaE+KV5tTwEwNP94TK6XgOE+8qDKcOQ01rj2Gptmd00Waw+jDCSgNRY4ZzXHeYKGJm+wNB9XyIsmWpeN9GWblc3oDZLYEMY3uolUgBWRogeJViQuYMyY1nhxbRJyOwHZvgPQucsxQjPcGs3mjE3ZYfTxwqOYab06p/I3wJiiuql0C/HLKzjBzysfvUidgpkXIpxW9P6r2ZXXVMDRwIHedW1QqfeXkHs3QcuN9YWc/oBxX+9RYPme+1ViobmanMqnlVF1JtrWtc5hL2eaiOdWaC7R7U12ggIG7WaJg1RcL8gzomRaarJxq5Jyp45KUGvEyKkybcX6os40vg+1Bri+S9PLcKheWct/LAgzVhACCGbBpAQx72FZbPKtHlVX0nHPmooQPMHPhJNY63S0VB6eglPxuolObuFF7FCY6OV0ZLR1NZ8yBpQqOD6nxUQ5KW1s+m1X1mGLYBisFKKflkqoJDXNB4N/scA9husPtSjLTW/BgtAuKKVktB2dAa+uqi5iSg0F1lTqb3B7jwhjTyMJJMkd5KpOVlI0HHfpW44+buVBQNkZSi6ku71yikrIpJzuUTTnsVDbluJeyMaytV1YirXOYbWnvpMGAjPHGnIrIBXpmgnmGz5kqbpktE8rpzkwox80gTfUn2INVqDF6Pp3TUmA1SwGzvVFbBTeq3RzLgYKi0tVcp57pTUfVPjB/bcapXFhbNyvAQrmsUIx0RTPUuNNxl6i2rs6X7JYUJgKyegZMzRTSa4xbbE+lIQVQVbqjRiavx9SCh+YagN1Dt2Sig1lac7AVlbAnJQVm5XVb1kUVvSMP+Lb5G5cVJaZnSu5O8CRpiRLDO3CJjF6ijPakKHqHUVKHLizdX1tX5QWV6lhBrBkln8aUY1ocXE2X0FR9cBlY45KofVlQ1EtWhnsSRtil5rSdOaFXaISscWipEXIKSo2Qm+hshNyoVyNkcbwaobkWxSW2lzRfaGzRbiZbrq0KqqisfLW1rSuTlVSRB92hijxwpyryINjTpNAJc5VhECinpJQBZVRHc1iGOjthZbA9MIUOUVLtc9Zul6DKzgPdSXPhZbhTDP+prXNJNSPam9HjI8qk4DXFDlVfbAHdaj/gFWu/M8cC0JJaDHQCJtr0SphmAtZXQrUnZiFDrHi5K8xkP9juRpGUcBQNu7GkjpwkGL/RnpAZgAmemN33Qhkv6Rbgd9FQmpq1E5xjSztid3qohZv74dJgr1Yxsh6NsXme09B61IK2hDMZQB1bA9aEnikpbTcIeuGDChhQfWD4UyTb1b6r3+PCnP0eF2iPXtE+nF7wGcC5QLv9Qi8goSVzqsOXdW5RqTNZTnZ0JsthZ2eyHLeHyOWKrz70wJ360INg96cwniis2sLBfaGognVNLQ3ntl2RqAtgGFpHGiRwbydYTpgWwPTquoKbE0E1t+dBmaw0HPWgmyEs9CdjStaI5uBoE3rmkJtXWsCLn2S7vEMt9lmg2Vy31VXFyKRBJVETiYxebOMBBWjl4kxKbRFIJp0RcQhK/UE3EWbxWB/Q2QFwo16NHeQ49LlLUmrsyqiOxq4MderWMthLP8OdDeXxmeoHO4vTZD+aV+VpTyrpbo/wFtrTdrBpDq7lqzlVLy6TtmvlUyJlspLO9aA7qqgH7opyOcFr9GTOuFnzja5e2VQHp9SpdJhL5c1Fc+pJF2gPiqytCUWNjA5urkhmVX2Sls4V9lGBfVNgH0w0ahgxJZ2Y15PR4tOnL5jpyVEMWPcS85KZdEdNPJNvT4IpmgHIWjo3swbaqJRcdHlqMBny1KkL2CJtKPgF19OhTgTOLRikpTqiuUwmWThcK5UEMT2TlTvh3fCdSrixKdqp9gmdSjqeBIOsuKaM64DLpmAZ37xYzmmWoVFXeq1Bw1RoThkd5jYYXTUsG3ZRbV2J1t1j9LhoBZGTphtlNFPkoq0pp60pp2W7y2imyElLuqNQEDlpiXJawoMW18topqi2LlyUwUtbVAM0a06yE6itG9RhLke15xPmHq9qKDAzD2xtUXVzf+BIpzyuFhEzcxVdn1eaqDQnJ2FmuuB2xdBiNriqCMNOSkE8qKMjn4h297S1WT/GuwXz8mmgH9V4jQE3KPrjyQFwbQA85o0X0E4F4NXleGdGzy0YXSaHlRj8b8HwMgzUtHKXzJQZUSY3a+6CqjIArFosWG6ZnBPIlnCmmWoBE8jO3BoG7YHSY+1HBHsOhxSF6cLFX6JN1N0zEprANja4J1jVi4f5uY6OVDLap6nJ/DD4s1dtBzdpGUYKXHaVnu0QdkK7Sa0dRNFLHqmEbt2IldWyKhgIzPS1A46uZOGVW0Xy9EAybMQK1FlBVCOfArvyjArZVmpUzo5l0j1Ftn8iAjbcIZjTtQodzyRy8LqGytjwcjJbNGsHYleU0M48CQwBuDosndFTRXZdMDtbcjcUyEwZprupfLJoY0agDTWrKqUI1gdx1+SVdE5bq0bXtFSWdFklXpnLILhgO3GPGita8K81Ngta3GFnToV2CvymCvnWULyiPChYSyhGrrI80FLhWCZZWZJ2JPOVFbEOdyFvCGQrYAoxriZzSjRtK/A+Gs20ZNvpDTJBV+P5mFpZXtisVpTfNn57sruyZI3lU0ChVZSssWx/hY5m0j3heGVKzOLGeyt2OqZUWGSsoUlFrQWYAAJDgwI5XAk5peodamVhUfQOu+oN5sbj9vrnaF0LStGRUSmlu3CkKAqHhR16Jg8OxeT0/lF2orMwTvGBwLREBlx9Cfa7GtWQBcpuPJOL5taEo/VAty1zy0OWvMohX9Niiutd4qboMi92o584BMShMrGn2w3ejjR4O9Lg7UjE25Gwn9jTEStN6p1ple5JZBs85Km+gnyEQ66taYj2GdDbciCdhDZGuoBItM+yUl2GmHK3jXDRhtuTcNTHqXDUWx7ylaegfLBD3p4INVnppiThWSRYysExVwGKrZ7cENMA63QmC7uvEhTBUSgc0JaMAB1tGjtBxzUL9kSZJx/gRvihbiyt9poVzXatK7jhcpApNHfxA5YZeKNXA60MPDfAmJJ8uwUV+llqX84MEegdwfMUfNEYiovwN4gpCDpnmfLpuGz9zKqgmcxpYsms9uXYosmyohqqFZti1yPWmU93m9Yy2Rzc4C9YJpgwps00aPlMz9JqrxVvyTKbczOGGbVUPmlGTTOKnsRNP805A3NIqlrR7VT0uNGrGZ2DSkatI5XRLDvmVejg9Hk0r8Un2WTg0E8enp+JZdJxkNFmDpk5A8cuIHNzuqLlDLEoBHEy0yWhJa2gWjGAiWvGIq71mO7EgLrLRsJg170WCQ8vE4J/zdIGO+Mhs3nqHGOJzDAmMnqvosdh/zsRCZvVyTwOU4DMnQVmorQnwdhMW6uON43WIY9CE9CfjnXqGbAwNtkTLw3bFMCt8SLpakcxOWqDCOZ9bdFYJp/OTRyYWO1DGeElB55P8AIcOexpFZTTqV6AFV4jn81mwAJPJusZPTcN3ALtmZoW0by7IJM1Jg1AAnGaMgDHPPo2fQBWXDViugbXRQeitucTCVWHBT4oEmoPKOVptTcogCYJpK9n6TNLLVQ2I31xzyS3BbKYUjMrIQL9CGrD7ErIUPlC+qzK6FpHGlT+AUNiOmxKPNPPIpeqX1AqpNRUiRjkXGkSxrPk2VhgbtWzSlgckKXWb0+VYNHMY/SeBNv5M2cxA+ez4jDmKjhxVpj2Ge9Bss7teag3Ezcnk2KZrFboTjpxEItpDrmudmhGTu8HM5rgl6oXoEk+PDipbIln+3A8xbV1u7rlZs/ZPetW4Aww6+YkDna4Xa5IYKXzyM3x/iyYmWOdODgXaGtDJnqgrhbEg9LhoozypoBIVJVDIPCTy8XlunvqwCSguaf40qwrKiDgEQ23dp8QSAGxmRTIMDX7rEAOuInBrllqA9m2ViCYaHNxsS+xdLp3AMYIP0JDORDgqAWlAywVpLFMOqF1/FcqkkdxsGtycNAgY+Q8ypZXEzV9YFqhgZo5MLXUPM2ohGw1TsuDuQEZ4EEbIEL2ds6jsJe1cuN8ObCb75/KjibQQxtYNFiDvVpAO6mjAodsGtOjghQU5oBJaTH8ow11rrNvZGqhfo8OmlnFzS0ptlxwNgUg5E7/zE6aTYuP9IB1NZbR41UeSFrtrfYQA3/GOORxtceugarKQDgumFImLiZ5JmXqu2xOd7ocs0Yq4CIYXU2M9wRLY+5xnnjaYrh65QVYaQczb4XeyMwyDnilINbtWevrKyHbq0rdABZKRX36AExbgS9PFedoa5gXXlMmNIdT4LJS81qFIIK5bFaennaKOS4rzxLHsG1COWy2sjEwaQk2gIz1ZCRUJZfXVWN4GQrCXh6w8k7DlAE55aM9G8veZSiPhLvHUJ6YZd2B2UEUeJOGlfUGLFbTgui2yhjIsxXT8nJv8bwqaXkx9ivw5dXZxixPlbJqUJ5LXu2Cr0MljV9e3l2DovL0t8c8m3NV/fIiVt6A+AYLrHuYwSov3fb2welJoeYbjt77eE9OSTuM8MOd/U8z08DVQ9aqvRlvUAfMK9oqZZtTdHDFIQ17YUxB0Ax+tLXFsnkwCAPKDBx+g6MDc/5tXjt44wnOPps9OZO18G/bc82oVexxU3TZP/K4aO+fetz4Dz1u/E89bviHHjf85x7/szxu+E/zOPwPYxz+D2MM1mL+iccle//QY7Cm8088LtlzeRzycMDeQEFF2dZma2u9guphwzZdYIaE6lBzsd74ELOVjGvgcRC9G+z9H9KhpuFOQ9hxi4I7baUONZVSGgo338gd7ekEuGcK6FLFMEyzEitcDjQsYZSWh8B2JKDV+cIFa1pKHWb9zuqZVBb0k3Ul3T3ZEtoub9NVI5tJG2o0o2ggpZTcoERGVxVwPVU+HQONMJVI5aKJ7AS4aauw7TKdT5ldGSAs7Oeybkkz7zMyjyBo6bSqj1RTvR3Z/Dbp1Rm9e2kmrS7JgO2uOTVeXUBWpWNKFnSK4pvqekYfV5CvBDftGbmlsDkvWhvvgheZly8V8aKHK5TsIjCEKCKjC4jp4vKMkStiI0xsCewebg9XoVdk4vmkOsQOmBYdosWwHIxWU2bHRU2bl/XBnkBSS2k5Y0wZZu42gO9sSfH+9BJQEHq6ujRNE4pGrUvjbQa59Fvr0rq6JIfZbk/rGmwzaF1dXV3aIJdEc1CgRHZJnGata4TTXPpvmBcw1EM4pFw2uEw0yC1xhUOTnGanMSE6jPZUcTiUSCQcYMJuiNvS3Z4HCa70my3+LAagS3NkIDCKJYMTsrnbpWlc6XfR3a6iXZAZmt1kc0mzlxJN6xpa+m1mvD3elmyw02xPQ1PitKDZ/dZc1mEWOHB72LSuQTYD9ExyCBxWta5hdhMMq71cWsJRTnOR2KVpI/wglxvOUGhdwx1G01JCG+SWugXaYJcg4Qqs1uViaF3aWJcEpnCirIoUa0jXxDKR25I2xotS+G90ADjKHxvpC43wQ6q8gWpPcUIb7in3dCShDfMSD/UQlqegRwAS8L9yasKdXx5+JLxkifJw+/iRSAxyi1yFxl3wEq7i6jLGHXXI6VgikZCcZnvtdDiUcBbehMtqIpEQHUa7Qw5D3KaP7FFJwPIq2gV2e4mEzfu4ZteQmhbnSr9L4oTNNeC6YDfZDSXFrSWKCrbkUELrEkq/be4kNJvOtzkZt4cubtPfcW08vLDVfv194cbbnK4qKUOAeGcsmlKVdBU0mCvO5h2v4PJQY7hbDGaljDKyeSvpJHPbvHfXzNpSL9g5dDwZS2YMtSquJRLmpp22ttLvUbazENaVxeaF0OncsLha3FYD3zIGW73KhaFo/VCXEIxvy2RN0WVlskZPWchDVu5eg4fdBg+7DR52Ix52w56ycruh8kSAu9rcQrilbbhLaO5n85Kmk1VlUriTze0u3MZWzoV72ModBhvYyl0IRz2EIW9hqjaugouPzSvD4cWu5l0m2YyhwRtP4cXn0XB8tAcRFM4eTe39y9pZmQVLzFlDS4LfsLjNrLFBRk7Rc16Aap74c4ut026eTln3dnthsc6M5o2A/e45M1oeqOIdCnCoz5PdXxAPLp3nAWdnFkytA0QwFCleGWvdjwsPpIJR1RRfggGm+DLR9v6caszyZWX1TLsRNVceC0PNjkC2xyMYJf4AK5ZO4lArFXK6phYuUx1RkBUXQQzzyYVCkhlZNZZPKjmtRy1tZASKdKoHwehP5zqjOri9vXBh9DQPGpxeNI+MtbXBm/tr6+oG4hUfNFowMDMIn+QHmxO1cEdmtQ9nhZc8lU1G02BWIGrAM6TWEeuBaLV1MypzLa4ridxWlXErYW0eTEpl4gPGIJWJ19bVVuAODPvSCogD+1eBI+1qh5b2LEguonlr/7IBmEo22j1wUgBWbd30ityCybFFRdQKSJX5CRNlgKJmUc1kUYK5tpdqbJrpb738MEDALR8qSazCqywDk2b5caA3xQpk3YXvm15OdnDVdHIrYfkmjElK5bLFEPrWBxs1uPbZiANSKvEtuPbZiGYxmxPMVJWOpBqx3c82QAYW+FbyVOh64WFPdYAML/AryfACtxJWhd7CpJ1ZGddM3QFSKw5P11Ra3AvsSmJf4FbCqtBbGPuID9dfQdfWTfRASvsa4F2te3hQvDaJlWgDd7lsxBEezsPojPQAzJwrdrzM5wjMd9KKr2+oiVLNtxPKZbV145xCcHRA1XPgqD28UWORL5xPW4svarzwwI+ncIqvC/bw1vmyrMUQa0Wltq7el+kDTPO30KnGuqMqWMkwauv8eVGYFANHKGqLkX+ECu6Anj14fCjAPTA6MVdojFn+rA41DV5PAK89gNEBcHOGP9ucl7AuqAPcgHiDFfasDpZGtB51fIEHHy4y19OsNXnQ3TcCcLBCZozywK3nJSa6IPNfOGaz3k4qpbpFKd0M1J6Pw3mUjB5Th7pY8IESl6xDzblpYD+FWwa6JK4gmw1NMtOh5YxC3dTVVCZnagw4+EjnxhSRQgitIgwPmfiBxXQcW8awIgg3MZY7bqHAqi8IkqHcZwssNm++1kHytPiBsVxfsep5gb7xiSUzaf/YwvufxvmiDi1orZ7C6pzNaOYVRuBi3bA/wQ8peAlmAaxJNVhj4MVvSkddAGytpVrFYFIQE57gzgzAMSdBJgRxYJUdH8AAFTwoSrqamBoAwzVi837HIF/AsvfEANw8ilMXFBAlHh9TBtvejBkbAM6Yv5N97sbIRdOZuOrZNmfVjsraZos4xuWwoqtpcHdbPpV1xscGAq0JAjDCDpsQeIGrtq66HDDvpCmXgwMio8vFxSv+PKyAsI0pF0NdDhNuYQE0D5baexewT1WqHD6EBl88wOpsFwJUqnkTtqe8/u/Ra+tGOABbyRnnAhzGUibaRv5AeZhzdCVnXXCp31g+P1GUuChK1k1RsqvcAs9Sm+4Y6Np1J3Gkw1XzMSvzVdVqDwSUsREecpjXhZIEZ+AKqZ7LROFzWoU209xdas4JDrZkyUxHNKVo4B57mwROKqt6O5iABudkM0AvjLYRClvQC3ulC1360rVgxUS03RTmvHPpb9qJVW7HedPU37BTvNCoriI74D6mGRUxzT09lYWkJIFnU2yEGl/WLDvL9hsOi13c2rohDgZ0r8ohKl5W2uIQFyprTSmxrI7vPNB3nAnlphfVnhYnzB/hkGulRzbKgOIrRW4gnYcXGVv31XrYNAm1dVXlAHjicqRbDO7DUpW0O9Ba8f2OoU45nG0f5pDBW1/dCavqiqE6eWoqm+t3B9lmGOUH1NY5HYIjT3fIQI65ZYoB6o8zYDBa29pEnurMKi4DqzOLWOiheE3g22TVdpFtor6gkRJaziUpvahZSB7QedMzycLiC1CNI20QOP0P34SGL4NPLiDgoUlw4Slo7gqTm4UnJyc5SGDtpLCkU9rMN6GcY95iXmRMczMcC2El3sxynpJMFlPLKV7llnrmlnXR3MC5ZRFnOVy1UsEoHHmIqmnwrk4016mlu8GTGd5skIfjvCE4dlCyho9NMFgZ7Q3BMcUML6wwhtZKQwL4vkRlXG9aXNPBENu8yBa4NmFA2nQvhivzLKkjGqCbl9LSGjj+l4qAbkQWTp2AOqAYuVAZ1yKAO3nM/QOgcCtaGm4hSOadCWi3kVKyNX5YwbtpboK1adbNm+rmlQZaoISCp9IyWTVdAQ0e4PelGTkFXMsRNysdrF71vuRsf64T7ovtB4W0UFOMskiXLKh6Kp9TG30J5oRLye/CQ6Hdar/RWrmtwj5fcDajW+2P/A2bSSUHfRvssANvPHVJ7B1km8wR+5TRUaaeJrkIUbBNpbSpG5iMnb04/xWNs/V/0eUFtXVTypxT4fZgVTeKS/y1deODWEo83uCLO1PYAe3hi/xXEkpxO2/NVXg8+PQPfVhVgQ/By4BQVbrWAie6XC1mQ6kEllPg0S3b7n3DnWNg9iMdLxykTed2cOH/lQRxtFKFjf19cD7R0b5Zl7Urpf0rhZ6V+SAzPKs1yCFS4vEJRYGh2gZntmF3YSFA6cxEYxkd9KxLC8d2YWGuzPX6sm3doAzZ3Q/wTDklXmHKWcSqWFLLFh+ftt5yifaNhmJzOJqGzWEGbCOCt9rNsWGg61acsk0qPUo03wkv/QAduDg8kmGEffhgBKCne5LReKfusjLewwq8xaPTTP7RHjjskMZyfaM8MHiPayQ81gey3hXzQROR8DgfSNHhQCYITkTCkz3gMhELJSASK81fKaVDjeZbXLlchAbKZQdxtM3JRCTsuOHZxMyzvP2ZfC7fkyzOJY60Y4qhhIvIeBvS26kZWfAWQzpWxO2uGjk1G7G5OsqOaR1JLetpbU2vmrZbm+zGcjkw99UNvTXUKDzsNCmIpKtGOK3mAjmWZ/VBHLC0lDa3WYEnFqJgs9Y0LwsdKhwGxlXzF0iI6RXwsroKbiurhGoFty6QGu5VekCeg9+hCphgdQrewQaTNFKJDSVvKOadaPBKtOCgm3asoNf4Uj2KCyQovsUlbCsus21YNhPrVnP2LMwlUtGk0g+WpcyzcJMD6Zabk7xJqpJWwVMNaRC5YI6ZCbMCOfBmuZyupI1sxlBDfkGz2FbQJniS7OloT6ysBg7tlRJrjB1TdKVbtTk91gHG40k1EyutN0y0oWmwTqeDSa5w1JYV9ixOgRsgOpJaKmVbs5hpJ2TawRk+NdfTWOhmF0XwEtI5wWTNXFmFrZAWzyvJGcF8Nd6hFrnjA7lgHtuGF8eCnskI4Fg21eOZ/iktlSkmUDSVGuWHub1MZaJKPq5lPFU0bIE96w2cSG7whLq1lGbzbrQL6g43ekav0Hp7lpLOfLo/r9hReynp0JU0OApgZFUV7IG2KKFySgPcFJAplGGwYxh0FBTDUFPtyf5JA9pwpk9HMtXgnR/m4LnHM6Ymlg8EvVWSCSqeSaT2KZm02hBt9LQZz+QMeyUb78IiabAernjjqpo1VLXbbr/GGw97Bg3susno9vo5yoF29CRTRWh4CSrkUo+WG1YuTaUGmUJwJ5bZjTP7PGAuaQj8Za5yW79WgTnpmlgmbRSGNOaMta52qH2uCWvQETIHy8UXo8HdVuC08LySM4C57T9yFboUNY/0uhxc8k8cdLkxNKakY6CnnQFvnMXg8GSIJVNi5k6oXJ8hwjFWr5brBMbh0JTrVMGca1ozOqM5xegeCaWWXRME11jEcn2jLcRc8XFiw2JKEo5lzFkE8+jL9rFwr3V0x0hm3CPXIjZQR9RBrDbLQk7p6ACbl4rLzINMeel0wWCr0GhpeN2Wls6JpsTaojTCNMWNrKJ3w8PkmZ4ouJS3ygLgjrWwdc9qRh/iFIMmdrh1eKgwt2OGZDJYTjCjCrMQ3EUfsx7MiEZ7dThqmlQiFVdA58+LRlPtpajOL3HsJaIXHmTP2Z7oMFRFL/hQHIwr0HY6melMKem0tUdAadeiPZFoKBytBz2JnKIlC+9zzitRTXcNcKW4+WIp1NRK0kXpqNgH8wy70heNm7P9Xt5ZtQ/s8nJh2X/mT7Gg/m0Pm6CHsMXzGJN1q/1RcIuhrrveiAlVag2+v9SQT1buEVw+nFnTGAoDj+YMZM31+E0w3xGRZGV852LpcMi3rU3CB2amQCl84sV83cV8Qchld4wPCzox0wkWNYT5xpYrlpWSk3+HrP0dcqwCsjP2A5EdbwhNHoAMHxSqDSaVXheaGEwES9sDeGiuaU8JJlknJicFs2Buj2xXNLBJJJVRI1HHeHC6ks9lii8Zw6WKtKk0QZG0tlWa+Bg7Fc456mrhvKUx2g5aDUlh6nGyHSvnmaZaP5KSVpL9a9Xius8oBwjXlgpQo6c987QWvAklliutIpiXnBi1dQ0V2LJmUEuW5lZgqfh8LKy6JbvNf8euoYL+WC6j19Z5J4uPPXgArehlqDKrRsnGzAAb1nXp4AVWkzErgGw3mktJ8/4Ou7h31FpP3+SfWIYKNA2ngyP/wH4lftq8gKP0ZFK1oltb5+lncUsneDLRLautax3ATqECFpaRrWXleG1dS4U2S3tKjVgGPMboWaYDLYLHI0F3vrZujpdda1nBFkFL4pMkRb61RRverackQc8um1XjsEgWVlCsNRM1Ct7XVRUj5+qkjVeyWfvz1usc5tq6oUoiB1c+4Iy7kU8ktL5hUdv1N7mkuQhf7RDCA6BQPsZDDvvs4AUML0tqn5Yb5SGP6YrRqcadVtRUVjcf6BoZLbuTR1eNXEZXq8sRGP0JdrmeB/UmChWeVvDT4aZ5CCClaMn2TN+QaLRXMVLmFhJzV9tgS2SOUXLgrblo1MjFtYx5bYBQMIGBa9EAvCny4Cn+6mg0a0XZUJOJYt+XikZTKSU7IuqMTjyTz0EnI9ForK9Padd6QiDje1KaNeYzbxCGCzRmPz3aroKxTdzI/Q07SnsGbOs0cgsqsNOpGOApk1S71pHP5I1oNt+e1GJw9SnstG5UEMrKrRQDOX9gKwFhnO60Dfd7F69iNle6wKWiYFQ120lN5NNxBTQsStKTPsdJHzDqFfKL8W4bgB8Q6doBrBbj4EodeOWzCtp8eA8jHNsnrJFPrTcV1n8HcQwkRjuSmXYlaW56i8bBSm9ra6jFH2yqb/QHG+tb/cFIS5Mv2BJqbA4AGxp8webW1rA/2BIQoOZIfb0/WN/ib7OpuTkADDf6g42tDf5+NrY0+6dQY3NAgBqb6v1TqLExEgCGQ/7ONjQ2RALAsL+zDfVNTaP9wEhTyNdipCEgr8PN9f4lMxwOKF/h+oCkDbVEwmN9wYZwpMUfDde3BqCh1oZQANrS0BqANjcG2K1vDbJb3xAUqvqGoFDVN0QaA9FAu+GGIDQUaLc+EoBGWoPiG2kNCnOkJdDl5qYgtCkoJSNNASWnPhIJ9DccGObA1AgHpka4NSgXwq31QWhzcyAaFN9wU6DLDUEpGQ4sk+FIYKgCUzIcCkzJ+qCUDLUGlY1QS1A6h5oDXW4OCnOoKRgNSudQYDqHGgLD3BDocjgwNcKBdkOBduuDQlUfWGLrW4Jcrm8Jj/NBZ7eCPkBklC/c5A+F/aGQP1Q/0hfytdTS6A81+EP+0WrxD2CzfzCam/0h/xA2+wejOVTjC9WDZjccYNc/IZvH+yFN0VB9Y71/NJr8I9/U4u9qc7Q5EvEvDk0BAWqKhpvDjX79pNlNTQHONvk72whCFPJ3tjEgov5Z2dTg72ME+Fjvb9U/J5vC/q6Gos2RcEBYQ76FwD9xGkGdD/tnZ2NrNNLQ6J8Kja3+VkFJCDf7lurGZtht80+mRv+y2djk72wjrCwBzgbEpsHf2QgIbbO/rmj0z9TGsL+zIeBsU0BMA3z0r/WNvrnSADM8EoRHGhojvgFuaIUB9o9sg38JbfAvZw2wsPinUwMsLAE1tcFfrzQ0gSgFuN0E3fbPgwb/0tbQCO02BhMaIwHp5V8cG/xVTANQMeF6f29hcQ0oPA0BWRwGNajRX9k2BED+rVgDbMUaA8JcD5MqwHH/At/g26mJRFtCTfW+CRkB9SHU4utnpNU3vJEWEKGGFt+WJdLiX14jAV7668xIE/TSX59HQGMX8u+oRfxLaqQBuu1f5iKgzIX8VUskEm1sCjX4J0fEvzhG/ItjBBbHhrC/uwGNYsS/PY2A9jTkr/EjIeivf0MSFB3/kuqvCQKiEdBCh4HmDPlrt3AzmDtp8dduYX/NGW6KNgb1O8P+BS3sr9bC/t30cMQ3l8Nh/xoT9s/lMMjl+lZ/Z0MBqe6vzEKtUFf5F46Qv94ItQC7AdEJUEch/3wM+WuFUGO0JdTsX7NDQGvU+7dyoUY4d+efbyH/Xnso4jvzOTsU0C6G/DVCKAynA/01QihgFBEKKH4h/7Yn5D+ACNW3+tb2ULUPMgTIlWg2D7ZmaHouryQnmiItHdPNp9WLi6Dgli74aGC1STHfQCuA2Zwum/LiAsnQaDRmXVqVBydZo8lMzCZLZnpNWVVBBp+UaQfvh4CdghNWb77tKvNZki3NO+mcgtq6OjdjtZZMLtUz2eWKkdu0z1wvXKkmLKb5nskAzBHLl6+I7rB1dMsV2y5va7MZJPB72Y6mbNmOCIIiGIIjBEIiFEIjDMIiHELDj0cEREQkREZoZBAyGBmCDEWGIcORKqQaGYGMRGhkFDIaGYOMRcYh4xEaqUEmIBORSchkhEamIFORaUgtUodMR2YgM5FZyGxkDlKPhJAwQiMRpAFpRJoQGmlGWhAaaUXakLnIPIRG5iMLkE2QhQiNLEIWIzSyBFmKbIpshtDI5sgWyJbIVsgyZDmyAtkaoZFtkG2R7RAaWYlsj+yArIJh3hH+fzWyE0IjOyM0sgtCI7ta8dkN2R2hkT2QqGWmkT0RGlGQdoRGYkgcUaEsgdBIB9KJaAiNdCE00o0kkRRCI2kkg2SRNYiOGEgOySM9SG/RnT6kH/67FtkL2RvZB/5eh+yL7IfQyP7IAciByEHIwQiNHIIc+j9pfBhyOHIEciRyFHI0cozlwrHIccjx1u8TkBORk5CTkVMs86kIjZyGnI6cgZyJnAUlZyPnIOci5yHrERo5H7kAuRC5qBiWucjFyCXIpZbpMuRy5ArkSuQq5Gpovga5FrkOuR65AbkRuQm5GbkFuRW5zeLejtyB3InchdyN3IPci9yH3I88gDxYdBd8DyEPI48gjyKPIY8jTyBPIk9Z8qeRZ5BnkeeQ55EXkBeRl6DsZeQV5FXkNeR15A3kTeQtZOPGt20uvYO8i7yHvI98gHyIfIR8/D9p/gnyKfIZ8jnyBfIl8hWyAfka+Qb5FnK/Q75HfkB+RH5CfkZ+QX5FfkN+R/5A/nSErPT9hWxEEBRFMXQDsgHBUQIlUSeDQmmUQVmUQ3lUQEVUQmV0EDoYHYIORYehw9GPkCp0PVKNjkC93B+JjkJHo2PQseg4dDxag05AJyMT0UnoZLQKnYJO9bAzDa1F69Dp6Ax0JjoLnY3OQevREBpGI2gD2og2oc1oC9qKtqEfIXPReeh8dAG6CQpC4B2/hegidDG6BF2KbopuhiaQzdEt0C3RrdBl6HJ0Bbo1ug26LboduhLdHt0BXYVWoTt6xoJGVqM7oTuju6C7oruhu6N7oFF0T1RB29EYGkdVNIF2oJ2ohnah3WgSTaFpNINm0TWojhpozsfFgb482oP2on1oP7oW3QvdG90HXYfui+6H7o8egB6IHoQejB6CHooehh6OHoEeiR6FHo0egx6LHocej56AnoiehJ6MnoKeWpHfp6Gno2egZ6JnoWej56Dnoueh69Hz0QvQC9GL0IvRS9BL0cvQy9Er0CvRq9Cr0WvQa9Hr0OvRG9Ab0ZvQm9Fb0FvR29Db0TvQO9G70LvRe9Aq9F50PXLfP4y313c/+gD6IPoQ+jD6CPooeg76GPo4+gT6JPoU+jT6DPos+hz6PPoC+iL6Evoy+gr6Kvoa+jr6Bvom+hb6NvoO+i76Hvo++gH6IfoR+jH6Cfop+hn6OXoP8gX6JfoVugH9Gv0G/Rb9Dv0e/QEdjv6I/oT+jP6C/or+hv6O/oH+if6FbkQRrAqtQlHMQDEMx7zL+n/yERiJURiNMRiLcRiPCZiISZiMDcIGY0OwodgwbDhWhVVjI7CR2ChsNDYGG4uNw8ZjNdgEbCI2CZuMTcGmYtOwWqwOm47NwGZis7DZ2BysHgthYSyCNWCNWBPWjLVgrVgbNhebh83HFmCbYL8hC7FF2GJsCbYUA7HfFNsM2xzbAtsS2wpbhi3HVmAbN26NbY6cjG6DbYtth63Etsd2wFZhO2KrsZ2wnbFdsF2x3bDdsT2w/3aK/O//otiemIK1YzEsjqlYAuvAOjEN68K6sSSWwtJYBstiazAdM7Aclsd6sF6sD+vH1mJ7YXtj+2DrsH2x/bD9sQOwA7GDsIOxQ7BDscOww7EjsCOxo7CjsWOwY7HjsOOxE7ATsZOwk7FTsFOx07DTsTOwM7GzsLOxc7BzsfOw9dj52AXYhdhF2MXYJdil2GXY5dgV2JXYVdjV2DXYtdh12PXYDdiN2E3Yzdgt2K3YZOQ27HbsDuxO7C7sbuwe7F7sPuwg5H7sAexB7CHsYewR7FFsCPIY9jj2BHYv+iT2FPY09gz2LPYc9jz2AvYi9hL2MvYK9ir2GvY69gb2JvYW9jb2DvYu9h4s7+B7H3sf+wADGu1DDHwotjPyEfYxth5Zj3yCfYp9hn2OfYF9+f9A/he+r7AN2NfYN9i32HfY99gP2I/YT9jP2C/Yr9hv2O/YH9if2F/YRgzBURzDcZzASZzCaZzBWZzDeVzARVzCZXwQPhgfgg/Fh+HD8Sq8Gq/G5yIj8JH4KHw0PgYfi4/Dx+M1+AR8Ij4Jn4xPwafi0/BavA6fjs/AZ+Kz8Nn4HLweD+Ez0TAewRvwRrwJb8Zb8Fa8DZ+Lz8Pn4wvwTfCF+CJ8Mb4EX4pvim+Gb45vgW+Jb4Uvw5fjK/Ct8W3wbfBt8e3wlfj2+A74KnxHfDW+E74zvgu+K74bvju+Bx7F98QVvB2P4XFcxRN4B96Ja3gX3o0n8RSexjN4Fl+D67iB5/A83oP34n14P74W3wvfG98HX4fvi++H748fgB+IH4QfjN+DHIIfih+GH44fgR+JH4UfjR+DH4sfhx+Pn4CfiJ+En4yfgp+Kn4ZHkdPxG7Az8DPxs/Cz8XPwc/Hz8PX4+fgF+IX4RfjF+CX4pfhl+OX4FfiV+FX41fg1+LX4dfj1+A34jfhN+M34Lfit+G347fgd+J34Xfjd+D34vfh9+BDkfvwB/EH8Ifxh/BH8Ufwx/HH8CfxJ/Cn8afwZ/Fn8Ofx5/AX8Rfwl/GX8FfxV/DX8dfwN/E38Lfxt/HXsdewd/F1848aNG9/D38c/wD/EP8I/xj/BP8U/wz/Hv8C/xL/Cv8I34F/j3+Df4t/h3+M/4D/iP+E/47/gv+K/4b/jf+B/4n/hG3GEQAmMwAmCIAmSoAiaqEIZAnwfYCzBEWm0DeUJgchAqUiAWnUvKhGrMBPfESsxZGIQMZgYQgwlhhHDiOHEcKKKqCZGECOJUcRoYgwxlhhHjCdqiAnERGIS8X+65vz7/d/+TSamEFOJaUQtUUdMJ2YQM4lZxGxiDkFi9USICBMRooFoJJqIZqKFaCXaiLnEPGI+MZ9YQGxCLCQWEYuJJcRSYlNiM2JzYgtiS2IrYhmxnFhBbE1sQ2xLbEesJLYndiBWETsSq4mdiJ2JXYhdid2I3Yk9iCixJ6EQ7USMiBMqkSA6iE5CI7qIbiJJpIg0kSGyxBpCJwwiR+SJHqKX6CP6ibXEXsTexD7EOmJfYj9if+IA4kDiIOJg4hDiUOIw4nDiCOJI4ijiaOIY4ljiOOJ44gTiROIk4mTiFOJU4jTidOIM4kziLOJsYi/0HOJcYiZ6HrGeOJ+4gLiQGIJdRFxMXEL0YZcSlxGXE1cQLHElcRVxNXENcS1xHXE9cQNxI3ETcTNxC3ErcRtxO3EHcSdxF3EXcTdxD3EvcR9xP/EA8SDxEPEw8QjxKPEY8TjxBPEk8RTxNPEM8SzxHPE88QLxIvES8TLxCvEq8RrxOvEG8SbxFvE28Q7xLvEe8T7xAfEh8RHxMfEJ8SnxGfE58QXxJfEVsYH4mviG+Jb4jvie+IH4kfiJ+Jn4hfiV+I34nfiD+JP4i9hIICRKYiROEiRJUiRNMiRLciRPCqRISqRMDiIHk0PIoeQwcjhZRVaTI8iR5ChyNDmGHEuOI8eTNeQEciI5iZxMTiGnktPIWrKOnE7OIGeSs8jZ5ByyngyRYTJCNpCNZBPZTLaQrWQbOZecR84nF5CbkAvJReQicjG5hFxKbkpuRm5ObkFuSW5FLiOXkyvIrcltyG3J7ciV5PbkDuQqckdyNbkTuTO5C7kruRu5O7kHGSX3JBWynYyRcVIlE2QH2UlqZBfZTSbJFJkmM2SWXEPqpEHmyDzZQ/aSfWQ/uZbci9yb3IdcR+5L7kfuTx5AHkgeRB5MHkIeSh5GHk4eQR5JHkUeTR5DHkseRx5PnkCeSJ5EnkyeQp5KnkaeTp5BnkmeRZ5NnkOeS55HrifPJy8gLyQvIi8mLyEvJS8jLyevIK8kryKvJq8hryWvI68nbyBvJHniJvJm8hbyVvI28nR8A7oBjsSiyGn4BhT8RZHfkN+QDejt5B3kneRd5N3kPeS95H3k/eQD5APkg+RD5MPkI+Sj5GPk4+QT5JPkSmQl8hT5NPkM+Sz5HPk8+QL5IvkS+TL5Cvkq+Rr5OvkG+Sb5Fvk2+RvyDvku+R75PvkB+SH5ETkc/Zi8HP+E/JT8jPyc/IL8krwG/4rcQH5NfkN+S35HXod/T/5A/kj+RP5M/kL+Sv5G/k7+Qf5J/kVuJBEKpTAKpwiKpCiKphiKpe7GOYqnBEqkJEqmBlGDqSHUUGoYNZyqoqqpEdRIahQ1mhpDjaXGUeOp8VQN/LxaMSAXkQnUMGQrbCI1iZpMTaGmUtOoWqqOmk7NoGZSs6jZ1ByqngpRYSpCNVCNVBPVTLVQrVQbNZeaR82nFlCbUAupRdRiagm1lNqU2ozanNqC2pLailpGgdZ7ObWC2poC7fc21LbUdtRKantqB2oVtSO1mtqJ2pnahdqV2o3andqDilJ7UgrVTsWoOKVSCaqD6qQ0qovqppJUikpTGSpLraF0yqByVJ7qoXqpPqqfWkvtRe1N7UOto/al9qP2p/Ynf8MPoA6kDqIOpg6hDqUOow6njqCOpI6itseOpv7Ej6GOoY6ljqOOo46nTqBOpE6iTqZOoU6lTqNOpzbiZ1BnUmdRZ1PnUOdQ51LnWd96aj11PnU+dQF1AXWh67uIuoi6mLqYuoS6hLrU9l0Gv8upK6grqauoq6lrqGuod7FrKdD3uI6iCK/P7Nmj2PXUDdSN1E3UzdQt1EfYR9it1G3UXcTt1O3UIKLw3UHdQd1J3UXdTd1D3UPdS91H3UfdT91PPUA9QD1IPUg9RD1EPUw9Qj1KPUY9Tj1BPUk9RT1NPUM9Sz1HPU+9QL1IvUS9TL1CvUq9Rr1OvUG9Sb1FvU29Q71LvUe9T31AjSM+pD7HPsc+oj6mJhCfUJ9Sn1GfU19QX1JfURuor6lvqP/TbeK/37/fv9+/37/fv9+/37/fv9+/37/fv9+/37/fv9+/37/fv9+/3/9/37fUd9T31A/Uj9RP1M/UL9Sv1G/U7xSJ/UH9Sf1FbaQ2UgiN0iiN0ThN0CRN0hQN/mNoluZojuZpgRZokZZoiZbpBmIQPZgeQjcRQ+lh9HC6iq6mR9Aj6VH0aHoMPZYeR4+na+gJ9ER6Ej2ZnkJPpafR0+hauo6eTs+gZ9Kz6Nn0HLqeDtFhOkI30I10E91Mt9C/Yq10Gz2XnkfPpxfQm9Cb0AvpRfRiegm9lN6U3ozenN6C3pLeil5GL6dX0FvT29Db0tvRK+nt6R3oVfSO9Gp6J3pnehd6V3o3end6DzpK70krdDsdo+O0SifoDrqT1uguuptO0ik6TWfoLL2G3onQaYPO0Xm6h+6l++h+ei29F703vQ+9jt6X3o/enz6APpA+iD6IPpg+mD6EPpQ+jD6cPoI+kj6KPpo+hj6WPo4+nj6BPpE+iT6ZPoU+lT6NPp0+gz6TPgt+Z9Pn0OfS59Hr6fOt7wL6Qvoi+mL6EvpS+jL6cvoKeiVyJX0VfTU9Ar+Gvpa+jr6evoG+kb6Jvpm+hb6Vvo2+nb6DvpO+i76bvoe+l76Pvp9+gH6Qfoh+mH6EfpR+jH6cfoJ+kn6Kfpp+hn6Wfo5+nn6BfpF+iX6ZfoV+lX6Nfp1+g36DfpN+i36bfod+l36Pfp/+gP6Q/oj+mP6E/oT+lP6M/oz+nP6C/oL+kv6K/oreQH9Nf0N/Q39Lf0d/T/9A/0D/SP9E/0z/TP9C/0r/Rv9O/07/Qf9J/0X/RW8E24sZlMEYnCEYkqEYmmEYluEYnhEYkZEYmRnEDGaGMEOZYcxwpoqpZkYwI5lRzGhmDDOWGceMZ2qYCcxEZhIzmZnCTGWmMbVMHTOdmcHMZGYxs5k5TD0TYsJMhGlgGpkmpplpYVqZNmYuM4+ZzyxgNmEWMouYxcwSZimzKbMZszmzBbMlsxWzjFnOrGC2ZrZhtmW2Y1Yy2zM7MKuYHZkdmdXMTszOzC7MLsyuzCnEboyC7M7swUSZPRmFUZh2JsacTsQZlUkwHUwnozEa08V0M0kmxaSZDJNl1jA6ozMGk2PyTJ7pYXqZPqafWcusZfZi9mb2YfZh1jH7Mvsx+zH7MwcwBzIHMgcxBzOHMIcyhzGHM0cwRzJHMUcxRzPHMMcyxzHHMcczJzAnMicyJzEnM6cwpzKnMqcxpzNnEmcwZzJnMmcxZzPnMOcw5zLnMeuZ9cz5zAXMhcyFzEXMxcwlTC1yKXMZczlzBXM2cSVzFXM1cw1zLXMdcz1zA3MjcxNzM3MLcytzG3M7cwdzJ3MXczdzD3Mvcx9zPzMTBd8DzIPMQ8zDzCPMo8xjzOPME8yTzFPM08wzzLPMc8zzzAvMi8xLzMvMK8yrzGvM68wbzJvMhcRbzNvMO8y7zHvM+8wHzIfMR8zHzCfMp8xnzOfMF8yXzFfMBuZr5hvmW+Y75nvmB+ZH5ifmZ+YX5lfmN+Z35g/mT+YvZiODsCiLsThLsCRLsTTLsCzLsTwrsCIrsTI7iB3MDmGHssPY4WwVW82OYEeyo9jR7Bh2LDuOHc/WsBPYiewkdjI7hZ3KTmNr2Tp2OjuDncnOYmezc9h6NsSG2QjbwDayTWwz28K2sm3sXHYeO59dwG7CLmQXsYvZJexSdlN2M3Zzdgt2S3Yrdhm7nF3Bbs1uw27LbseuZLdnd2BXsTuyq9md2J3ZXdhd2d3Y3dk92Ci7J6uw7WyMjbMqm2A72E5WY7vYbjbJptg0m2Gz7BpWZw02x+bZHraX7WP72bXsXuze7D7sOnZfdj92f/YA9kD2IPZg9hD2UPYw9nD2CPZI9ij2aPYY9lj2OPZ49gT2RPYk9mT2FPZU9jT2dPYM9kz2LPZs9hz2XPY8dj17PnsBeyF7EXsxewl7KXsZezl7BXslexV7NXsNey17HXs9ewN7I3sTezN7C3srext7O3sHeyd7F3s3ew97L3sfez/7APsg+xD7MPsI+yj7GPs4+wT7JPsU+zT7DPss+xz7HPs8+wL7IvsS+zL7Cvsq+xr7OvsG+yb7Fvs2+w77Lvse+z77AXsr8SH7Efsx+wn7KfsZ+zn7Bfsl+xW7gf2a/Yb9lv2O/Z79gf2R/Yn9mf2F/ZX9jf2d/YP9k/2L3cgiHMphHM4RHMlRHM0xHMtxHM8JnMhJnMwN4gZzQ7ih3DBuOFfFVXMjuJHcKG40N4Yby43jxnM13ARuIjeJm8xN4aZy07haro6bzs3gZnKzuNncHK6eC3FhLsI1cI1cE9fMtXCtXBs3l5vHzecWcJtwC7lF3GJuCbeU25TbjNuc24LbktuKW8Yt51ZwW3PbcNty23Erue25HbhV3I7cam4nbmduF25Xbjdud24PLsrtySlcOxfj4pzKJbgOrpPTuC6um0tyKS7NZbgst4bTOYPLcXmuh+vl+rh+bi23F7c3tw+3jtuX24/bnzuAO5A7iDuYO4Q7lDuMO5w7gjuSO4o7mjuGO5Y7jjueO4E7kTuJO5k7hTuVO407nTuDO5M7izubO4c7lzuPW8+dz13AXchdxF3MXcJdyl3GXc5dwV3JXcVdzV3DXctdx13P3cDdyN3E3czdwt3K3cbdzt3B3cndxd3N3cPdy93H3c89wD3IPcQ9zD3CPco9xj3OPcE9yT3FPc09wz3LPcc9z73Avci9xL3MvcK9yr3Gvc69wb3JvcW9zb3Dvcu9x73PfcB9yH3Efcx9wn3KfcZ9zn3Bfcl9xW3gvua+4b7lvuO+537gfuR+4u4mfuZ+4X7lfuN+5/7g/uT+4jZyCI/yGI/zBE/yFE/zDM/yHM/zAi/yEi/zg/jB/BB+KD+MH85X8dX8CH4kP4ofzY/hx/Lj+PF8DT+Bn8hP4ifzU/gp/FR+Gl/L1/HT+Rn8TH4WP5ufw9fzIT7MR/gGvpFv4pv5Fr6Vb+Pn8vP4+fwCfhN+Ib+IX8Qv5pfwS/lN+c34zfkt+C35rfhl/HJ+Bb81vw2/Lb8dv5Lfnt+BX8XvyK/md+J35nfhd+V343fn9+Cj/J68wrfzMT7Oq3yC7+A7eY3v4rv5JJ/i03yGz/JreJ03+Byf53v4Xr6P7+fX8nvxe/P78Ov4ffn9+P35A/gD+YP4g/lD+EP5w/jD+SP4I/mj+KP5Y/hj+eP44/kT+BP5k/iT+VP4U/nT+NP5M/gz+bP4s/lz+HP58/j1/Pn8BfyF/EX8xfwl/KX8Zfzl/BX8lfxV/NX8Nfy1/HX89fwN/I38TfzN/C38rfxt/O38Hfyd/F383fw9/L38ffz9/AP8g/xD/MP8I/yj/GP84/wT/JP8U/zT/DP8s/xz/PP8C/yL/Ev8y/wr/Kv8a/zr/Bv8m/xb/Nv8O/y7/Hv8+/wH/If8R/zH/Cf8p/xn/Of8F/yX/CPEV/wG/mv+G/5b/jv+e/4H/kf+J/5n/hf+V/43/nf+D/5P/i9+I48IqIAJuEAIpEAJtMAIrMAJvCAIoiAJsjBIGCwMEYYKw4ThQpVQLYwQRgqjhNHCGGGsME4YL9QIE4SJwiRhsjBFmCpME2qFOmG6MEOYKcwSZgtzhHohJISFiNAgNApNQrPQIrQKbcJcYZ4wX1ggbCIsFBYJi4UlwhJhqbCpsJmwubCFsKWwlbBMWC6sELYWthG2FbYTVgrbCzsIq4QdhdXCTsLOwi7CrsJuwu7CHkJU2FNQhHYhJsQFVUgIHUKnoAldQreQFFJCWsgIWWGNoAuGkBNyQl7oEXqFPqFfWCvsJewt7COsE/YV9hP2Fw4Q9sPAd6BwkHCwcIhwiHCocJhwuHCEcKRwlHC0cIxwrPAUcZxwvHCCcKJwknCycIpwqnCacLpwhnCmcJZwtnCOcK5wnrBeOF+4QLhAuBB+FwkXCRcLlwiXCpcJlwtXCM8QVwpXCVcJVwvXCNcK1wrXCdcLNwg3CjcJNwu3CLcKtwm3C3cIdwp3CXcLC/HniOfgPrB7hHuF+4T7hQeEB4WHhIeFR4RHhceEx4THhSfg96TwlPC08LTwjPCs8JzwvPCC8KLwkvCy8IrwqvCa8LrwhvCm8JbwtvCO8I7wLvzeE94T3iHeFz4QPhQ+Et4lPhY+gd+nwmfC58IXwpfCe8RXwgb4fS18I3wrfCd8L/wg/Ci8T/wk/Cz8Ivwq/Cb8Lvwh/Cn8JWwUEBEVURETcREXCfiRIilSIi0yIityIi/yogA/8J8kyuIgcbA4RBwqDhOHi1VitThCHCmOEkeLY8Sx4jhxvPghUSPOQieIE8VJ4mRxijhVnCZ+RNSKdeJ0cYY4U5wlzhbniHPEejEkhsWI2CA2ik3ioViz2CK2im1imzhXnCfOFxeIm4gLxUXiYnGJuFRcKm4qbipuJm4ubiFuKX5JbCVuJS4Tl4nLxRXi18TW4jbituJ24kpxe3EHcZW4o7ha3EncWdxF3FXcTdxd3EOMinuKitguxsS4qIoJsUPsFDtFTewSu8WkmBLT4k54RsyKa0RdNMScmBd7xF6xT7wc7RfXinuJe4v7iOvEfcX9xP3FA8QDxYPEg8VDxEPFw8TDxSPEI8WjxKPFY8RjxGPF48TjxRPEE8WTxJPFU8RTxFPF08TTxTPEM8WzxLPFc8RzxfPE9eL54gXiMHIYeaF4kXixeIl4qXiZeLl4hXileJV4tXi1eI14rXideL14g3iDeKN4k3izeIsYxW8VbxNvF++wvjvFu8S7xXvEe8X7xPvFB8QHxAfFh8SHxUfER8XHxMfFJ8QnxCfFJ8WnxKfFZ8RnxefE58XnxRfEF8WXxJfFV8RXxdfE18XXxTfEN8W3xLfFd8R3xffE98WzkQ/ED8UPxY/Ej8VPxE/FT8XPxM/FL8QvxS/Fr8QN4tfiN+K34rfid+L34g/ij+KP4k/iz+Iv4q/ib+Jv4u/iH+Kf4l/iRhGRUAmVMAmXCImUKImSaImRWImVOImXBEmUREmSZGmQNFgaLA2RhkrDpOFSlVQtVUsjpJHSSGmUNI4cLY2RxkrjpPFSjTRBmihNkiZLU6Sp0jSpVqqTpkszpJnSLGmWNFuaI9VLISksRaSI1CA1Sk1Ss9QstUitUps0VwK77+ZJ86UF0ibSQmmhtEhaLC2RlkqbSptJm0mbS1tIW0pbSVtJy6Tl0gppa2lraRtpW2k7aRq5Utpe2kFaJe0orZZWSztJO0u7SLXkrtJu0u7SHlJU2lNSpGlYu9QuxaS4pEoJqUPqlDRJk7qkbikppaSUlJYyUlZaI+mSIeWkvNQj9Ui9Up/UD7+10l7SXtLe0j7SSmSdtK+0n7S/dIB0oHSQdLDUSoLvEOlQ6TDpcOkI6UjpKOlo6RjpWOk46XjpBOlE6STpZOkU6VTpNOl06QzpTOlM6SzpLOls6WzpHOkc6VzpXOk86TxpvbReOl86X7pAukC6ULpQuki6SLpYuli6xPe7VLpMuly6QrpSukq6WrpGula6TrpeukG6UbpJulm6RbpVuk26XbpDulO6S7pbuke6V7pPul96QHpQekh6SHpYekR6VHpMelx6QnpSekp6WnpaekZ6RnpWek56XnpBelF6SXpZekV6VXpNel16Q3pTekt6W3pHeld6T3pf+kD6UPpI+lj6RPpU+kz6XPpC+lL6StogfS19I30rfSd9L/0g/Sj9JP0s/SL9Kv0m/S79If0p/SVtlBAZlTEZlwmZlCmZlhmZlTmZlwVZlCVZlgfJg+Uh8lB5mDxcrpKr5RHySHmUPFoeI4+1vnHyeLlGniBPlCfJk+Up8lR5mlwr70/VydPlGfJMeZY8W54j18shOSxH5Aa5UW6Sm+UWuVVuk+fK8+T58gJ5E3mhvEheLC+Rl8qbypvJm8tbyFvKW8nL5OXywTj4Vsj3IP7f1vI28rbydvJKeXt5B3mVvKO8Wt5J3lneWd5F3lXeTd5d3kOOynvKitwux+S4rMoJuUPulDW5S+6Wk3JKTssZOSuvkXXZkHNyXu6Re+U+uV9eK+8l7y3vI6+T95X3k/eXD5APlA+SD5YPlk8nD5EPlQ+TD5ePkI+Uj5KPko+Wj5GPlY+Tj5dPkE+UT5JPlk+RT5VPk0+Xz5DPlM+Sz5bPkc+Vz5PXy+fDvwvkC+HfRfLF8O8S+VL4d5l8efHvCvlK+Sr5avh3jXwt/LtOvl6+Qb5RvlG+Sb5ZvkW+Vb5Nvl2+Q75Tvku+S75bvke+V75Pvl9+QH5Qfkh+WH5EflR+TH5cfkJ+Un5Kflp+Rn5Wfk5+Xn5BflF+SX5ZfkV+VX5Nfl1+Q35Tfkt+W35Hfld+T/5fhZplWBVIGIW593KxnXMOdndhd3cgNnZid3djtyIm2J2YoAIqtljY3SKIndjBPqy6rvs8uzvvjzkz3zfn+zl/Tri5byJMpHlgosxD88g8Nk/MU/PMPDcvzEvzyrw2b0y0eWvemffmg/loPpnP5ov5ar6ZGOMAC6ywwRF2OCEO4iIe4iMBEiIREsMAIARnJEFSJENypEBKpEJqpEFapEN6ZEBGZEJmZEFWZEN25EBO5IILciMP8iIf8qMACqIQCqMIiqIYiqMESqIUSqMMyqIcyqMCKqISKqMKqqIaXJHAsTrcUAM1UQu1UQd1UQ/uqI8GaIhGaIwmaIpmaI4WaIlW8EBrtEFbtEN7dEBHdEJndIGv7SfPLV3ha+uG2Dzzd/XP/Vflv9X3bHRXxN55/Ob2X+5elp/vfG0zLH8///T5Ncnjt6k+tn+r/FC2T7bu6IGe6IXe6I399j7oi37ojwEYiEEYjCEYimEYjuEYgZHwxCiMxmiMwViMw3gEWCdgIiZhEg7bJ2MKpuKIfRqmYwa8MBNH7d6YhdmYg7mYh/kItfvAFwuwEIuwGEuwFMuwHCuwEquwGmuwFuuwHhsQ+xu5O2yEH/ywCZuxBWH2rdiG7fBHAHZgJ3YhEEEIxm7swV6EYB/24wAO4hAO4wiOIhTHcBwncBIncQphCMNpnMFZOFucLedwHoHWC7iIS7hlv4wruIpruI4buIlbuI07uIt7CMd9RCASDxCFh3iEx3iCp3iG53iBl4i2RFte4RVe4w2iEY23eIt3eI8P+IhP+IzPSGr5gq/4hhg40EIrbXSknU6MwziMy3g/iM8ETEhvi7clERPT0DDKDpKiM5MwKZMxOVMwJVMxNdPQ3SEt0zE9MzAjMzEzszArszE7czAnc9GFuZmHeZmP+VmABVmIhVmERVmMxVmCJVmKpVmGZVmO5VmBFVmJlVmFVVmNrnRldbrRy1KDNfneXou1+cH+nTqsy3p0Z302YEM2YmM2YVPG2JuxOVuwJVvRg63Zhm3Zju3ZgR1pderEzuzCruzG7uzBnuzFIFtv9mFf9mN/DuBADuJgDuFQDuNwjuBIejLYNoqjOYZjOY7jOYETOYmTWcIyhVM5jdM5g16cSW/O4mzO4VzO43y6Wn3oywVcyBBbLIu4mEu4lMu4nCu4kqu4mmu4luu4nhu4kX7cxM3cwq2UwzbGpve305/+DGAAd3AHd3IXAxnEU1ZPh2AGM9QWattNN6ubdQ/3MoT7uJ8HeJCHeJhHeJShPMbjPMGTPMUwnuYZnuU5nrGe54U/uchLvMwrdHG6ymu8TneHG7zJW7zN27zDu7zHcIbzPiMYwUhG8gGj+JCP+JhP+JTP+Jwv+JKv+JpvGM23fMf3/MCP/MTP/MKv/MYYOsgiq2xylF1OiqPr1riKp/hKoIRKpMQygijJWUmUVMmUXCmUUqmUWmmUVumUXhmUUZmUWVmUVdmUXTmUU7nkotzKo7zKp/wqoIIqpMIqoqIqpuIqoZIqpdIqo7Iqp/KqoIqqpMqqoqqqJldVl5tqqKZqqbbqqK7qyV311UAN1UiN1URN1UzN1UIt1Uoeaq02aqt2aq8O6qhO6qwu6qpu6q4e6qle6q0+6qt+6q8BGqhBGqwhGqphGq4RGilPjdJojdFYjdN4TdBETdJkTdFUTdN0zZCXZspbszRbczRX8zRfPvLVAi3UIi3WEi3VMi3XCq3UKq3WGq3VOq3XBm2UnzZps7Zoq7Zpu/wVoB3aqV0KVJCCtVt7tFch2qf9OqCDOqTDOqKjCtUxHdcJndQphem0zuiszum8LuiiLumyruiqrum6buimbum27uiu7ilc9xWhmP9dkYrUA0XpoR791f0HFRGms1nOAgA="
+};
+
+// src/debug.ts
+var cache = /* @__PURE__ */ new Map();
+function loadMap(buildKey) {
+  return __async(this, null, function* () {
+    if (cache.has(buildKey)) return cache.get(buildKey);
+    const b64 = WASM_SOURCE_MAP[buildKey];
+    if (!b64) throw new Error(`No source map for build "${buildKey}"`);
+    const gzipped = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const ds = new DecompressionStream("gzip");
+    const writer = ds.writable.getWriter();
+    writer.write(gzipped);
+    writer.close();
+    const buf = yield new Response(ds.readable).arrayBuffer();
+    const dv = new DataView(buf);
+    const bytes = new Uint8Array(buf);
+    const firstId = dv.getUint32(0, true);
+    const funcCount = dv.getUint32(4, true);
+    const numNames = dv.getUint32(8, true);
+    const td = new TextDecoder();
+    const names = [];
+    let pos = 12;
+    for (let i = 0; i < numNames; i++) {
+      const len = bytes[pos++];
+      names.push(td.decode(bytes.subarray(pos, pos + len)));
+      pos += len;
+    }
+    const funcNames = [];
+    for (let i = 0; i < funcCount; i++) {
+      const idx = dv.getUint16(pos, true);
+      pos += 2;
+      funcNames.push(idx === 65535 ? null : names[idx]);
+    }
+    const entry = { firstId, funcNames };
+    cache.set(buildKey, entry);
+    return entry;
+  });
+}
+var Debug = {
+  /**
+   * Resolves a list of wasm function indices to their cleaned symbol names.
+   */
+  decodeFuncIds: (funcIds, isCompatBuild) => __async(null, null, function* () {
+    const buildKey = isCompatBuild ? "compat" : "default";
+    const { firstId, funcNames } = yield loadMap(buildKey);
+    return funcIds.map((funcId) => {
+      const i = funcId - firstId;
+      const name = i >= 0 && i < funcNames.length && funcNames[i] ? funcNames[i] : "(unknown)";
+      return { funcId, name };
+    });
+  }),
+  /**
+   * Annotates a wasm stack trace string with resolved function names.
+   *
+   * Example input from Chrome:
+   *   at http://localhost:8080/esm/wasm/wllama.wasm:wasm-function[775]:0x74251
+   *   at async blob:http://localhost:8080/53a863cc-7227-45cc-8594-ddbbf5257f20:317:28
+   *
+   * Example input from Firefox:
+   *   @http://localhost:8080/esm/wasm/wllama.wasm:wasm-function[796]:0x7dfe2
+   *       at wModuleInit/WebAssembly.promising/< (9b6a2acd-d909-44e2-b021-d42fb9087cfb:15:32) index.js:1433:45
+   *
+   * Example input from Safari:
+   *   2441@wasm-function[2441]
+   *       at wrapper (d746f19e-4523-4f36-ba06-d0969acc0b05:22:126009)
+   *
+   * Example output:
+   *   wasm-func[775] (server_response::send)
+   */
+  decodeStackTrace: (stack, isCompatBuild) => __async(null, null, function* () {
+    const re = /wasm-function\[(\d+)\]/g;
+    const funcIds = [
+      ...new Set([...stack.matchAll(re)].map((m) => parseInt(m[1])))
+    ];
+    if (funcIds.length === 0) return stack;
+    const resolved = yield Debug.decodeFuncIds(funcIds, isCompatBuild);
+    return resolved.map((r) => {
+      if (r.name === "(unknown)") {
+        return `    wasm-func[${r.funcId}] (unknown)`;
+      }
+      return `    wasm-func[${r.funcId}] (${r.name})`;
+    }).join("\n");
+  })
+};
+
+// src/utils.ts
+var textDecoder = new TextDecoder();
+var URL_PARTS_REGEX = /-(\d{5})-of-(\d{5})\.gguf(?:\?.*)?$/;
+var parseShardNumber = (fnameOrUrl) => {
+  const matches = fnameOrUrl.match(URL_PARTS_REGEX);
+  if (!matches) {
+    return {
+      baseURL: fnameOrUrl,
+      current: 1,
+      total: 1
+    };
+  } else {
+    return {
+      baseURL: fnameOrUrl.replace(URL_PARTS_REGEX, ""),
+      current: parseInt(matches[1]),
+      total: parseInt(matches[2])
+    };
+  }
+};
+var sortFileByShard = (blobs) => {
+  const isFiles = blobs.every((b) => !!b.name);
+  if (isFiles && blobs.length > 1) {
+    const files = blobs;
+    files.sort((a, b) => {
+      const infoA = parseShardNumber(a.name);
+      const infoB = parseShardNumber(b.name);
+      return infoA.current - infoB.current;
+    });
+  }
+};
+var isMmproj = (blob) => __async(null, null, function* () {
+  const META_NAME = "general.architecture";
+  const META_VAL = "clip";
+  const tmp = blob.slice(0, 128 * 1024);
+  const header = yield tmp.arrayBuffer();
+  const buf = new Uint8Array(header);
+  const nameBytes = new TextEncoder().encode(META_NAME);
+  const valBytes = new TextEncoder().encode(META_VAL);
+  let offset = -1;
+  outer: for (let i = 0; i <= buf.length - nameBytes.length; i++) {
+    for (let j = 0; j < nameBytes.length; j++) {
+      if (buf[i + j] !== nameBytes[j]) continue outer;
+    }
+    offset = i;
+    break;
+  }
+  if (offset === -1) return false;
+  if (offset + 8 * 4 + 4 > buf.length) return false;
+  const view = new DataView(header);
+  const valLen = view.getBigUint64(offset + 8 * 3, true);
+  if (valLen !== /* @__PURE__ */ BigInt("4")) return false;
+  for (let i = 0; i < valBytes.length; i++) {
+    if (buf[offset + 8 * 4 + i] !== valBytes[i]) return false;
+  }
+  return true;
+});
+var absoluteUrl = (relativePath) => typeof document === "undefined" ? new URL(relativePath, self.location.href).href : new URL(relativePath, document.baseURI).href;
+var padDigits = (number, digits) => {
+  return Array(Math.max(digits - String(number).length + 1, 0)).join("0") + number;
+};
+var sumArr = (arr) => arr.reduce((prev, curr) => prev + curr, 0);
+var isString = (value) => !!(value == null ? void 0 : value.startsWith);
+var MMPROJ_FILE_NAME = "mmproj.gguf";
+var prepareBlobs = (blobsInp) => __async(null, null, function* () {
+  const blobs = [];
+  let blobMmproj = null;
+  for (const blob of blobsInp) {
+    if (yield isMmproj(blob)) {
+      blobMmproj = blob;
+    } else {
+      blobs.push(blob);
+    }
+  }
+  sortFileByShard(blobs);
+  const result = blobs.map((blob, i) => ({
+    blob,
+    name: `model-${padDigits(i + 1, 5)}-of-${padDigits(blobs.length, 5)}.gguf`
+  }));
+  if (blobMmproj) {
+    result.push({
+      blob: blobMmproj,
+      name: MMPROJ_FILE_NAME
+    });
+  }
+  return {
+    llm: result.filter((f) => f.name !== MMPROJ_FILE_NAME),
+    mmproj: blobMmproj ? { blob: blobMmproj, name: MMPROJ_FILE_NAME } : null,
+    all: result
+  };
+});
+var isSupportMultiThread = () => ((e) => __async(null, null, function* () {
+  try {
+    return "undefined" != typeof MessageChannel && new MessageChannel().port1.postMessage(new SharedArrayBuffer(1)), WebAssembly.validate(e);
+  } catch (e2) {
+    return false;
+  }
+}))(
+  new Uint8Array([
+    0,
+    97,
+    115,
+    109,
+    1,
+    0,
+    0,
+    0,
+    1,
+    4,
+    1,
+    96,
+    0,
+    0,
+    3,
+    2,
+    1,
+    0,
+    5,
+    4,
+    1,
+    3,
+    1,
+    1,
+    10,
+    11,
+    1,
+    9,
+    0,
+    65,
+    0,
+    254,
+    16,
+    2,
+    0,
+    26,
+    11
+  ])
+);
+var isSupportExceptions = () => __async(null, null, function* () {
+  return WebAssembly.validate(
+    new Uint8Array([
+      0,
+      97,
+      115,
+      109,
+      1,
+      0,
+      0,
+      0,
+      1,
+      4,
+      1,
+      96,
+      0,
+      0,
+      3,
+      2,
+      1,
+      0,
+      10,
+      8,
+      1,
+      6,
+      0,
+      6,
+      64,
+      25,
+      11,
+      11
+    ])
+  );
+});
+var isSupportSIMD = () => __async(null, null, function* () {
+  return WebAssembly.validate(
+    new Uint8Array([
+      0,
+      97,
+      115,
+      109,
+      1,
+      0,
+      0,
+      0,
+      1,
+      5,
+      1,
+      96,
+      0,
+      1,
+      123,
+      3,
+      2,
+      1,
+      0,
+      10,
+      10,
+      1,
+      8,
+      0,
+      65,
+      0,
+      253,
+      15,
+      253,
+      98,
+      11
+    ])
+  );
+});
+var isSupportJSPI = () => {
+  return !!WebAssembly.Suspending;
+};
+var isSupportWebGPU = () => {
+  return !!navigator.gpu;
+};
+var isSupportMem64 = () => {
+  try {
+    new WebAssembly.Memory({
+      address: "i64",
+      initial: /* @__PURE__ */ BigInt("1")
+      // 1 page (64 KiB)
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+var checkEnvironmentCompatible = () => __async(null, null, function* () {
+  if (!(yield isSupportExceptions())) {
+    throw new Error("WebAssembly runtime does not support exception handling");
+  }
+  if (!(yield isSupportSIMD())) {
+    throw new Error("WebAssembly runtime does not support SIMD");
+  }
+});
+var isFirefox = () => {
+  return !!navigator.userAgent.match(/Firefox\/([0-9\.]+)(?:\s|$)/);
+};
+var GGUF_FILE_REGEX = /^.*\.gguf(?:\?.*)?$/;
+var isValidGgufFile = (path) => {
+  return GGUF_FILE_REGEX.test(path);
+};
+var isSafariMobile = () => {
+  return !!navigator.userAgent.match(/Version\/([0-9\._]+).*Mobile.*Safari.*/);
+};
+var createWorker = (workerCode) => {
+  const workerURL = URL.createObjectURL(
+    isString(workerCode) ? new Blob([workerCode], { type: "text/javascript" }) : workerCode
+  );
+  return new Worker(workerURL, { type: "module" });
+};
+var cbToAsyncIter = (fn) => (...args) => {
+  let values = [];
+  let resolve;
+  let reject;
+  values.push(
+    new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    })
+  );
+  fn(...args, (val, done, err) => {
+    if (err) {
+      reject(err);
+      return;
+    }
+    resolve([val, done]);
+    values.push(
+      new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      })
+    );
+  });
+  return (function() {
+    return __asyncGenerator(this, null, function* () {
+      let val;
+      for (let i = 0, done = false; !done; i++) {
+        [val, done] = yield new __await(values[i]);
+        delete values[i];
+        if (val !== void 0) yield val;
+      }
+    });
+  })();
+};
+var canUseAsyncFileRead = (compat) => isSupportJSPI() || compat;
+var needCompat = () => !isSupportJSPI() || !isSupportMem64();
+
+// src/workers-code/generated.ts
+var LIBLLAMA_VERSION = "b1-83d855c";
+var LLAMA_CPP_WORKER_CODE = "// Start the main llama.cpp\nlet wllamaMalloc;\nlet wllamaStart;\nlet wllamaAction;\nlet wllamaExit;\nlet wllamaDebug;\n\nlet Module = null;\nlet runtimeEnv = {};\nlet runtimePolicy = {};\nlet isCompat = false;\nlet lastStack = '';\nlet isAborted = false;\nlet hasMultithread = false;\n\n//////////////////////////////////////////////////////////////\n// UTILS\n//////////////////////////////////////////////////////////////\n\n// send message back to main thread\nconst msg = (data, transfer) => postMessage(data, transfer);\n\n// Convert CPP log into JS log\nconst cppLogToJSLog = (line) => {\n  const matched = line.match(/@@(DEBUG|INFO|WARN|ERROR)@@(.*)/);\n  return !!matched\n    ? {\n        level: (matched[1] === 'INFO' ? 'debug' : matched[1]).toLowerCase(),\n        text: matched[2],\n      }\n    : { level: 'log', text: line };\n};\n\nconst getHeapU8 = () => {\n  const buffer = Module.wasmMemory.buffer;\n  return new Uint8Array(buffer);\n};\n\nconst toSizeT = (num) => {\n  return isCompat ? Number(num) : BigInt(num);\n};\n\n// Get module config that forwards stdout/err to main thread\nconst getWModuleConfig = (_argMainScriptBlob) => {\n  var pathConfig = RUN_OPTIONS.pathConfig;\n  var pthreadPoolSize = RUN_OPTIONS.nbThread;\n  var argMainScriptBlob = _argMainScriptBlob;\n  runtimeEnv = RUN_OPTIONS.env || {};\n\n  isCompat = RUN_OPTIONS.compat;\n  hasMultithread = pthreadPoolSize > 1;\n\n  msg({\n    verb: 'console.debug',\n    args: [\n      `Multithread enabled: ${hasMultithread}, pthreadPoolSize: ${pthreadPoolSize}`,\n    ],\n  });\n\n  if (!pathConfig['wllama.wasm']) {\n    throw new Error('\"wllama.wasm\" is missing in pathConfig');\n  }\n  return {\n    noInitialRun: true,\n    print: function (text) {\n      if (arguments.length > 1)\n        text = Array.prototype.slice.call(arguments).join(' ');\n      msg({ verb: 'console.log', args: [text] });\n    },\n    printErr: function (text) {\n      if (arguments.length > 1)\n        text = Array.prototype.slice.call(arguments).join(' ');\n      if (text.startsWith('@@STACK@@')) {\n        lastStack = text.slice('@@STACK@@'.length);\n        return;\n      }\n      const logLine = cppLogToJSLog(text);\n      msg({ verb: 'console.' + logLine.level, args: [logLine.text] });\n    },\n    locateFile: function (filename, basePath) {\n      const p = pathConfig[filename];\n      const truncate = (str) =>\n        str.length > 128 ? `${str.substr(0, 128)}...` : str;\n      if (filename.match(/wllama\\.worker\\.js/)) {\n        msg({\n          verb: 'console.error',\n          args: [\n            '\"wllama.worker.js\" is removed from v2.2.1. Hint: make sure to clear browser\\'s cache.',\n          ],\n        });\n      } else {\n        msg({\n          verb: 'console.debug',\n          args: [`Loading \"${filename}\" from \"${truncate(p)}\"`],\n        });\n        return p;\n      }\n    },\n    mainScriptUrlOrBlob: hasMultithread\n      ? argMainScriptBlob\n      : 'throw new Error(\"Multithreading is not enabled\")',\n    pthreadPoolSize: hasMultithread ? pthreadPoolSize : 0,\n    wasmMemory: hasMultithread ? getWasmMemory() : null,\n    onAbort: function (message) {\n      isAborted = true;\n      msg({ verb: 'signal.abort', args: ['abort', message, lastStack, null] });\n    },\n    onExit: function (code) {\n      isAborted = true;\n      const callstack = new Error().stack.toString();\n      msg({\n        verb: 'signal.abort',\n        args: ['abort', 'exit(' + code + ')', callstack, null],\n      });\n    },\n  };\n};\n\n// Get the memory to be used by wasm. (Only used in multi-thread mode)\n// Because we have a weird OOM issue on iOS, we need to try some values\n// See: https://github.com/emscripten-core/emscripten/issues/19144\n//      https://github.com/godotengine/godot/issues/70621\nconst getWasmMemory = () => {\n  let minBytes = 128 * 1024 * 1024;\n  let maxBytes = 4096 * 1024 * 1024;\n  let stepBytes = 128 * 1024 * 1024;\n  while (maxBytes > minBytes) {\n    try {\n      const wasmMemory = new WebAssembly.Memory({\n        initial: toSizeT(minBytes / 65536),\n        maximum: toSizeT(maxBytes / 65536),\n        shared: true,\n        address: isCompat ? undefined : 'i64',\n      });\n      return wasmMemory;\n    } catch (e) {\n      maxBytes -= stepBytes;\n      continue; // retry\n    }\n  }\n  throw new Error('Cannot allocate WebAssembly.Memory');\n};\n\n//////////////////////////////////////////////////////////////\n// HEAPFS PATCH\n//////////////////////////////////////////////////////////////\n\n/**\n * By default, emscripten uses memfs. The way it works is by\n * allocating new Uint8Array in javascript heap. This is not good\n * because it requires files to be copied to wasm heap each time\n * a file is read.\n *\n * HeapFS is an alternative, which resolves this problem by\n * allocating space for file directly inside wasm heap. This\n * allows us to mmap without doing any copy.\n *\n * For llama.cpp, this is great because we use MAP_SHARED\n *\n * Ref: https://github.com/ngxson/wllama/pull/39\n * Ref: https://github.com/emscripten-core/emscripten/blob/main/src/library_memfs.js\n *\n * Note 29/05/2024 @ngxson\n * Due to ftell() being limited to MAX_LONG, we cannot load files bigger than 2^31 bytes (or 2GB)\n * Ref: https://github.com/emscripten-core/emscripten/blob/main/system/lib/libc/musl/src/stdio/ftell.c\n */\n\nconst fsNameToFile = {}; // map Name => File\nconst fsIdToFile = {}; // map ID => File\nlet currFileId = 0;\n\n// Patch and redirect memfs calls to wllama\nconst patchHeapFS = () => {\n  const m = Module;\n  // save functions\n  m.MEMFS.stream_ops._read = m.MEMFS.stream_ops.read;\n  m.MEMFS.stream_ops._write = m.MEMFS.stream_ops.write;\n  m.MEMFS.stream_ops._llseek = m.MEMFS.stream_ops.llseek;\n  m.MEMFS.stream_ops._allocate = m.MEMFS.stream_ops.allocate;\n  m.MEMFS.stream_ops._mmap = m.MEMFS.stream_ops.mmap;\n  m.MEMFS.stream_ops._msync = m.MEMFS.stream_ops.msync;\n\n  const patchStream = (stream) => {\n    const name = stream.node.name;\n    if (fsNameToFile[name]) {\n      const f = fsNameToFile[name];\n      const ptr = Number(f.ptr);\n      stream.node.contents = getHeapU8().subarray(ptr, ptr + f.size);\n      stream.node.usedBytes = f.size;\n    }\n  };\n\n  // replace \"read\" functions\n  m.MEMFS.stream_ops.read = function (\n    stream,\n    buffer,\n    offset,\n    length,\n    position\n  ) {\n    patchStream(stream);\n    return m.MEMFS.stream_ops._read(stream, buffer, offset, length, position);\n  };\n  m.MEMFS.ops_table.file.stream.read = m.MEMFS.stream_ops.read;\n\n  // replace \"llseek\" functions\n  m.MEMFS.stream_ops.llseek = function (stream, offset, whence) {\n    patchStream(stream);\n    return m.MEMFS.stream_ops._llseek(stream, offset, whence);\n  };\n  m.MEMFS.ops_table.file.stream.llseek = m.MEMFS.stream_ops.llseek;\n\n  // replace \"mmap\" functions\n  m.MEMFS.stream_ops.mmap = function (stream, length, position, prot, flags) {\n    patchStream(stream);\n    const name = stream.node.name;\n    if (fsNameToFile[name]) {\n      const f = fsNameToFile[name];\n      const mmapPtr = f.ptr + toSizeT(position);\n      return {\n        ptr: mmapPtr,\n        allocated: false,\n      };\n    } else {\n      return m.MEMFS.stream_ops._mmap(stream, length, position, prot, flags);\n    }\n  };\n  m.MEMFS.ops_table.file.stream.mmap = m.MEMFS.stream_ops.mmap;\n\n  // mount FS\n  m.FS.mkdir('/models');\n  m.FS.mount(m.MEMFS, { root: '.' }, '/models');\n};\n\n// Allocate a new file in wllama heapfs, returns file ID\nconst heapfsAlloc = (name, size, allocBuffer) => {\n  if (size < 1) {\n    throw new Error('File size must be bigger than 0');\n  }\n  const m = Module;\n  const ptr = toSizeT(allocBuffer ? m.mmapAlloc(size) : 0);\n  const file = {\n    ptr: ptr,\n    size: size,\n    id: currFileId++,\n  };\n  fsIdToFile[file.id] = file;\n  fsNameToFile[name] = file;\n  return file.id;\n};\n\n// Add new file to wllama heapfs, return number of written bytes\nconst heapfsWrite = (id, buffer, offset) => {\n  if (fsIdToFile[id]) {\n    const { ptr, size } = fsIdToFile[id];\n    const afterWriteByte = offset + buffer.byteLength;\n    if (afterWriteByte > size) {\n      throw new Error(\n        `File ID ${id} write out of bound, afterWriteByte = ${afterWriteByte} while size = ${size}`\n      );\n    }\n    getHeapU8().set(buffer, Number(ptr) + offset);\n    return buffer.byteLength;\n  } else {\n    throw new Error(`File ID ${id} not found in heapfs`);\n  }\n};\n\n//////////////////////////////////////////////////////////////\n// ASYNC FILE READ\n//////////////////////////////////////////////////////////////\n\nlet isAwaitReading = false;\nlet pendingReadPromise = null;\nlet pendingReadResolve = null;\nlet pendingReadReject = null;\n\nconst _stripModelsPrefix = (path) => path.replace(/^\\/?models\\//, '');\n\n// Called from EM_ASYNC_JS stub in wllama-fs.h (path is already a JS string)\nconst _wllama_js_file_read = async (path, offset, req_size, out_ptr) => {\n  const name = _stripModelsPrefix(path);\n\n  pendingReadPromise = new Promise((res, rej) => {\n    pendingReadResolve = res;\n    pendingReadReject = rej;\n  });\n  isAwaitReading = true;\n\n  postMessage({ verb: 'fs.read_req', args: [name, offset, req_size] });\n\n  let data;\n  try {\n    data = await pendingReadPromise;\n  } finally {\n    isAwaitReading = false;\n    pendingReadResolve = null;\n    pendingReadReject = null;\n  }\n\n  const bytes = new Uint8Array(data);\n  getHeapU8().set(bytes, out_ptr);\n  return toSizeT(bytes.length);\n};\n\n//////////////////////////////////////////////////////////////\n// MAIN CODE\n//////////////////////////////////////////////////////////////\n\nconst callWrapper = (name, ret, args, isAsync) => {\n  const fn = Module.cwrap(\n    name,\n    ret,\n    args,\n    isAsync ? { async: true } : undefined\n  );\n  return async (action, req) => {\n    // console.log(`Calling ${name} with action:`, action, 'and req:', req);\n    let result;\n    try {\n      if (args.length === 2) {\n        result = isAsync ? await fn(action, req) : fn(action, req);\n      } else {\n        result = fn();\n      }\n    } catch (ex) {\n      console.error(ex);\n      throw ex;\n    }\n    return result;\n  };\n};\n\n// re-entering the wasm while a call is suspended (JSPI / asyncify) corrupts its state, so only one call runs at a time and the rest wait in the queue\nlet wasmCallBusy = false;\nconst wasmCallQueue = [];\n\nconst runWasmCall = async (callbackId, fn) => {\n  if (isAborted) {\n    // the wasm is dead, fail fast instead of calling into it\n    msg({ callbackId, err: 'wllama has crashed, please reload the module' });\n    return;\n  }\n  if (wasmCallBusy) {\n    wasmCallQueue.push({ callbackId, fn });\n    return;\n  }\n  wasmCallBusy = true;\n  try {\n    await fn();\n  } finally {\n    wasmCallBusy = false;\n    if (isAborted) {\n      // do not touch the wasm again after it aborted; the main thread already rejected the queued tasks\n      wasmCallQueue.length = 0;\n    } else {\n      const next = wasmCallQueue.shift();\n      if (next) runWasmCall(next.callbackId, next.fn);\n    }\n  }\n};\n\nconst runAction = async (data) => {\n  const { args, callbackId } = data;\n  const argAction = args[0];\n  const argEncodedMsg = args[1];\n  try {\n    const inputPtr = await wllamaMalloc(toSizeT(argEncodedMsg.byteLength), 0);\n    // copy data to wasm heap\n    const inputBuffer = new Uint8Array(\n      getHeapU8().buffer,\n      Number(inputPtr),\n      argEncodedMsg.byteLength\n    );\n    inputBuffer.set(argEncodedMsg, 0);\n    const outputPtr = await wllamaAction(argAction, inputPtr);\n    // length of output buffer is written at the first 4 bytes of input buffer\n    const outputLen = new Uint32Array(\n      getHeapU8().buffer,\n      Number(inputPtr),\n      1\n    )[0];\n    // copy the output buffer to JS heap\n    const outputBuffer = new Uint8Array(outputLen);\n    const outputSrcView = new Uint8Array(\n      getHeapU8().buffer,\n      Number(outputPtr),\n      outputLen\n    );\n    outputBuffer.set(outputSrcView, 0); // copy it\n    msg({ callbackId, result: outputBuffer }, [outputBuffer.buffer]);\n  } catch (err) {\n    handleError(err);\n  }\n};\n\nfunction handleError(err) {\n  // If WASM already aborted, onAbort already sent signal.abort; skip to avoid\n  // re-reporting the resulting WebAssembly.RuntimeError as a JS exception.\n  if (isAborted) return;\n\n  const message = err ? err.message || String(err) : 'Unknown error';\n  const stack = err ? err.stack || String(err) : '';\n  msg({\n    verb: 'signal.abort',\n    args: ['exception', message, stack, err],\n  });\n}\n\nonmessage = async (e) => {\n  if (!e.data) return;\n  const { verb, args, callbackId } = e.data;\n\n  // This message is handled outside the Wasm call queue so a suspended\n  // completion can observe a burst-policy change at its next graph.\n  if (verb === 'runtime.policy') {\n    runtimePolicy = args[0] && typeof args[0] === 'object' ? { ...args[0] } : {};\n    globalThis.WLLM_WEBGPU_POLICY = runtimePolicy;\n    if (Module) {\n      Module.WLLM_WEBGPU_POLICY = runtimePolicy;\n    }\n    return;\n  }\n\n  // fs.read_res arrives while wasm is JSPI-suspended; resolve the pending promise.\n  if (verb === 'fs.read_res') {\n    if (pendingReadResolve) {\n      pendingReadResolve(args[0]);\n    }\n    return;\n  }\n\n  // Guard: while awaiting a file read, reject any other incoming task.\n  if (isAwaitReading) {\n    if (callbackId) {\n      msg({\n        callbackId,\n        err: 'Worker is suspended waiting for file data (JSPI)',\n      });\n    }\n    return;\n  }\n\n  if (!callbackId) {\n    msg({ verb: 'console.error', args: ['callbackId is required', e.data] });\n    return;\n  }\n\n  if (verb === 'module.init') {\n    const argMainScriptBlob = args[0];\n    const argUseAsyncFile = args[1];\n    try {\n      Module = getWModuleConfig(argMainScriptBlob);\n      Module.WLLM_WEBGPU_POLICY = runtimePolicy;\n      Module.preRun = () => {\n        Object.assign(Module.ENV, runtimeEnv);\n        if (argUseAsyncFile) {\n          Module.ENV['USE_ASYNC_FILE'] = '1';\n        }\n      };\n      Module.onRuntimeInitialized = () => {\n        // async call once module is ready\n        // init FS\n        patchHeapFS();\n        // init cwrap\n        const pointer = isCompat ? 'number' : 'bigint';\n        // TODO: note sure why emscripten cannot bind if there is only 1 argument\n        wllamaMalloc = callWrapper('wllama_malloc', pointer, [\n          'number',\n          pointer,\n        ]);\n        wllamaStart = callWrapper('wllama_start', 'string', [], true);\n        wllamaAction = callWrapper(\n          'wllama_action',\n          pointer,\n          ['string', pointer],\n          true\n        );\n        wllamaExit = callWrapper('wllama_exit', 'string', []);\n        wllamaDebug = callWrapper('wllama_debug', 'string', []);\n        msg({ callbackId, result: null });\n      };\n      wModuleInit();\n    } catch (err) {\n      handleError(err);\n    }\n    return;\n  }\n\n  if (verb === 'fs.alloc') {\n    const argFilename = args[0];\n    const argSize = args[1];\n    const argAllocBuffer = args[2];\n    try {\n      // create blank file\n      const emptyBuffer = new ArrayBuffer(0);\n      Module['FS_createDataFile'](\n        '/models',\n        argFilename,\n        emptyBuffer,\n        true,\n        true,\n        true\n      );\n      // alloc data on heap\n      const fileId = heapfsAlloc(argFilename, argSize, argAllocBuffer);\n      msg({ callbackId, result: { fileId } });\n    } catch (err) {\n      handleError(err);\n    }\n    return;\n  }\n\n  if (verb === 'fs.write') {\n    const argFileId = args[0];\n    const argBuffer = args[1];\n    const argOffset = args[2];\n    try {\n      const writtenBytes = heapfsWrite(argFileId, argBuffer, argOffset);\n      msg({ callbackId, result: { writtenBytes } });\n    } catch (err) {\n      handleError(err);\n    }\n    return;\n  }\n\n  if (verb === 'wllama.start') {\n    await runWasmCall(callbackId, async () => {\n      try {\n        const result = await wllamaStart();\n        msg({ callbackId, result });\n      } catch (err) {\n        handleError(err);\n      }\n    });\n    return;\n  }\n\n  if (verb === 'wllama.action') {\n    await runWasmCall(callbackId, () => runAction(e.data));\n    return;\n  }\n\n  if (verb === 'wllama.exit') {\n    await runWasmCall(callbackId, async () => {\n      try {\n        const result = await wllamaExit();\n        msg({ callbackId, result });\n      } catch (err) {\n        handleError(err);\n      }\n    });\n    return;\n  }\n\n  if (verb === 'wllama.debug') {\n    await runWasmCall(callbackId, async () => {\n      try {\n        const result = await wllamaDebug();\n        msg({ callbackId, result });\n      } catch (err) {\n        handleError(err);\n      }\n    });\n    return;\n  }\n};\n";
+var OPFS_UTILS_WORKER_CODE = "let accessHandle;\nlet abortController = new AbortController();\n\nasync function openFile(filename) {\n  const opfsRoot = await navigator.storage.getDirectory();\n  const cacheDir = await opfsRoot.getDirectoryHandle('cache', { create: true });\n  const fileHandler = await cacheDir.getFileHandle(filename, { create: true });\n  accessHandle = await fileHandler.createSyncAccessHandle();\n  accessHandle.truncate(0); // clear file content\n}\n\nasync function writeFile(buf) {\n  accessHandle.write(buf);\n}\n\nasync function closeFile() {\n  accessHandle.flush();\n  accessHandle.close();\n}\n\nasync function writeTextFile(filename, str) {\n  await openFile(filename);\n  await writeFile(new TextEncoder().encode(str));\n  await closeFile();\n}\n\nconst throttled = (func, delay) => {\n  let lastRun = 0;\n  return (...args) => {\n    const now = Date.now();\n    if (now - lastRun > delay) {\n      lastRun = now;\n      func.apply(null, args);\n    }\n  };\n};\n\nconst assertNonNull = (val) => {\n  if (val === null || val === undefined) {\n    throw new Error('OPFS Worker: Assertion failed');\n  }\n};\n\n// respond to main thread\nconst resOK = () => postMessage({ ok: true });\nconst resProgress = (loaded, total) =>\n  postMessage({ progress: { loaded, total } });\nconst resErr = (err) => postMessage({ err });\n\nonmessage = async (e) => {\n  try {\n    if (!e.data) return;\n\n    /**\n     * @param {Object} e.data\n     *\n     * Fine-control FS actions:\n     * - { action: 'open', filename: 'string' }\n     * - { action: 'write', buf: ArrayBuffer }\n     * - { action: 'close' }\n     *\n     * Simple write API:\n     * - { action: 'write-simple', filename: 'string', buf: ArrayBuffer }\n     *\n     * Download API:\n     * - { action: 'download', url: 'string', filename: 'string', options: Object, metadataFileName: 'string' }\n     * - { action: 'download-abort' }\n     */\n    const {\n      action,\n      filename,\n      buf,\n      url,\n      options,\n      metadataFileName,\n      metadataAdditional,\n    } = e.data;\n\n    if (action === 'open') {\n      assertNonNull(filename);\n      await openFile(filename);\n      return resOK();\n    } else if (action === 'write') {\n      assertNonNull(buf);\n      await writeFile(buf);\n      return resOK();\n    } else if (action === 'close') {\n      await closeFile();\n      return resOK();\n    } else if (action === 'write-simple') {\n      assertNonNull(filename);\n      assertNonNull(buf);\n      await openFile(filename);\n      await writeFile(buf);\n      await closeFile();\n      return resOK();\n    } else if (action === 'download') {\n      assertNonNull(url);\n      assertNonNull(filename);\n      assertNonNull(metadataFileName);\n      assertNonNull(options);\n      assertNonNull(options.aborted);\n      abortController = new AbortController();\n      if (options.aborted) abortController.abort();\n      const response = await fetch(url, {\n        ...options,\n        signal: abortController.signal,\n      });\n      const contentLength = response.headers.get('content-length');\n      const etag = (response.headers.get('etag') || '').replace(\n        /[^A-Za-z0-9]/g,\n        ''\n      );\n      const total = parseInt(contentLength, 10);\n      const reader = response.body.getReader();\n      await openFile(filename);\n      let loaded = 0;\n      const throttledProgress = throttled(resProgress, 100);\n      while (true) {\n        const { done, value } = await reader.read();\n        if (done) break;\n        loaded += value.byteLength;\n        await writeFile(value);\n        throttledProgress(loaded, total);\n      }\n      resProgress(total, total); // 100% done\n      await closeFile();\n      // make sure this is in-sync with CacheEntryMetadata\n      await writeTextFile(\n        metadataFileName,\n        JSON.stringify({\n          originalURL: url,\n          originalSize: total,\n          etag,\n          ...metadataAdditional,\n        })\n      );\n      return resOK();\n    } else if (action === 'download-abort') {\n      if (abortController) {\n        abortController.abort();\n      }\n      return;\n    }\n\n    throw new Error('OPFS Worker: Invalid action', e.data);\n  } catch (err) {\n    return resErr(err);\n  }\n};\n";
+var WLLAMA_EMSCRIPTEN_CODE = 'var Module=typeof Module!="undefined"?Module:{};var ENVIRONMENT_IS_WEB=!!globalThis.window;var ENVIRONMENT_IS_WORKER=!!globalThis.WorkerGlobalScope;var ENVIRONMENT_IS_NODE=globalThis.process?.versions?.node&&globalThis.process?.type!="renderer";var ENVIRONMENT_IS_PTHREAD=ENVIRONMENT_IS_WORKER&&self.name?.startsWith("em-pthread");if(ENVIRONMENT_IS_NODE){var worker_threads=require("worker_threads");global.Worker=worker_threads.Worker;ENVIRONMENT_IS_WORKER=!worker_threads.isMainThread;ENVIRONMENT_IS_PTHREAD=ENVIRONMENT_IS_WORKER&&worker_threads["workerData"]=="em-pthread"}var arguments_=[];var thisProgram="./this.program";var quit_=(status,toThrow)=>{throw toThrow};var _scriptName=globalThis.document?.currentScript?.src;if(typeof __filename!="undefined"){_scriptName=__filename}else if(ENVIRONMENT_IS_WORKER){_scriptName=self.location.href}var scriptDirectory="";function locateFile(path){if(Module["locateFile"]){return Module["locateFile"](path,scriptDirectory)}return scriptDirectory+path}var readAsync,readBinary;if(ENVIRONMENT_IS_NODE){var fs=require("fs");scriptDirectory=__dirname+"/";readBinary=filename=>{filename=isFileURI(filename)?new URL(filename):filename;var ret=fs.readFileSync(filename);return ret};readAsync=async(filename,binary=true)=>{filename=isFileURI(filename)?new URL(filename):filename;var ret=fs.readFileSync(filename,binary?undefined:"utf8");return ret};if(process.argv.length>1){thisProgram=process.argv[1].replace(/\\\\/g,"/")}arguments_=process.argv.slice(2);if(typeof module!="undefined"){module["exports"]=Module}quit_=(status,toThrow)=>{process.exitCode=status;throw toThrow}}else if(ENVIRONMENT_IS_WEB||ENVIRONMENT_IS_WORKER){try{scriptDirectory=new URL(".",_scriptName).href}catch{}if(!ENVIRONMENT_IS_NODE){if(ENVIRONMENT_IS_WORKER){readBinary=url=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,false);xhr.responseType="arraybuffer";xhr.send(null);return new Uint8Array(xhr.response)}}readAsync=async url=>{if(isFileURI(url)){return new Promise((resolve,reject)=>{var xhr=new XMLHttpRequest;xhr.open("GET",url,true);xhr.responseType="arraybuffer";xhr.onload=()=>{if(xhr.status==200||xhr.status==0&&xhr.response){resolve(xhr.response);return}reject(xhr.status)};xhr.onerror=reject;xhr.send(null)})}var response=await fetch(url,{credentials:"same-origin"});if(response.ok){return response.arrayBuffer()}throw new Error(response.status+" : "+response.url)}}}else{}var defaultPrint=console.log.bind(console);var defaultPrintErr=console.error.bind(console);if(ENVIRONMENT_IS_NODE){var utils=require("util");var stringify=a=>typeof a=="object"?utils.inspect(a):a;defaultPrint=(...args)=>fs.writeSync(1,args.map(stringify).join(" ")+"\\n");defaultPrintErr=(...args)=>fs.writeSync(2,args.map(stringify).join(" ")+"\\n")}var out=defaultPrint;var err=defaultPrintErr;var wasmBinary;var wasmModule;var ABORT=false;var EXITSTATUS;function assert(condition,text){if(!condition){abort(text)}}var isFileURI=filename=>filename.startsWith("file://");function growMemViews(){if(wasmMemory.buffer!=HEAP8.buffer){updateMemoryViews()}}if(ENVIRONMENT_IS_NODE&&ENVIRONMENT_IS_PTHREAD){var parentPort=worker_threads["parentPort"];parentPort.on("message",msg=>global.onmessage?.({data:msg}));Object.assign(globalThis,{self:global,postMessage:msg=>parentPort["postMessage"](msg)});process.on("uncaughtException",err=>{postMessage({cmd:"uncaughtException",error:err});process.exit(1)})}var startWorker;if(ENVIRONMENT_IS_PTHREAD){var initializedJS=false;self.onunhandledrejection=e=>{throw e.reason||e};async function handleMessage(e){try{var msgData=e["data"];var cmd=msgData.cmd;if(cmd==="load"){let messageQueue=[];self.onmessage=e=>messageQueue.push(e);startWorker=()=>{postMessage({cmd:"loaded"});for(let msg of messageQueue){handleMessage(msg)}self.onmessage=handleMessage};for(const handler of msgData.handlers){if(!Module[handler]||Module[handler].proxy){Module[handler]=(...args)=>{postMessage({cmd:"callHandler",handler,args})};if(handler=="print")out=Module[handler];if(handler=="printErr")err=Module[handler]}}wasmMemory=msgData.wasmMemory;updateMemoryViews();wasmModule=msgData.wasmModule;createWasm();run()}else if(cmd==="run"){establishStackSpace(msgData.pthread_ptr);__emscripten_thread_init(msgData.pthread_ptr,0,0,1,0,0);PThread.threadInitTLS();__emscripten_thread_mailbox_await(msgData.pthread_ptr);if(!initializedJS){initializedJS=true}try{await invokeEntryPoint(msgData.start_routine,msgData.arg)}catch(ex){if(ex!="unwind"){throw ex}}}else if(msgData.target==="setimmediate"){}else if(cmd==="checkMailbox"){if(initializedJS){checkMailbox()}}else if(cmd){err(`worker: received unknown command ${cmd}`);err(msgData)}}catch(ex){__emscripten_thread_crashed();throw ex}}self.onmessage=handleMessage}var HEAP8,HEAPU8,HEAP16,HEAPU16,HEAP32,HEAPU32,HEAPF32,HEAPF64;var HEAP64,HEAPU64;var runtimeInitialized=false;function updateMemoryViews(){var b=wasmMemory.buffer;HEAP8=new Int8Array(b);HEAP16=new Int16Array(b);Module["HEAPU8"]=HEAPU8=new Uint8Array(b);HEAPU16=new Uint16Array(b);HEAP32=new Int32Array(b);HEAPU32=new Uint32Array(b);HEAPF32=new Float32Array(b);HEAPF64=new Float64Array(b);HEAP64=new BigInt64Array(b);HEAPU64=new BigUint64Array(b)}function initMemory(){if(ENVIRONMENT_IS_PTHREAD){return}if(Module["wasmMemory"]){wasmMemory=Module["wasmMemory"]}else{var INITIAL_MEMORY=Module["INITIAL_MEMORY"]||134217728;wasmMemory=new WebAssembly.Memory({initial:BigInt(INITIAL_MEMORY/65536),maximum:65536n,shared:true,address:"i64"})}updateMemoryViews()}function preRun(){if(Module["preRun"]){if(typeof Module["preRun"]=="function")Module["preRun"]=[Module["preRun"]];while(Module["preRun"].length){addOnPreRun(Module["preRun"].shift())}}callRuntimeCallbacks(onPreRuns)}function initRuntime(){runtimeInitialized=true;if(ENVIRONMENT_IS_PTHREAD)return startWorker();if(!Module["noFSInit"]&&!FS.initialized)FS.init();TTY.init();wasmExports["__wasm_call_ctors"]();FS.ignorePermissions=false}function preMain(){}function postRun(){if(ENVIRONMENT_IS_PTHREAD){return}if(Module["postRun"]){if(typeof Module["postRun"]=="function")Module["postRun"]=[Module["postRun"]];while(Module["postRun"].length){addOnPostRun(Module["postRun"].shift())}}callRuntimeCallbacks(onPostRuns)}function abort(what){Module["onAbort"]?.(what);what="Aborted("+what+")";err(what);ABORT=true;what+=". Build with -sASSERTIONS for more info.";if(runtimeInitialized){___trap()}var e=new WebAssembly.RuntimeError(what);throw e}var wasmBinaryFile;function findWasmBinary(){return locateFile("wllama.wasm")}function getBinarySync(file){if(file==wasmBinaryFile&&wasmBinary){return new Uint8Array(wasmBinary)}if(readBinary){return readBinary(file)}throw"both async and sync fetching of the wasm failed"}async function getWasmBinary(binaryFile){if(!wasmBinary){try{var response=await readAsync(binaryFile);return new Uint8Array(response)}catch{}}return getBinarySync(binaryFile)}async function instantiateArrayBuffer(binaryFile,imports){try{var binary=await getWasmBinary(binaryFile);var instance=await WebAssembly.instantiate(binary,imports);return instance}catch(reason){err(`failed to asynchronously prepare wasm: ${reason}`);abort(reason)}}async function instantiateAsync(binary,binaryFile,imports){if(!binary&&!isFileURI(binaryFile)&&!ENVIRONMENT_IS_NODE){try{var response=fetch(binaryFile,{credentials:"same-origin"});var instantiationResult=await WebAssembly.instantiateStreaming(response,imports);return instantiationResult}catch(reason){err(`wasm streaming compile failed: ${reason}`);err("falling back to ArrayBuffer instantiation")}}return instantiateArrayBuffer(binaryFile,imports)}function getWasmImports(){assignWasmImports();if(!wasmImports.__instrumented){wasmImports.__instrumented=true;Asyncify.instrumentWasmImports(wasmImports)}var imports={env:wasmImports,wasi_snapshot_preview1:wasmImports};return imports}async function createWasm(){function receiveInstance(instance,module){wasmExports=instance.exports;wasmExports=Asyncify.instrumentWasmExports(wasmExports);wasmExports=applySignatureConversions(wasmExports);registerTLSInit(wasmExports["_emscripten_tls_init"]);assignWasmExports(wasmExports);wasmModule=module;removeRunDependency("wasm-instantiate");return wasmExports}addRunDependency("wasm-instantiate");function receiveInstantiationResult(result){return receiveInstance(result["instance"],result["module"])}var info=getWasmImports();if(Module["instantiateWasm"]){return new Promise((resolve,reject)=>{Module["instantiateWasm"](info,(inst,mod)=>{resolve(receiveInstance(inst,mod))})})}if(ENVIRONMENT_IS_PTHREAD){var instance=new WebAssembly.Instance(wasmModule,getWasmImports());return receiveInstance(instance,wasmModule)}wasmBinaryFile??=findWasmBinary();var result=await instantiateAsync(wasmBinary,wasmBinaryFile,info);var exports=receiveInstantiationResult(result);return exports}class ExitStatus{name="ExitStatus";constructor(status){this.message=`Program terminated with exit(${status})`;this.status=status}}var terminateWorker=worker=>{worker.terminate();worker.onmessage=e=>{}};var cleanupThread=pthread_ptr=>{var worker=PThread.pthreads[pthread_ptr];PThread.returnWorkerToPool(worker)};var callRuntimeCallbacks=callbacks=>{while(callbacks.length>0){callbacks.shift()(Module)}};var onPreRuns=[];var addOnPreRun=cb=>onPreRuns.push(cb);var runDependencies=0;var dependenciesFulfilled=null;var removeRunDependency=id=>{runDependencies--;Module["monitorRunDependencies"]?.(runDependencies);if(runDependencies==0){if(dependenciesFulfilled){var callback=dependenciesFulfilled;dependenciesFulfilled=null;callback()}}};var addRunDependency=id=>{runDependencies++;Module["monitorRunDependencies"]?.(runDependencies)};var spawnThread=threadParams=>{var worker=PThread.getNewWorker();if(!worker){return 6}PThread.runningWorkers.push(worker);PThread.pthreads[threadParams.pthread_ptr]=worker;worker.pthread_ptr=threadParams.pthread_ptr;var msg={cmd:"run",start_routine:threadParams.startRoutine,arg:threadParams.arg,pthread_ptr:threadParams.pthread_ptr};if(ENVIRONMENT_IS_NODE){worker.unref()}worker.postMessage(msg,threadParams.transferList);return 0};var runtimeKeepaliveCounter=0;var keepRuntimeAlive=()=>noExitRuntime||runtimeKeepaliveCounter>0;var stackSave=()=>_emscripten_stack_get_current();var stackRestore=val=>__emscripten_stack_restore(val);var stackAlloc=sz=>__emscripten_stack_alloc(sz);var proxyToMainThread=(funcIndex,emAsmAddr,sync,...callArgs)=>{var serializedNumCallArgs=callArgs.length*2;var sp=stackSave();var args=stackAlloc(serializedNumCallArgs*8);var b=args/8;for(var i=0;i<callArgs.length;i++){var arg=callArgs[i];if(typeof arg=="bigint"){(growMemViews(),HEAP64)[b+2*i]=1n;(growMemViews(),HEAP64)[b+2*i+1]=arg}else{(growMemViews(),HEAP64)[b+2*i]=0n;(growMemViews(),HEAPF64)[b+2*i+1]=arg}}var rtn=__emscripten_run_js_on_main_thread(funcIndex,emAsmAddr,serializedNumCallArgs,args,sync);stackRestore(sp);return rtn};function _proc_exit(code){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(0,0,1,code);EXITSTATUS=code;if(!keepRuntimeAlive()){PThread.terminateAllThreads();Module["onExit"]?.(code);ABORT=true}quit_(code,new ExitStatus(code))}function exitOnMainThread(returnCode){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(1,0,0,returnCode);_exit(returnCode)}var exitJS=(status,implicit)=>{EXITSTATUS=status;if(ENVIRONMENT_IS_PTHREAD){exitOnMainThread(status);throw"unwind"}_proc_exit(status)};var _exit=exitJS;var PThread={unusedWorkers:[],runningWorkers:[],tlsInitFunctions:[],pthreads:{},init(){if(!ENVIRONMENT_IS_PTHREAD){PThread.initMainThread()}},initMainThread(){var pthreadPoolSize=Module["pthreadPoolSize"];while(pthreadPoolSize--){PThread.allocateUnusedWorker()}addOnPreRun(async()=>{var pthreadPoolReady=PThread.loadWasmModuleToAllWorkers();addRunDependency("loading-workers");await pthreadPoolReady;removeRunDependency("loading-workers")})},terminateAllThreads:()=>{for(var worker of PThread.runningWorkers){terminateWorker(worker)}for(var worker of PThread.unusedWorkers){terminateWorker(worker)}PThread.unusedWorkers=[];PThread.runningWorkers=[];PThread.pthreads={}},returnWorkerToPool:worker=>{var pthread_ptr=worker.pthread_ptr;delete PThread.pthreads[pthread_ptr];PThread.unusedWorkers.push(worker);PThread.runningWorkers.splice(PThread.runningWorkers.indexOf(worker),1);worker.pthread_ptr=0;__emscripten_thread_free_data(pthread_ptr)},threadInitTLS(){PThread.tlsInitFunctions.forEach(f=>f())},loadWasmModuleToWorker:worker=>new Promise(onFinishedLoading=>{worker.onmessage=e=>{var d=e["data"];var cmd=d.cmd;if(d.targetThread&&d.targetThread!=_pthread_self()){var targetWorker=PThread.pthreads[d.targetThread];if(targetWorker){targetWorker.postMessage(d,d.transferList)}else{err(`Internal error! Worker sent a message "${cmd}" to target pthread ${d.targetThread}, but that thread no longer exists!`)}return}if(cmd==="checkMailbox"){checkMailbox()}else if(cmd==="spawnThread"){spawnThread(d)}else if(cmd==="cleanupThread"){callUserCallback(()=>cleanupThread(d.thread))}else if(cmd==="loaded"){worker.loaded=true;if(ENVIRONMENT_IS_NODE&&!worker.pthread_ptr){worker.unref()}onFinishedLoading(worker)}else if(d.target==="setimmediate"){worker.postMessage(d)}else if(cmd==="uncaughtException"){worker.onerror(d.error)}else if(cmd==="callHandler"){Module[d.handler](...d.args)}else if(cmd){err(`worker sent an unknown command ${cmd}`)}};worker.onerror=e=>{var message="worker sent an error!";err(`${message} ${e.filename}:${e.lineno}: ${e.message}`);throw e};if(ENVIRONMENT_IS_NODE){worker.on("message",data=>worker.onmessage({data}));worker.on("error",e=>worker.onerror(e))}var handlers=[];var knownHandlers=["onExit","onAbort","print","printErr"];for(var handler of knownHandlers){if(Module.propertyIsEnumerable(handler)){handlers.push(handler)}}worker.postMessage({cmd:"load",handlers,wasmMemory,wasmModule})}),async loadWasmModuleToAllWorkers(){if(ENVIRONMENT_IS_PTHREAD){return}let pthreadPoolReady=Promise.all(PThread.unusedWorkers.map(PThread.loadWasmModuleToWorker));return pthreadPoolReady},allocateUnusedWorker(){var worker;var pthreadMainJs=_scriptName;if(Module["mainScriptUrlOrBlob"]){pthreadMainJs=Module["mainScriptUrlOrBlob"];if(typeof pthreadMainJs!="string"){pthreadMainJs=URL.createObjectURL(pthreadMainJs)}}worker=new Worker(pthreadMainJs,{workerData:"em-pthread",name:"em-pthread"});PThread.unusedWorkers.push(worker)},getNewWorker(){if(PThread.unusedWorkers.length==0){PThread.allocateUnusedWorker();PThread.loadWasmModuleToWorker(PThread.unusedWorkers[0])}return PThread.unusedWorkers.pop()}};var onPostRuns=[];var addOnPostRun=cb=>onPostRuns.push(cb);function establishStackSpace(pthread_ptr){var stackHigh=Number((growMemViews(),HEAPU64)[(pthread_ptr+88)/8]);var stackSize=Number((growMemViews(),HEAPU64)[(pthread_ptr+96)/8]);var stackLow=stackHigh-stackSize;_emscripten_stack_set_limits(stackHigh,stackLow);stackRestore(stackHigh)}var wasmTableMirror=[];var getWasmTableEntry=funcPtr=>{funcPtr=Number(funcPtr);var func=wasmTableMirror[funcPtr];if(!func){wasmTableMirror[funcPtr]=func=wasmTable.get(BigInt(funcPtr));if(Asyncify.isAsyncExport(func)){wasmTableMirror[funcPtr]=func=Asyncify.makeAsyncFunction(func)}}return func};var invokeEntryPoint=async(ptr,arg)=>{runtimeKeepaliveCounter=0;noExitRuntime=0;var result=(a1=>WebAssembly.promising(getWasmTableEntry(ptr)).call(null,BigInt(a1)))(arg);function finish(result){if(keepRuntimeAlive()){EXITSTATUS=result;return}__emscripten_thread_exit(result)}result=await result;finish(result)};invokeEntryPoint.isAsync=true;var noExitRuntime=true;var registerTLSInit=tlsInitFunc=>PThread.tlsInitFunctions.push(tlsInitFunc);var wasmMemory;function pthreadCreateProxied(pthread_ptr,attr,startRoutine,arg){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(2,0,1,pthread_ptr,attr,startRoutine,arg);return ___pthread_create_js(pthread_ptr,attr,startRoutine,arg)}var _emscripten_has_threading_support=()=>!!globalThis.SharedArrayBuffer;var INT53_MAX=9007199254740992;var INT53_MIN=-9007199254740992;var bigintToI53Checked=num=>num<INT53_MIN||num>INT53_MAX?NaN:Number(num);function ___pthread_create_js(pthread_ptr,attr,startRoutine,arg){pthread_ptr=bigintToI53Checked(pthread_ptr);attr=bigintToI53Checked(attr);startRoutine=bigintToI53Checked(startRoutine);arg=bigintToI53Checked(arg);if(!_emscripten_has_threading_support()){return 6}var transferList=[];var error=0;if(ENVIRONMENT_IS_PTHREAD&&(transferList.length===0||error)){return pthreadCreateProxied(pthread_ptr,attr,startRoutine,arg)}if(error)return error;var threadParams={startRoutine,pthread_ptr,arg,transferList};if(ENVIRONMENT_IS_PTHREAD){threadParams.cmd="spawnThread";postMessage(threadParams,transferList);return 0}return spawnThread(threadParams)}var syscallGetVarargP=()=>{var ret=Number((growMemViews(),HEAPU64)[SYSCALLS.varargs/8]);SYSCALLS.varargs+=8;return ret};var syscallGetVarargI=()=>{var ret=(growMemViews(),HEAP32)[+SYSCALLS.varargs/4];SYSCALLS.varargs+=4;return ret};var PATH={isAbs:path=>path.charAt(0)==="/",splitPath:filename=>{var splitPathRe=/^(\\/?|)([\\s\\S]*?)((?:\\.{1,2}|[^\\/]+?|)(\\.[^.\\/]*|))(?:[\\/]*)$/;return splitPathRe.exec(filename).slice(1)},normalizeArray:(parts,allowAboveRoot)=>{var up=0;for(var i=parts.length-1;i>=0;i--){var last=parts[i];if(last==="."){parts.splice(i,1)}else if(last===".."){parts.splice(i,1);up++}else if(up){parts.splice(i,1);up--}}if(allowAboveRoot){for(;up;up--){parts.unshift("..")}}return parts},normalize:path=>{var isAbsolute=PATH.isAbs(path),trailingSlash=path.slice(-1)==="/";path=PATH.normalizeArray(path.split("/").filter(p=>!!p),!isAbsolute).join("/");if(!path&&!isAbsolute){path="."}if(path&&trailingSlash){path+="/"}return(isAbsolute?"/":"")+path},dirname:path=>{var result=PATH.splitPath(path),root=result[0],dir=result[1];if(!root&&!dir){return"."}if(dir){dir=dir.slice(0,-1)}return root+dir},basename:path=>path&&path.match(/([^\\/]+|\\/)\\/*$/)[1],join:(...paths)=>PATH.normalize(paths.join("/")),join2:(l,r)=>PATH.normalize(l+"/"+r)};var initRandomFill=()=>view=>view.set(crypto.getRandomValues(new Uint8Array(view.byteLength)));var randomFill=view=>{(randomFill=initRandomFill())(view)};var PATH_FS={resolve:(...args)=>{var resolvedPath="",resolvedAbsolute=false;for(var i=args.length-1;i>=-1&&!resolvedAbsolute;i--){var path=i>=0?args[i]:FS.cwd();if(typeof path!="string"){throw new TypeError("Arguments to path.resolve must be strings")}else if(!path){return""}resolvedPath=path+"/"+resolvedPath;resolvedAbsolute=PATH.isAbs(path)}resolvedPath=PATH.normalizeArray(resolvedPath.split("/").filter(p=>!!p),!resolvedAbsolute).join("/");return(resolvedAbsolute?"/":"")+resolvedPath||"."},relative:(from,to)=>{from=PATH_FS.resolve(from).slice(1);to=PATH_FS.resolve(to).slice(1);function trim(arr){var start=0;for(;start<arr.length;start++){if(arr[start]!=="")break}var end=arr.length-1;for(;end>=0;end--){if(arr[end]!=="")break}if(start>end)return[];return arr.slice(start,end-start+1)}var fromParts=trim(from.split("/"));var toParts=trim(to.split("/"));var length=Math.min(fromParts.length,toParts.length);var samePartsLength=length;for(var i=0;i<length;i++){if(fromParts[i]!==toParts[i]){samePartsLength=i;break}}var outputParts=[];for(var i=samePartsLength;i<fromParts.length;i++){outputParts.push("..")}outputParts=outputParts.concat(toParts.slice(samePartsLength));return outputParts.join("/")}};var UTF8Decoder=globalThis.TextDecoder&&new TextDecoder;var findStringEnd=(heapOrArray,idx,maxBytesToRead,ignoreNul)=>{var maxIdx=idx+maxBytesToRead;if(ignoreNul)return maxIdx;while(heapOrArray[idx]&&!(idx>=maxIdx))++idx;return idx};var UTF8ArrayToString=(heapOrArray,idx=0,maxBytesToRead,ignoreNul)=>{var endPtr=findStringEnd(heapOrArray,idx,maxBytesToRead,ignoreNul);if(endPtr-idx>16&&heapOrArray.buffer&&UTF8Decoder){return UTF8Decoder.decode(heapOrArray.buffer instanceof ArrayBuffer?heapOrArray.subarray(idx,endPtr):heapOrArray.slice(idx,endPtr))}var str="";while(idx<endPtr){var u0=heapOrArray[idx++];if(!(u0&128)){str+=String.fromCharCode(u0);continue}var u1=heapOrArray[idx++]&63;if((u0&224)==192){str+=String.fromCharCode((u0&31)<<6|u1);continue}var u2=heapOrArray[idx++]&63;if((u0&240)==224){u0=(u0&15)<<12|u1<<6|u2}else{u0=(u0&7)<<18|u1<<12|u2<<6|heapOrArray[idx++]&63}if(u0<65536){str+=String.fromCharCode(u0)}else{var ch=u0-65536;str+=String.fromCharCode(55296|ch>>10,56320|ch&1023)}}return str};var FS_stdin_getChar_buffer=[];var lengthBytesUTF8=str=>{var len=0;for(var i=0;i<str.length;++i){var c=str.charCodeAt(i);if(c<=127){len++}else if(c<=2047){len+=2}else if(c>=55296&&c<=57343){len+=4;++i}else{len+=3}}return len};var stringToUTF8Array=(str,heap,outIdx,maxBytesToWrite)=>{if(!(maxBytesToWrite>0))return 0;var startIdx=outIdx;var endIdx=outIdx+maxBytesToWrite-1;for(var i=0;i<str.length;++i){var u=str.codePointAt(i);if(u<=127){if(outIdx>=endIdx)break;heap[outIdx++]=u}else if(u<=2047){if(outIdx+1>=endIdx)break;heap[outIdx++]=192|u>>6;heap[outIdx++]=128|u&63}else if(u<=65535){if(outIdx+2>=endIdx)break;heap[outIdx++]=224|u>>12;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63}else{if(outIdx+3>=endIdx)break;heap[outIdx++]=240|u>>18;heap[outIdx++]=128|u>>12&63;heap[outIdx++]=128|u>>6&63;heap[outIdx++]=128|u&63;i++}}heap[outIdx]=0;return outIdx-startIdx};var intArrayFromString=(stringy,dontAddNull,length)=>{var len=length>0?length:lengthBytesUTF8(stringy)+1;var u8array=new Array(len);var numBytesWritten=stringToUTF8Array(stringy,u8array,0,u8array.length);if(dontAddNull)u8array.length=numBytesWritten;return u8array};var FS_stdin_getChar=()=>{if(!FS_stdin_getChar_buffer.length){var result=null;if(ENVIRONMENT_IS_NODE){var BUFSIZE=256;var buf=Buffer.alloc(BUFSIZE);var bytesRead=0;var fd=process.stdin.fd;try{bytesRead=fs.readSync(fd,buf,0,BUFSIZE)}catch(e){if(e.toString().includes("EOF"))bytesRead=0;else throw e}if(bytesRead>0){result=buf.slice(0,bytesRead).toString("utf-8")}}else if(globalThis.window?.prompt){result=window.prompt("Input: ");if(result!==null){result+="\\n"}}else{}if(!result){return null}FS_stdin_getChar_buffer=intArrayFromString(result,true)}return FS_stdin_getChar_buffer.shift()};var TTY={ttys:[],init(){},shutdown(){},register(dev,ops){TTY.ttys[dev]={input:[],output:[],ops};FS.registerDevice(dev,TTY.stream_ops)},stream_ops:{open(stream){var tty=TTY.ttys[stream.node.rdev];if(!tty){throw new FS.ErrnoError(43)}stream.tty=tty;stream.seekable=false},close(stream){stream.tty.ops.fsync(stream.tty)},fsync(stream){stream.tty.ops.fsync(stream.tty)},read(stream,buffer,offset,length,pos){if(!stream.tty||!stream.tty.ops.get_char){throw new FS.ErrnoError(60)}var bytesRead=0;for(var i=0;i<length;i++){var result;try{result=stream.tty.ops.get_char(stream.tty)}catch(e){throw new FS.ErrnoError(29)}if(result===undefined&&bytesRead===0){throw new FS.ErrnoError(6)}if(result===null||result===undefined)break;bytesRead++;buffer[offset+i]=result}if(bytesRead){stream.node.atime=Date.now()}return bytesRead},write(stream,buffer,offset,length,pos){if(!stream.tty||!stream.tty.ops.put_char){throw new FS.ErrnoError(60)}try{for(var i=0;i<length;i++){stream.tty.ops.put_char(stream.tty,buffer[offset+i])}}catch(e){throw new FS.ErrnoError(29)}if(length){stream.node.mtime=stream.node.ctime=Date.now()}return i}},default_tty_ops:{get_char(tty){return FS_stdin_getChar()},put_char(tty,val){if(val===null||val===10){out(UTF8ArrayToString(tty.output));tty.output=[]}else{if(val!=0)tty.output.push(val)}},fsync(tty){if(tty.output?.length>0){out(UTF8ArrayToString(tty.output));tty.output=[]}},ioctl_tcgets(tty){return{c_iflag:25856,c_oflag:5,c_cflag:191,c_lflag:35387,c_cc:[3,28,127,21,4,0,1,0,17,19,26,0,18,15,23,22,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}},ioctl_tcsets(tty,optional_actions,data){return 0},ioctl_tiocgwinsz(tty){return[24,80]}},default_tty1_ops:{put_char(tty,val){if(val===null||val===10){err(UTF8ArrayToString(tty.output));tty.output=[]}else{if(val!=0)tty.output.push(val)}},fsync(tty){if(tty.output?.length>0){err(UTF8ArrayToString(tty.output));tty.output=[]}}}};var zeroMemory=(ptr,size)=>(growMemViews(),HEAPU8).fill(0,ptr,ptr+size);var alignMemory=(size,alignment)=>Math.ceil(size/alignment)*alignment;var mmapAlloc=size=>{size=alignMemory(size,65536);var ptr=_emscripten_builtin_memalign(65536,size);if(ptr)zeroMemory(ptr,size);return ptr};var MEMFS={ops_table:null,mount(mount){return MEMFS.createNode(null,"/",16895,0)},createNode(parent,name,mode,dev){if(FS.isBlkdev(mode)||FS.isFIFO(mode)){throw new FS.ErrnoError(63)}MEMFS.ops_table||={dir:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr,lookup:MEMFS.node_ops.lookup,mknod:MEMFS.node_ops.mknod,rename:MEMFS.node_ops.rename,unlink:MEMFS.node_ops.unlink,rmdir:MEMFS.node_ops.rmdir,readdir:MEMFS.node_ops.readdir,symlink:MEMFS.node_ops.symlink},stream:{llseek:MEMFS.stream_ops.llseek}},file:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr},stream:{llseek:MEMFS.stream_ops.llseek,read:MEMFS.stream_ops.read,write:MEMFS.stream_ops.write,mmap:MEMFS.stream_ops.mmap,msync:MEMFS.stream_ops.msync}},link:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr,readlink:MEMFS.node_ops.readlink},stream:{}},chrdev:{node:{getattr:MEMFS.node_ops.getattr,setattr:MEMFS.node_ops.setattr},stream:FS.chrdev_stream_ops}};var node=FS.createNode(parent,name,mode,dev);if(FS.isDir(node.mode)){node.node_ops=MEMFS.ops_table.dir.node;node.stream_ops=MEMFS.ops_table.dir.stream;node.contents={}}else if(FS.isFile(node.mode)){node.node_ops=MEMFS.ops_table.file.node;node.stream_ops=MEMFS.ops_table.file.stream;node.usedBytes=0;node.contents=null}else if(FS.isLink(node.mode)){node.node_ops=MEMFS.ops_table.link.node;node.stream_ops=MEMFS.ops_table.link.stream}else if(FS.isChrdev(node.mode)){node.node_ops=MEMFS.ops_table.chrdev.node;node.stream_ops=MEMFS.ops_table.chrdev.stream}node.atime=node.mtime=node.ctime=Date.now();if(parent){parent.contents[name]=node;parent.atime=parent.mtime=parent.ctime=node.atime}return node},getFileDataAsTypedArray(node){if(!node.contents)return new Uint8Array(0);if(node.contents.subarray)return node.contents.subarray(0,node.usedBytes);return new Uint8Array(node.contents)},expandFileStorage(node,newCapacity){var prevCapacity=node.contents?node.contents.length:0;if(prevCapacity>=newCapacity)return;var CAPACITY_DOUBLING_MAX=1024*1024;newCapacity=Math.max(newCapacity,prevCapacity*(prevCapacity<CAPACITY_DOUBLING_MAX?2:1.125)>>>0);if(prevCapacity!=0)newCapacity=Math.max(newCapacity,256);var oldContents=node.contents;node.contents=new Uint8Array(newCapacity);if(node.usedBytes>0)node.contents.set(oldContents.subarray(0,node.usedBytes),0)},resizeFileStorage(node,newSize){if(node.usedBytes==newSize)return;if(newSize==0){node.contents=null;node.usedBytes=0}else{var oldContents=node.contents;node.contents=new Uint8Array(newSize);if(oldContents){node.contents.set(oldContents.subarray(0,Math.min(newSize,node.usedBytes)))}node.usedBytes=newSize}},node_ops:{getattr(node){var attr={};attr.dev=FS.isChrdev(node.mode)?node.id:1;attr.ino=node.id;attr.mode=node.mode;attr.nlink=1;attr.uid=0;attr.gid=0;attr.rdev=node.rdev;if(FS.isDir(node.mode)){attr.size=4096}else if(FS.isFile(node.mode)){attr.size=node.usedBytes}else if(FS.isLink(node.mode)){attr.size=node.link.length}else{attr.size=0}attr.atime=new Date(node.atime);attr.mtime=new Date(node.mtime);attr.ctime=new Date(node.ctime);attr.blksize=4096;attr.blocks=Math.ceil(attr.size/attr.blksize);return attr},setattr(node,attr){for(const key of["mode","atime","mtime","ctime"]){if(attr[key]!=null){node[key]=attr[key]}}if(attr.size!==undefined){MEMFS.resizeFileStorage(node,attr.size)}},lookup(parent,name){if(!MEMFS.doesNotExistError){MEMFS.doesNotExistError=new FS.ErrnoError(44);MEMFS.doesNotExistError.stack="<generic error, no stack>"}throw MEMFS.doesNotExistError},mknod(parent,name,mode,dev){return MEMFS.createNode(parent,name,mode,dev)},rename(old_node,new_dir,new_name){var new_node;try{new_node=FS.lookupNode(new_dir,new_name)}catch(e){}if(new_node){if(FS.isDir(old_node.mode)){for(var i in new_node.contents){throw new FS.ErrnoError(55)}}FS.hashRemoveNode(new_node)}delete old_node.parent.contents[old_node.name];new_dir.contents[new_name]=old_node;old_node.name=new_name;new_dir.ctime=new_dir.mtime=old_node.parent.ctime=old_node.parent.mtime=Date.now()},unlink(parent,name){delete parent.contents[name];parent.ctime=parent.mtime=Date.now()},rmdir(parent,name){var node=FS.lookupNode(parent,name);for(var i in node.contents){throw new FS.ErrnoError(55)}delete parent.contents[name];parent.ctime=parent.mtime=Date.now()},readdir(node){return[".","..",...Object.keys(node.contents)]},symlink(parent,newname,oldpath){var node=MEMFS.createNode(parent,newname,511|40960,0);node.link=oldpath;return node},readlink(node){if(!FS.isLink(node.mode)){throw new FS.ErrnoError(28)}return node.link}},stream_ops:{read(stream,buffer,offset,length,position){var contents=stream.node.contents;if(position>=stream.node.usedBytes)return 0;var size=Math.min(stream.node.usedBytes-position,length);if(size>8&&contents.subarray){buffer.set(contents.subarray(position,position+size),offset)}else{for(var i=0;i<size;i++)buffer[offset+i]=contents[position+i]}return size},write(stream,buffer,offset,length,position,canOwn){if(buffer.buffer===(growMemViews(),HEAP8).buffer){canOwn=false}if(!length)return 0;var node=stream.node;node.mtime=node.ctime=Date.now();if(buffer.subarray&&(!node.contents||node.contents.subarray)){if(canOwn){node.contents=buffer.subarray(offset,offset+length);node.usedBytes=length;return length}else if(node.usedBytes===0&&position===0){node.contents=buffer.slice(offset,offset+length);node.usedBytes=length;return length}else if(position+length<=node.usedBytes){node.contents.set(buffer.subarray(offset,offset+length),position);return length}}MEMFS.expandFileStorage(node,position+length);if(node.contents.subarray&&buffer.subarray){node.contents.set(buffer.subarray(offset,offset+length),position)}else{for(var i=0;i<length;i++){node.contents[position+i]=buffer[offset+i]}}node.usedBytes=Math.max(node.usedBytes,position+length);return length},llseek(stream,offset,whence){var position=offset;if(whence===1){position+=stream.position}else if(whence===2){if(FS.isFile(stream.node.mode)){position+=stream.node.usedBytes}}if(position<0){throw new FS.ErrnoError(28)}return position},mmap(stream,length,position,prot,flags){if(!FS.isFile(stream.node.mode)){throw new FS.ErrnoError(43)}var ptr;var allocated;var contents=stream.node.contents;if(!(flags&2)&&contents&&contents.buffer===(growMemViews(),HEAP8).buffer){allocated=false;ptr=contents.byteOffset}else{allocated=true;ptr=mmapAlloc(length);if(!ptr){throw new FS.ErrnoError(48)}if(contents){if(position>0||position+length<contents.length){if(contents.subarray){contents=contents.subarray(position,position+length)}else{contents=Array.prototype.slice.call(contents,position,position+length)}}(growMemViews(),HEAP8).set(contents,ptr)}}return{ptr,allocated}},msync(stream,buffer,offset,length,mmapFlags){MEMFS.stream_ops.write(stream,buffer,0,length,offset,false);return 0}}};var FS_modeStringToFlags=str=>{var flagModes={r:0,"r+":2,w:512|64|1,"w+":512|64|2,a:1024|64|1,"a+":1024|64|2};var flags=flagModes[str];if(typeof flags=="undefined"){throw new Error(`Unknown file open mode: ${str}`)}return flags};var FS_getMode=(canRead,canWrite)=>{var mode=0;if(canRead)mode|=292|73;if(canWrite)mode|=146;return mode};var asyncLoad=async url=>{var arrayBuffer=await readAsync(url);return new Uint8Array(arrayBuffer)};var FS_createDataFile=(...args)=>FS.createDataFile(...args);var getUniqueRunDependency=id=>id;var preloadPlugins=[];var FS_handledByPreloadPlugin=async(byteArray,fullname)=>{if(typeof Browser!="undefined")Browser.init();for(var plugin of preloadPlugins){if(plugin["canHandle"](fullname)){return plugin["handle"](byteArray,fullname)}}return byteArray};var FS_preloadFile=async(parent,name,url,canRead,canWrite,dontCreateFile,canOwn,preFinish)=>{var fullname=name?PATH_FS.resolve(PATH.join2(parent,name)):parent;var dep=getUniqueRunDependency(`cp ${fullname}`);addRunDependency(dep);try{var byteArray=url;if(typeof url=="string"){byteArray=await asyncLoad(url)}byteArray=await FS_handledByPreloadPlugin(byteArray,fullname);preFinish?.();if(!dontCreateFile){FS_createDataFile(parent,name,byteArray,canRead,canWrite,canOwn)}}finally{removeRunDependency(dep)}};var FS_createPreloadedFile=(parent,name,url,canRead,canWrite,onload,onerror,dontCreateFile,canOwn,preFinish)=>{FS_preloadFile(parent,name,url,canRead,canWrite,dontCreateFile,canOwn,preFinish).then(onload).catch(onerror)};var FS={root:null,mounts:[],devices:{},streams:[],nextInode:1,nameTable:null,currentPath:"/",initialized:false,ignorePermissions:true,filesystems:null,syncFSRequests:0,readFiles:{},ErrnoError:class{name="ErrnoError";constructor(errno){this.errno=errno}},FSStream:class{shared={};get object(){return this.node}set object(val){this.node=val}get isRead(){return(this.flags&2097155)!==1}get isWrite(){return(this.flags&2097155)!==0}get isAppend(){return this.flags&1024}get flags(){return this.shared.flags}set flags(val){this.shared.flags=val}get position(){return this.shared.position}set position(val){this.shared.position=val}},FSNode:class{node_ops={};stream_ops={};readMode=292|73;writeMode=146;mounted=null;constructor(parent,name,mode,rdev){if(!parent){parent=this}this.parent=parent;this.mount=parent.mount;this.id=FS.nextInode++;this.name=name;this.mode=mode;this.rdev=rdev;this.atime=this.mtime=this.ctime=Date.now()}get read(){return(this.mode&this.readMode)===this.readMode}set read(val){val?this.mode|=this.readMode:this.mode&=~this.readMode}get write(){return(this.mode&this.writeMode)===this.writeMode}set write(val){val?this.mode|=this.writeMode:this.mode&=~this.writeMode}get isFolder(){return FS.isDir(this.mode)}get isDevice(){return FS.isChrdev(this.mode)}},lookupPath(path,opts={}){if(!path){throw new FS.ErrnoError(44)}opts.follow_mount??=true;if(!PATH.isAbs(path)){path=FS.cwd()+"/"+path}linkloop:for(var nlinks=0;nlinks<40;nlinks++){var parts=path.split("/").filter(p=>!!p);var current=FS.root;var current_path="/";for(var i=0;i<parts.length;i++){var islast=i===parts.length-1;if(islast&&opts.parent){break}if(parts[i]==="."){continue}if(parts[i]===".."){current_path=PATH.dirname(current_path);if(FS.isRoot(current)){path=current_path+"/"+parts.slice(i+1).join("/");nlinks--;continue linkloop}else{current=current.parent}continue}current_path=PATH.join2(current_path,parts[i]);try{current=FS.lookupNode(current,parts[i])}catch(e){if(e?.errno===44&&islast&&opts.noent_okay){return{path:current_path}}throw e}if(FS.isMountpoint(current)&&(!islast||opts.follow_mount)){current=current.mounted.root}if(FS.isLink(current.mode)&&(!islast||opts.follow)){if(!current.node_ops.readlink){throw new FS.ErrnoError(52)}var link=current.node_ops.readlink(current);if(!PATH.isAbs(link)){link=PATH.dirname(current_path)+"/"+link}path=link+"/"+parts.slice(i+1).join("/");continue linkloop}}return{path:current_path,node:current}}throw new FS.ErrnoError(32)},getPath(node){var path;while(true){if(FS.isRoot(node)){var mount=node.mount.mountpoint;if(!path)return mount;return mount[mount.length-1]!=="/"?`${mount}/${path}`:mount+path}path=path?`${node.name}/${path}`:node.name;node=node.parent}},hashName(parentid,name){var hash=0;for(var i=0;i<name.length;i++){hash=(hash<<5)-hash+name.charCodeAt(i)|0}return(parentid+hash>>>0)%FS.nameTable.length},hashAddNode(node){var hash=FS.hashName(node.parent.id,node.name);node.name_next=FS.nameTable[hash];FS.nameTable[hash]=node},hashRemoveNode(node){var hash=FS.hashName(node.parent.id,node.name);if(FS.nameTable[hash]===node){FS.nameTable[hash]=node.name_next}else{var current=FS.nameTable[hash];while(current){if(current.name_next===node){current.name_next=node.name_next;break}current=current.name_next}}},lookupNode(parent,name){var errCode=FS.mayLookup(parent);if(errCode){throw new FS.ErrnoError(errCode)}var hash=FS.hashName(parent.id,name);for(var node=FS.nameTable[hash];node;node=node.name_next){var nodeName=node.name;if(node.parent.id===parent.id&&nodeName===name){return node}}return FS.lookup(parent,name)},createNode(parent,name,mode,rdev){var node=new FS.FSNode(parent,name,mode,rdev);FS.hashAddNode(node);return node},destroyNode(node){FS.hashRemoveNode(node)},isRoot(node){return node===node.parent},isMountpoint(node){return!!node.mounted},isFile(mode){return(mode&61440)===32768},isDir(mode){return(mode&61440)===16384},isLink(mode){return(mode&61440)===40960},isChrdev(mode){return(mode&61440)===8192},isBlkdev(mode){return(mode&61440)===24576},isFIFO(mode){return(mode&61440)===4096},isSocket(mode){return(mode&49152)===49152},flagsToPermissionString(flag){var perms=["r","w","rw"][flag&3];if(flag&512){perms+="w"}return perms},nodePermissions(node,perms){if(FS.ignorePermissions){return 0}if(perms.includes("r")&&!(node.mode&292)){return 2}else if(perms.includes("w")&&!(node.mode&146)){return 2}else if(perms.includes("x")&&!(node.mode&73)){return 2}return 0},mayLookup(dir){if(!FS.isDir(dir.mode))return 54;var errCode=FS.nodePermissions(dir,"x");if(errCode)return errCode;if(!dir.node_ops.lookup)return 2;return 0},mayCreate(dir,name){if(!FS.isDir(dir.mode)){return 54}try{var node=FS.lookupNode(dir,name);return 20}catch(e){}return FS.nodePermissions(dir,"wx")},mayDelete(dir,name,isdir){var node;try{node=FS.lookupNode(dir,name)}catch(e){return e.errno}var errCode=FS.nodePermissions(dir,"wx");if(errCode){return errCode}if(isdir){if(!FS.isDir(node.mode)){return 54}if(FS.isRoot(node)||FS.getPath(node)===FS.cwd()){return 10}}else{if(FS.isDir(node.mode)){return 31}}return 0},mayOpen(node,flags){if(!node){return 44}if(FS.isLink(node.mode)){return 32}else if(FS.isDir(node.mode)){if(FS.flagsToPermissionString(flags)!=="r"||flags&(512|64)){return 31}}return FS.nodePermissions(node,FS.flagsToPermissionString(flags))},checkOpExists(op,err){if(!op){throw new FS.ErrnoError(err)}return op},MAX_OPEN_FDS:4096,nextfd(){for(var fd=0;fd<=FS.MAX_OPEN_FDS;fd++){if(!FS.streams[fd]){return fd}}throw new FS.ErrnoError(33)},getStreamChecked(fd){var stream=FS.getStream(fd);if(!stream){throw new FS.ErrnoError(8)}return stream},getStream:fd=>FS.streams[fd],createStream(stream,fd=-1){stream=Object.assign(new FS.FSStream,stream);if(fd==-1){fd=FS.nextfd()}stream.fd=fd;FS.streams[fd]=stream;return stream},closeStream(fd){FS.streams[fd]=null},dupStream(origStream,fd=-1){var stream=FS.createStream(origStream,fd);stream.stream_ops?.dup?.(stream);return stream},doSetAttr(stream,node,attr){var setattr=stream?.stream_ops.setattr;var arg=setattr?stream:node;setattr??=node.node_ops.setattr;FS.checkOpExists(setattr,63);setattr(arg,attr)},chrdev_stream_ops:{open(stream){var device=FS.getDevice(stream.node.rdev);stream.stream_ops=device.stream_ops;stream.stream_ops.open?.(stream)},llseek(){throw new FS.ErrnoError(70)}},major:dev=>dev>>8,minor:dev=>dev&255,makedev:(ma,mi)=>ma<<8|mi,registerDevice(dev,ops){FS.devices[dev]={stream_ops:ops}},getDevice:dev=>FS.devices[dev],getMounts(mount){var mounts=[];var check=[mount];while(check.length){var m=check.pop();mounts.push(m);check.push(...m.mounts)}return mounts},syncfs(populate,callback){if(typeof populate=="function"){callback=populate;populate=false}FS.syncFSRequests++;if(FS.syncFSRequests>1){err(`warning: ${FS.syncFSRequests} FS.syncfs operations in flight at once, probably just doing extra work`)}var mounts=FS.getMounts(FS.root.mount);var completed=0;function doCallback(errCode){FS.syncFSRequests--;return callback(errCode)}function done(errCode){if(errCode){if(!done.errored){done.errored=true;return doCallback(errCode)}return}if(++completed>=mounts.length){doCallback(null)}}for(var mount of mounts){if(mount.type.syncfs){mount.type.syncfs(mount,populate,done)}else{done(null)}}},mount(type,opts,mountpoint){var root=mountpoint==="/";var pseudo=!mountpoint;var node;if(root&&FS.root){throw new FS.ErrnoError(10)}else if(!root&&!pseudo){var lookup=FS.lookupPath(mountpoint,{follow_mount:false});mountpoint=lookup.path;node=lookup.node;if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}if(!FS.isDir(node.mode)){throw new FS.ErrnoError(54)}}var mount={type,opts,mountpoint,mounts:[]};var mountRoot=type.mount(mount);mountRoot.mount=mount;mount.root=mountRoot;if(root){FS.root=mountRoot}else if(node){node.mounted=mount;if(node.mount){node.mount.mounts.push(mount)}}return mountRoot},unmount(mountpoint){var lookup=FS.lookupPath(mountpoint,{follow_mount:false});if(!FS.isMountpoint(lookup.node)){throw new FS.ErrnoError(28)}var node=lookup.node;var mount=node.mounted;var mounts=FS.getMounts(mount);for(var[hash,current]of Object.entries(FS.nameTable)){while(current){var next=current.name_next;if(mounts.includes(current.mount)){FS.destroyNode(current)}current=next}}node.mounted=null;var idx=node.mount.mounts.indexOf(mount);node.mount.mounts.splice(idx,1)},lookup(parent,name){return parent.node_ops.lookup(parent,name)},mknod(path,mode,dev){var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;var name=PATH.basename(path);if(!name){throw new FS.ErrnoError(28)}if(name==="."||name===".."){throw new FS.ErrnoError(20)}var errCode=FS.mayCreate(parent,name);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.mknod){throw new FS.ErrnoError(63)}return parent.node_ops.mknod(parent,name,mode,dev)},statfs(path){return FS.statfsNode(FS.lookupPath(path,{follow:true}).node)},statfsStream(stream){return FS.statfsNode(stream.node)},statfsNode(node){var rtn={bsize:4096,frsize:4096,blocks:1e6,bfree:5e5,bavail:5e5,files:FS.nextInode,ffree:FS.nextInode-1,fsid:42,flags:2,namelen:255};if(node.node_ops.statfs){Object.assign(rtn,node.node_ops.statfs(node.mount.opts.root))}return rtn},create(path,mode=438){mode&=4095;mode|=32768;return FS.mknod(path,mode,0)},mkdir(path,mode=511){mode&=511|512;mode|=16384;return FS.mknod(path,mode,0)},mkdirTree(path,mode){var dirs=path.split("/");var d="";for(var dir of dirs){if(!dir)continue;if(d||PATH.isAbs(path))d+="/";d+=dir;try{FS.mkdir(d,mode)}catch(e){if(e.errno!=20)throw e}}},mkdev(path,mode,dev){if(typeof dev=="undefined"){dev=mode;mode=438}mode|=8192;return FS.mknod(path,mode,dev)},symlink(oldpath,newpath){if(!PATH_FS.resolve(oldpath)){throw new FS.ErrnoError(44)}var lookup=FS.lookupPath(newpath,{parent:true});var parent=lookup.node;if(!parent){throw new FS.ErrnoError(44)}var newname=PATH.basename(newpath);var errCode=FS.mayCreate(parent,newname);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.symlink){throw new FS.ErrnoError(63)}return parent.node_ops.symlink(parent,newname,oldpath)},rename(old_path,new_path){var old_dirname=PATH.dirname(old_path);var new_dirname=PATH.dirname(new_path);var old_name=PATH.basename(old_path);var new_name=PATH.basename(new_path);var lookup,old_dir,new_dir;lookup=FS.lookupPath(old_path,{parent:true});old_dir=lookup.node;lookup=FS.lookupPath(new_path,{parent:true});new_dir=lookup.node;if(!old_dir||!new_dir)throw new FS.ErrnoError(44);if(old_dir.mount!==new_dir.mount){throw new FS.ErrnoError(75)}var old_node=FS.lookupNode(old_dir,old_name);var relative=PATH_FS.relative(old_path,new_dirname);if(relative.charAt(0)!=="."){throw new FS.ErrnoError(28)}relative=PATH_FS.relative(new_path,old_dirname);if(relative.charAt(0)!=="."){throw new FS.ErrnoError(55)}var new_node;try{new_node=FS.lookupNode(new_dir,new_name)}catch(e){}if(old_node===new_node){return}var isdir=FS.isDir(old_node.mode);var errCode=FS.mayDelete(old_dir,old_name,isdir);if(errCode){throw new FS.ErrnoError(errCode)}errCode=new_node?FS.mayDelete(new_dir,new_name,isdir):FS.mayCreate(new_dir,new_name);if(errCode){throw new FS.ErrnoError(errCode)}if(!old_dir.node_ops.rename){throw new FS.ErrnoError(63)}if(FS.isMountpoint(old_node)||new_node&&FS.isMountpoint(new_node)){throw new FS.ErrnoError(10)}if(new_dir!==old_dir){errCode=FS.nodePermissions(old_dir,"w");if(errCode){throw new FS.ErrnoError(errCode)}}FS.hashRemoveNode(old_node);try{old_dir.node_ops.rename(old_node,new_dir,new_name);old_node.parent=new_dir}catch(e){throw e}finally{FS.hashAddNode(old_node)}},rmdir(path){var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;var name=PATH.basename(path);var node=FS.lookupNode(parent,name);var errCode=FS.mayDelete(parent,name,true);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.rmdir){throw new FS.ErrnoError(63)}if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}parent.node_ops.rmdir(parent,name);FS.destroyNode(node)},readdir(path){var lookup=FS.lookupPath(path,{follow:true});var node=lookup.node;var readdir=FS.checkOpExists(node.node_ops.readdir,54);return readdir(node)},unlink(path){var lookup=FS.lookupPath(path,{parent:true});var parent=lookup.node;if(!parent){throw new FS.ErrnoError(44)}var name=PATH.basename(path);var node=FS.lookupNode(parent,name);var errCode=FS.mayDelete(parent,name,false);if(errCode){throw new FS.ErrnoError(errCode)}if(!parent.node_ops.unlink){throw new FS.ErrnoError(63)}if(FS.isMountpoint(node)){throw new FS.ErrnoError(10)}parent.node_ops.unlink(parent,name);FS.destroyNode(node)},readlink(path){var lookup=FS.lookupPath(path);var link=lookup.node;if(!link){throw new FS.ErrnoError(44)}if(!link.node_ops.readlink){throw new FS.ErrnoError(28)}return link.node_ops.readlink(link)},stat(path,dontFollow){var lookup=FS.lookupPath(path,{follow:!dontFollow});var node=lookup.node;var getattr=FS.checkOpExists(node.node_ops.getattr,63);return getattr(node)},fstat(fd){var stream=FS.getStreamChecked(fd);var node=stream.node;var getattr=stream.stream_ops.getattr;var arg=getattr?stream:node;getattr??=node.node_ops.getattr;FS.checkOpExists(getattr,63);return getattr(arg)},lstat(path){return FS.stat(path,true)},doChmod(stream,node,mode,dontFollow){FS.doSetAttr(stream,node,{mode:mode&4095|node.mode&~4095,ctime:Date.now(),dontFollow})},chmod(path,mode,dontFollow){var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:!dontFollow});node=lookup.node}else{node=path}FS.doChmod(null,node,mode,dontFollow)},lchmod(path,mode){FS.chmod(path,mode,true)},fchmod(fd,mode){var stream=FS.getStreamChecked(fd);FS.doChmod(stream,stream.node,mode,false)},doChown(stream,node,dontFollow){FS.doSetAttr(stream,node,{timestamp:Date.now(),dontFollow})},chown(path,uid,gid,dontFollow){var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:!dontFollow});node=lookup.node}else{node=path}FS.doChown(null,node,dontFollow)},lchown(path,uid,gid){FS.chown(path,uid,gid,true)},fchown(fd,uid,gid){var stream=FS.getStreamChecked(fd);FS.doChown(stream,stream.node,false)},doTruncate(stream,node,len){if(FS.isDir(node.mode)){throw new FS.ErrnoError(31)}if(!FS.isFile(node.mode)){throw new FS.ErrnoError(28)}var errCode=FS.nodePermissions(node,"w");if(errCode){throw new FS.ErrnoError(errCode)}FS.doSetAttr(stream,node,{size:len,timestamp:Date.now()})},truncate(path,len){if(len<0){throw new FS.ErrnoError(28)}var node;if(typeof path=="string"){var lookup=FS.lookupPath(path,{follow:true});node=lookup.node}else{node=path}FS.doTruncate(null,node,len)},ftruncate(fd,len){var stream=FS.getStreamChecked(fd);if(len<0||(stream.flags&2097155)===0){throw new FS.ErrnoError(28)}FS.doTruncate(stream,stream.node,len)},utime(path,atime,mtime){var lookup=FS.lookupPath(path,{follow:true});var node=lookup.node;var setattr=FS.checkOpExists(node.node_ops.setattr,63);setattr(node,{atime,mtime})},open(path,flags,mode=438){if(path===""){throw new FS.ErrnoError(44)}flags=typeof flags=="string"?FS_modeStringToFlags(flags):flags;if(flags&64){mode=mode&4095|32768}else{mode=0}var node;var isDirPath;if(typeof path=="object"){node=path}else{isDirPath=path.endsWith("/");var lookup=FS.lookupPath(path,{follow:!(flags&131072),noent_okay:true});node=lookup.node;path=lookup.path}var created=false;if(flags&64){if(node){if(flags&128){throw new FS.ErrnoError(20)}}else if(isDirPath){throw new FS.ErrnoError(31)}else{node=FS.mknod(path,mode|511,0);created=true}}if(!node){throw new FS.ErrnoError(44)}if(FS.isChrdev(node.mode)){flags&=~512}if(flags&65536&&!FS.isDir(node.mode)){throw new FS.ErrnoError(54)}if(!created){var errCode=FS.mayOpen(node,flags);if(errCode){throw new FS.ErrnoError(errCode)}}if(flags&512&&!created){FS.truncate(node,0)}flags&=~(128|512|131072);var stream=FS.createStream({node,path:FS.getPath(node),flags,seekable:true,position:0,stream_ops:node.stream_ops,ungotten:[],error:false});if(stream.stream_ops.open){stream.stream_ops.open(stream)}if(created){FS.chmod(node,mode&511)}if(Module["logReadFiles"]&&!(flags&1)){if(!(path in FS.readFiles)){FS.readFiles[path]=1}}return stream},close(stream){if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(stream.getdents)stream.getdents=null;try{if(stream.stream_ops.close){stream.stream_ops.close(stream)}}catch(e){throw e}finally{FS.closeStream(stream.fd)}stream.fd=null},isClosed(stream){return stream.fd===null},llseek(stream,offset,whence){if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if(!stream.seekable||!stream.stream_ops.llseek){throw new FS.ErrnoError(70)}if(whence!=0&&whence!=1&&whence!=2){throw new FS.ErrnoError(28)}stream.position=stream.stream_ops.llseek(stream,offset,whence);stream.ungotten=[];return stream.position},read(stream,buffer,offset,length,position){if(length<0||position<0){throw new FS.ErrnoError(28)}if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===1){throw new FS.ErrnoError(8)}if(FS.isDir(stream.node.mode)){throw new FS.ErrnoError(31)}if(!stream.stream_ops.read){throw new FS.ErrnoError(28)}var seeking=typeof position!="undefined";if(!seeking){position=stream.position}else if(!stream.seekable){throw new FS.ErrnoError(70)}var bytesRead=stream.stream_ops.read(stream,buffer,offset,length,position);if(!seeking)stream.position+=bytesRead;return bytesRead},write(stream,buffer,offset,length,position,canOwn){if(length<0||position<0){throw new FS.ErrnoError(28)}if(FS.isClosed(stream)){throw new FS.ErrnoError(8)}if((stream.flags&2097155)===0){throw new FS.ErrnoError(8)}if(FS.isDir(stream.node.mode)){throw new FS.ErrnoError(31)}if(!stream.stream_ops.write){throw new FS.ErrnoError(28)}if(stream.seekable&&stream.flags&1024){FS.llseek(stream,0,2)}var seeking=typeof position!="undefined";if(!seeking){position=stream.position}else if(!stream.seekable){throw new FS.ErrnoError(70)}var bytesWritten=stream.stream_ops.write(stream,buffer,offset,length,position,canOwn);if(!seeking)stream.position+=bytesWritten;return bytesWritten},mmap(stream,length,position,prot,flags){if((prot&2)!==0&&(flags&2)===0&&(stream.flags&2097155)!==2){throw new FS.ErrnoError(2)}if((stream.flags&2097155)===1){throw new FS.ErrnoError(2)}if(!stream.stream_ops.mmap){throw new FS.ErrnoError(43)}if(!length){throw new FS.ErrnoError(28)}return stream.stream_ops.mmap(stream,length,position,prot,flags)},msync(stream,buffer,offset,length,mmapFlags){if(!stream.stream_ops.msync){return 0}return stream.stream_ops.msync(stream,buffer,offset,length,mmapFlags)},ioctl(stream,cmd,arg){if(!stream.stream_ops.ioctl){throw new FS.ErrnoError(59)}return stream.stream_ops.ioctl(stream,cmd,arg)},readFile(path,opts={}){opts.flags=opts.flags||0;opts.encoding=opts.encoding||"binary";if(opts.encoding!=="utf8"&&opts.encoding!=="binary"){abort(`Invalid encoding type "${opts.encoding}"`)}var stream=FS.open(path,opts.flags);var stat=FS.stat(path);var length=stat.size;var buf=new Uint8Array(length);FS.read(stream,buf,0,length,0);if(opts.encoding==="utf8"){buf=UTF8ArrayToString(buf)}FS.close(stream);return buf},writeFile(path,data,opts={}){opts.flags=opts.flags||577;var stream=FS.open(path,opts.flags,opts.mode);if(typeof data=="string"){data=new Uint8Array(intArrayFromString(data,true))}if(ArrayBuffer.isView(data)){FS.write(stream,data,0,data.byteLength,undefined,opts.canOwn)}else{abort("Unsupported data type")}FS.close(stream)},cwd:()=>FS.currentPath,chdir(path){var lookup=FS.lookupPath(path,{follow:true});if(lookup.node===null){throw new FS.ErrnoError(44)}if(!FS.isDir(lookup.node.mode)){throw new FS.ErrnoError(54)}var errCode=FS.nodePermissions(lookup.node,"x");if(errCode){throw new FS.ErrnoError(errCode)}FS.currentPath=lookup.path},createDefaultDirectories(){FS.mkdir("/tmp");FS.mkdir("/home");FS.mkdir("/home/web_user")},createDefaultDevices(){FS.mkdir("/dev");FS.registerDevice(FS.makedev(1,3),{read:()=>0,write:(stream,buffer,offset,length,pos)=>length,llseek:()=>0});FS.mkdev("/dev/null",FS.makedev(1,3));TTY.register(FS.makedev(5,0),TTY.default_tty_ops);TTY.register(FS.makedev(6,0),TTY.default_tty1_ops);FS.mkdev("/dev/tty",FS.makedev(5,0));FS.mkdev("/dev/tty1",FS.makedev(6,0));var randomBuffer=new Uint8Array(1024),randomLeft=0;var randomByte=()=>{if(randomLeft===0){randomFill(randomBuffer);randomLeft=randomBuffer.byteLength}return randomBuffer[--randomLeft]};FS.createDevice("/dev","random",randomByte);FS.createDevice("/dev","urandom",randomByte);FS.mkdir("/dev/shm");FS.mkdir("/dev/shm/tmp")},createSpecialDirectories(){FS.mkdir("/proc");var proc_self=FS.mkdir("/proc/self");FS.mkdir("/proc/self/fd");FS.mount({mount(){var node=FS.createNode(proc_self,"fd",16895,73);node.stream_ops={llseek:MEMFS.stream_ops.llseek};node.node_ops={lookup(parent,name){var fd=+name;var stream=FS.getStreamChecked(fd);var ret={parent:null,mount:{mountpoint:"fake"},node_ops:{readlink:()=>stream.path},id:fd+1};ret.parent=ret;return ret},readdir(){return Array.from(FS.streams.entries()).filter(([k,v])=>v).map(([k,v])=>k.toString())}};return node}},{},"/proc/self/fd")},createStandardStreams(input,output,error){if(input){FS.createDevice("/dev","stdin",input)}else{FS.symlink("/dev/tty","/dev/stdin")}if(output){FS.createDevice("/dev","stdout",null,output)}else{FS.symlink("/dev/tty","/dev/stdout")}if(error){FS.createDevice("/dev","stderr",null,error)}else{FS.symlink("/dev/tty1","/dev/stderr")}var stdin=FS.open("/dev/stdin",0);var stdout=FS.open("/dev/stdout",1);var stderr=FS.open("/dev/stderr",1)},staticInit(){FS.nameTable=new Array(4096);FS.mount(MEMFS,{},"/");FS.createDefaultDirectories();FS.createDefaultDevices();FS.createSpecialDirectories();FS.filesystems={MEMFS}},init(input,output,error){FS.initialized=true;input??=Module["stdin"];output??=Module["stdout"];error??=Module["stderr"];FS.createStandardStreams(input,output,error)},quit(){FS.initialized=false;for(var stream of FS.streams){if(stream){FS.close(stream)}}},findObject(path,dontResolveLastLink){var ret=FS.analyzePath(path,dontResolveLastLink);if(!ret.exists){return null}return ret.object},analyzePath(path,dontResolveLastLink){try{var lookup=FS.lookupPath(path,{follow:!dontResolveLastLink});path=lookup.path}catch(e){}var ret={isRoot:false,exists:false,error:0,name:null,path:null,object:null,parentExists:false,parentPath:null,parentObject:null};try{var lookup=FS.lookupPath(path,{parent:true});ret.parentExists=true;ret.parentPath=lookup.path;ret.parentObject=lookup.node;ret.name=PATH.basename(path);lookup=FS.lookupPath(path,{follow:!dontResolveLastLink});ret.exists=true;ret.path=lookup.path;ret.object=lookup.node;ret.name=lookup.node.name;ret.isRoot=lookup.path==="/"}catch(e){ret.error=e.errno}return ret},createPath(parent,path,canRead,canWrite){parent=typeof parent=="string"?parent:FS.getPath(parent);var parts=path.split("/").reverse();while(parts.length){var part=parts.pop();if(!part)continue;var current=PATH.join2(parent,part);try{FS.mkdir(current)}catch(e){if(e.errno!=20)throw e}parent=current}return current},createFile(parent,name,properties,canRead,canWrite){var path=PATH.join2(typeof parent=="string"?parent:FS.getPath(parent),name);var mode=FS_getMode(canRead,canWrite);return FS.create(path,mode)},createDataFile(parent,name,data,canRead,canWrite,canOwn){var path=name;if(parent){parent=typeof parent=="string"?parent:FS.getPath(parent);path=name?PATH.join2(parent,name):parent}var mode=FS_getMode(canRead,canWrite);var node=FS.create(path,mode);if(data){if(typeof data=="string"){var arr=new Array(data.length);for(var i=0,len=data.length;i<len;++i)arr[i]=data.charCodeAt(i);data=arr}FS.chmod(node,mode|146);var stream=FS.open(node,577);FS.write(stream,data,0,data.length,0,canOwn);FS.close(stream);FS.chmod(node,mode)}},createDevice(parent,name,input,output){var path=PATH.join2(typeof parent=="string"?parent:FS.getPath(parent),name);var mode=FS_getMode(!!input,!!output);FS.createDevice.major??=64;var dev=FS.makedev(FS.createDevice.major++,0);FS.registerDevice(dev,{open(stream){stream.seekable=false},close(stream){if(output?.buffer?.length){output(10)}},read(stream,buffer,offset,length,pos){var bytesRead=0;for(var i=0;i<length;i++){var result;try{result=input()}catch(e){throw new FS.ErrnoError(29)}if(result===undefined&&bytesRead===0){throw new FS.ErrnoError(6)}if(result===null||result===undefined)break;bytesRead++;buffer[offset+i]=result}if(bytesRead){stream.node.atime=Date.now()}return bytesRead},write(stream,buffer,offset,length,pos){for(var i=0;i<length;i++){try{output(buffer[offset+i])}catch(e){throw new FS.ErrnoError(29)}}if(length){stream.node.mtime=stream.node.ctime=Date.now()}return i}});return FS.mkdev(path,mode,dev)},forceLoadFile(obj){if(obj.isDevice||obj.isFolder||obj.link||obj.contents)return true;if(globalThis.XMLHttpRequest){abort("Lazy loading should have been performed (contents set) in createLazyFile, but it was not. Lazy loading only works in web workers. Use --embed-file or --preload-file in emcc on the main thread.")}else{try{obj.contents=readBinary(obj.url)}catch(e){throw new FS.ErrnoError(29)}}},createLazyFile(parent,name,url,canRead,canWrite){class LazyUint8Array{lengthKnown=false;chunks=[];get(idx){if(idx>this.length-1||idx<0){return undefined}var chunkOffset=idx%this.chunkSize;var chunkNum=idx/this.chunkSize|0;return this.getter(chunkNum)[chunkOffset]}setDataGetter(getter){this.getter=getter}cacheLength(){var xhr=new XMLHttpRequest;xhr.open("HEAD",url,false);xhr.send(null);if(!(xhr.status>=200&&xhr.status<300||xhr.status===304))abort("Couldn\'t load "+url+". Status: "+xhr.status);var datalength=Number(xhr.getResponseHeader("Content-length"));var header;var hasByteServing=(header=xhr.getResponseHeader("Accept-Ranges"))&&header==="bytes";var usesGzip=(header=xhr.getResponseHeader("Content-Encoding"))&&header==="gzip";var chunkSize=1024*1024;if(!hasByteServing)chunkSize=datalength;var doXHR=(from,to)=>{if(from>to)abort("invalid range ("+from+", "+to+") or no bytes requested!");if(to>datalength-1)abort("only "+datalength+" bytes available! programmer error!");var xhr=new XMLHttpRequest;xhr.open("GET",url,false);if(datalength!==chunkSize)xhr.setRequestHeader("Range","bytes="+from+"-"+to);xhr.responseType="arraybuffer";if(xhr.overrideMimeType){xhr.overrideMimeType("text/plain; charset=x-user-defined")}xhr.send(null);if(!(xhr.status>=200&&xhr.status<300||xhr.status===304))abort("Couldn\'t load "+url+". Status: "+xhr.status);if(xhr.response!==undefined){return new Uint8Array(xhr.response||[])}return intArrayFromString(xhr.responseText||"",true)};var lazyArray=this;lazyArray.setDataGetter(chunkNum=>{var start=chunkNum*chunkSize;var end=(chunkNum+1)*chunkSize-1;end=Math.min(end,datalength-1);if(typeof lazyArray.chunks[chunkNum]=="undefined"){lazyArray.chunks[chunkNum]=doXHR(start,end)}if(typeof lazyArray.chunks[chunkNum]=="undefined")abort("doXHR failed!");return lazyArray.chunks[chunkNum]});if(usesGzip||!datalength){chunkSize=datalength=1;datalength=this.getter(0).length;chunkSize=datalength;out("LazyFiles on gzip forces download of the whole file when length is accessed")}this._length=datalength;this._chunkSize=chunkSize;this.lengthKnown=true}get length(){if(!this.lengthKnown){this.cacheLength()}return this._length}get chunkSize(){if(!this.lengthKnown){this.cacheLength()}return this._chunkSize}}if(globalThis.XMLHttpRequest){if(!ENVIRONMENT_IS_WORKER)abort("Cannot do synchronous binary XHRs outside webworkers in modern browsers. Use --embed-file or --preload-file in emcc");var lazyArray=new LazyUint8Array;var properties={isDevice:false,contents:lazyArray}}else{var properties={isDevice:false,url}}var node=FS.createFile(parent,name,properties,canRead,canWrite);if(properties.contents){node.contents=properties.contents}else if(properties.url){node.contents=null;node.url=properties.url}Object.defineProperties(node,{usedBytes:{get:function(){return this.contents.length}}});var stream_ops={};for(const[key,fn]of Object.entries(node.stream_ops)){stream_ops[key]=(...args)=>{FS.forceLoadFile(node);return fn(...args)}}function writeChunks(stream,buffer,offset,length,position){var contents=stream.node.contents;if(position>=contents.length)return 0;var size=Math.min(contents.length-position,length);if(contents.slice){for(var i=0;i<size;i++){buffer[offset+i]=contents[position+i]}}else{for(var i=0;i<size;i++){buffer[offset+i]=contents.get(position+i)}}return size}stream_ops.read=(stream,buffer,offset,length,position)=>{FS.forceLoadFile(node);return writeChunks(stream,buffer,offset,length,position)};stream_ops.mmap=(stream,length,position,prot,flags)=>{FS.forceLoadFile(node);var ptr=mmapAlloc(length);if(!ptr){throw new FS.ErrnoError(48)}writeChunks(stream,(growMemViews(),HEAP8),ptr,length,position);return{ptr,allocated:true}};node.stream_ops=stream_ops;return node}};var UTF8ToString=(ptr,maxBytesToRead,ignoreNul)=>ptr?UTF8ArrayToString((growMemViews(),HEAPU8),ptr,maxBytesToRead,ignoreNul):"";var SYSCALLS={DEFAULT_POLLMASK:5,calculateAt(dirfd,path,allowEmpty){if(PATH.isAbs(path)){return path}var dir;if(dirfd===-100){dir=FS.cwd()}else{var dirstream=SYSCALLS.getStreamFromFD(dirfd);dir=dirstream.path}if(path.length==0){if(!allowEmpty){throw new FS.ErrnoError(44)}return dir}return dir+"/"+path},writeStat(buf,stat){(growMemViews(),HEAPU32)[buf/4]=stat.dev;(growMemViews(),HEAPU32)[(buf+4)/4]=stat.mode;(growMemViews(),HEAPU64)[(buf+8)/8]=BigInt(stat.nlink);(growMemViews(),HEAPU32)[(buf+16)/4]=stat.uid;(growMemViews(),HEAPU32)[(buf+20)/4]=stat.gid;(growMemViews(),HEAPU32)[(buf+24)/4]=stat.rdev;(growMemViews(),HEAP64)[(buf+32)/8]=BigInt(stat.size);(growMemViews(),HEAP32)[(buf+40)/4]=4096;(growMemViews(),HEAP32)[(buf+44)/4]=stat.blocks;var atime=stat.atime.getTime();var mtime=stat.mtime.getTime();var ctime=stat.ctime.getTime();(growMemViews(),HEAP64)[(buf+48)/8]=BigInt(Math.floor(atime/1e3));(growMemViews(),HEAPU64)[(buf+56)/8]=BigInt(atime%1e3*1e3*1e3);(growMemViews(),HEAP64)[(buf+64)/8]=BigInt(Math.floor(mtime/1e3));(growMemViews(),HEAPU64)[(buf+72)/8]=BigInt(mtime%1e3*1e3*1e3);(growMemViews(),HEAP64)[(buf+80)/8]=BigInt(Math.floor(ctime/1e3));(growMemViews(),HEAPU64)[(buf+88)/8]=BigInt(ctime%1e3*1e3*1e3);(growMemViews(),HEAP64)[(buf+96)/8]=BigInt(stat.ino);return 0},writeStatFs(buf,stats){(growMemViews(),HEAPU32)[(buf+8)/4]=stats.bsize;(growMemViews(),HEAPU32)[(buf+72)/4]=stats.bsize;(growMemViews(),HEAP64)[(buf+16)/8]=BigInt(stats.blocks);(growMemViews(),HEAP64)[(buf+24)/8]=BigInt(stats.bfree);(growMemViews(),HEAP64)[(buf+32)/8]=BigInt(stats.bavail);(growMemViews(),HEAP64)[(buf+40)/8]=BigInt(stats.files);(growMemViews(),HEAP64)[(buf+48)/8]=BigInt(stats.ffree);(growMemViews(),HEAPU32)[(buf+56)/4]=stats.fsid;(growMemViews(),HEAPU32)[(buf+80)/4]=stats.flags;(growMemViews(),HEAPU32)[(buf+64)/4]=stats.namelen},doMsync(addr,stream,len,flags,offset){if(!FS.isFile(stream.node.mode)){throw new FS.ErrnoError(43)}if(flags&2){return 0}var buffer=(growMemViews(),HEAPU8).slice(addr,addr+len);FS.msync(stream,buffer,offset,len,flags)},getStreamFromFD(fd){var stream=FS.getStreamChecked(fd);return stream},varargs:undefined,getStr(ptr){var ret=UTF8ToString(ptr);return ret}};function ___syscall_fcntl64(fd,cmd,varargs){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(3,0,1,fd,cmd,varargs);varargs=bigintToI53Checked(varargs);SYSCALLS.varargs=varargs;try{var stream=SYSCALLS.getStreamFromFD(fd);switch(cmd){case 0:{var arg=syscallGetVarargI();if(arg<0){return-28}while(FS.streams[arg]){arg++}var newStream;newStream=FS.dupStream(stream,arg);return newStream.fd}case 1:case 2:return 0;case 3:return stream.flags;case 4:{var arg=syscallGetVarargI();stream.flags|=arg;return 0}case 5:{var arg=syscallGetVarargP();var offset=0;(growMemViews(),HEAP16)[(arg+offset)/2]=2;return 0}case 6:case 7:return 0}return-28}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function ___syscall_fstat64(fd,buf){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(4,0,1,fd,buf);buf=bigintToI53Checked(buf);try{return SYSCALLS.writeStat(buf,FS.fstat(fd))}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}var stringToUTF8=(str,outPtr,maxBytesToWrite)=>stringToUTF8Array(str,(growMemViews(),HEAPU8),outPtr,maxBytesToWrite);function ___syscall_getcwd(buf,size){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(5,0,1,buf,size);buf=bigintToI53Checked(buf);size=bigintToI53Checked(size);try{if(size===0)return-28;var cwd=FS.cwd();var cwdLengthInBytes=lengthBytesUTF8(cwd)+1;if(size<cwdLengthInBytes)return-68;stringToUTF8(cwd,buf,size);return cwdLengthInBytes}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function ___syscall_getdents64(fd,dirp,count){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(6,0,1,fd,dirp,count);dirp=bigintToI53Checked(dirp);count=bigintToI53Checked(count);try{var stream=SYSCALLS.getStreamFromFD(fd);stream.getdents||=FS.readdir(stream.path);var struct_size=280;var pos=0;var off=FS.llseek(stream,0,1);var startIdx=Math.floor(off/struct_size);var endIdx=Math.min(stream.getdents.length,startIdx+Math.floor(count/struct_size));for(var idx=startIdx;idx<endIdx;idx++){var id;var type;var name=stream.getdents[idx];if(name==="."){id=stream.node.id;type=4}else if(name===".."){var lookup=FS.lookupPath(stream.path,{parent:true});id=lookup.node.id;type=4}else{var child;try{child=FS.lookupNode(stream.node,name)}catch(e){if(e?.errno===28){continue}throw e}id=child.id;type=FS.isChrdev(child.mode)?2:FS.isDir(child.mode)?4:FS.isLink(child.mode)?10:8}(growMemViews(),HEAP64)[(dirp+pos)/8]=BigInt(id);(growMemViews(),HEAP64)[(dirp+pos+8)/8]=BigInt((idx+1)*struct_size);(growMemViews(),HEAP16)[(dirp+pos+16)/2]=280;(growMemViews(),HEAP8)[dirp+pos+18]=type;stringToUTF8(name,dirp+pos+19,256);pos+=struct_size}FS.llseek(stream,idx*struct_size,0);return pos}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function ___syscall_ioctl(fd,op,varargs){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(7,0,1,fd,op,varargs);varargs=bigintToI53Checked(varargs);SYSCALLS.varargs=varargs;try{var stream=SYSCALLS.getStreamFromFD(fd);switch(op){case 21509:{if(!stream.tty)return-59;return 0}case 21505:{if(!stream.tty)return-59;if(stream.tty.ops.ioctl_tcgets){var termios=stream.tty.ops.ioctl_tcgets(stream);var argp=syscallGetVarargP();(growMemViews(),HEAP32)[argp/4]=termios.c_iflag||0;(growMemViews(),HEAP32)[(argp+4)/4]=termios.c_oflag||0;(growMemViews(),HEAP32)[(argp+8)/4]=termios.c_cflag||0;(growMemViews(),HEAP32)[(argp+12)/4]=termios.c_lflag||0;for(var i=0;i<32;i++){(growMemViews(),HEAP8)[argp+i+17]=termios.c_cc[i]||0}return 0}return 0}case 21510:case 21511:case 21512:{if(!stream.tty)return-59;return 0}case 21506:case 21507:case 21508:{if(!stream.tty)return-59;if(stream.tty.ops.ioctl_tcsets){var argp=syscallGetVarargP();var c_iflag=(growMemViews(),HEAP32)[argp/4];var c_oflag=(growMemViews(),HEAP32)[(argp+4)/4];var c_cflag=(growMemViews(),HEAP32)[(argp+8)/4];var c_lflag=(growMemViews(),HEAP32)[(argp+12)/4];var c_cc=[];for(var i=0;i<32;i++){c_cc.push((growMemViews(),HEAP8)[argp+i+17])}return stream.tty.ops.ioctl_tcsets(stream.tty,op,{c_iflag,c_oflag,c_cflag,c_lflag,c_cc})}return 0}case 21519:{if(!stream.tty)return-59;var argp=syscallGetVarargP();(growMemViews(),HEAP32)[argp/4]=0;return 0}case 21520:{if(!stream.tty)return-59;return-28}case 21537:case 21531:{var argp=syscallGetVarargP();return FS.ioctl(stream,op,argp)}case 21523:{if(!stream.tty)return-59;if(stream.tty.ops.ioctl_tiocgwinsz){var winsize=stream.tty.ops.ioctl_tiocgwinsz(stream.tty);var argp=syscallGetVarargP();(growMemViews(),HEAP16)[argp/2]=winsize[0];(growMemViews(),HEAP16)[(argp+2)/2]=winsize[1]}return 0}case 21524:{if(!stream.tty)return-59;return 0}case 21515:{if(!stream.tty)return-59;return 0}default:return-28}}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function ___syscall_lstat64(path,buf){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(8,0,1,path,buf);path=bigintToI53Checked(path);buf=bigintToI53Checked(buf);try{path=SYSCALLS.getStr(path);return SYSCALLS.writeStat(buf,FS.lstat(path))}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function ___syscall_newfstatat(dirfd,path,buf,flags){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(9,0,1,dirfd,path,buf,flags);path=bigintToI53Checked(path);buf=bigintToI53Checked(buf);try{path=SYSCALLS.getStr(path);var nofollow=flags&256;var allowEmpty=flags&4096;flags=flags&~6400;path=SYSCALLS.calculateAt(dirfd,path,allowEmpty);return SYSCALLS.writeStat(buf,nofollow?FS.lstat(path):FS.stat(path))}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function ___syscall_openat(dirfd,path,flags,varargs){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(10,0,1,dirfd,path,flags,varargs);path=bigintToI53Checked(path);varargs=bigintToI53Checked(varargs);SYSCALLS.varargs=varargs;try{path=SYSCALLS.getStr(path);path=SYSCALLS.calculateAt(dirfd,path);var mode=varargs?syscallGetVarargI():0;return FS.open(path,flags,mode).fd}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function ___syscall_stat64(path,buf){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(11,0,1,path,buf);path=bigintToI53Checked(path);buf=bigintToI53Checked(buf);try{path=SYSCALLS.getStr(path);return SYSCALLS.writeStat(buf,FS.stat(path))}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}var __abort_js=()=>abort("");function __emscripten_init_main_thread_js(tb){tb=bigintToI53Checked(tb);__emscripten_thread_init(tb,!ENVIRONMENT_IS_WORKER,1,!ENVIRONMENT_IS_WEB,5242880,false);PThread.threadInitTLS()}var handleException=e=>{if(e instanceof ExitStatus||e=="unwind"){return EXITSTATUS}quit_(1,e)};var maybeExit=()=>{if(!keepRuntimeAlive()){try{if(ENVIRONMENT_IS_PTHREAD){if(_pthread_self())__emscripten_thread_exit(EXITSTATUS);return}_exit(EXITSTATUS)}catch(e){handleException(e)}}};var callUserCallback=func=>{if(ABORT){return}try{func();maybeExit()}catch(e){handleException(e)}};function __emscripten_thread_mailbox_await(pthread_ptr){pthread_ptr=bigintToI53Checked(pthread_ptr);if(Atomics.waitAsync){var wait=Atomics.waitAsync((growMemViews(),HEAP32),pthread_ptr/4,pthread_ptr);wait.value.then(checkMailbox);var waitingAsync=pthread_ptr+228;Atomics.store((growMemViews(),HEAP32),waitingAsync/4,1)}}var checkMailbox=()=>callUserCallback(()=>{var pthread_ptr=_pthread_self();if(pthread_ptr){__emscripten_thread_mailbox_await(pthread_ptr);__emscripten_check_mailbox()}});function __emscripten_notify_mailbox_postmessage(targetThread,currThreadId){targetThread=bigintToI53Checked(targetThread);currThreadId=bigintToI53Checked(currThreadId);if(targetThread==currThreadId){setTimeout(checkMailbox)}else if(ENVIRONMENT_IS_PTHREAD){postMessage({targetThread,cmd:"checkMailbox"})}else{var worker=PThread.pthreads[targetThread];if(!worker){return}worker.postMessage({cmd:"checkMailbox"})}}var proxiedJSCallArgs=[];function __emscripten_receive_on_main_thread_js(funcIndex,emAsmAddr,callingThread,numCallArgs,args){emAsmAddr=bigintToI53Checked(emAsmAddr);callingThread=bigintToI53Checked(callingThread);args=bigintToI53Checked(args);numCallArgs/=2;proxiedJSCallArgs.length=numCallArgs;var b=args/8;for(var i=0;i<numCallArgs;i++){if((growMemViews(),HEAP64)[b+2*i]){proxiedJSCallArgs[i]=(growMemViews(),HEAP64)[b+2*i+1]}else{proxiedJSCallArgs[i]=(growMemViews(),HEAPF64)[b+2*i+1]}}var func=proxiedFunctionTable[funcIndex];PThread.currentProxiedOperationCallerThread=callingThread;var rtn=func(...proxiedJSCallArgs);PThread.currentProxiedOperationCallerThread=0;if(typeof rtn=="bigint"){rtn=bigintToI53Checked(rtn)}return rtn}function __emscripten_thread_cleanup(thread){thread=bigintToI53Checked(thread);if(!ENVIRONMENT_IS_PTHREAD)cleanupThread(thread);else postMessage({cmd:"cleanupThread",thread})}function __emscripten_thread_set_strongref(thread){thread=bigintToI53Checked(thread);if(ENVIRONMENT_IS_NODE){PThread.pthreads[thread].ref()}}var isLeapYear=year=>year%4===0&&(year%100!==0||year%400===0);var MONTH_DAYS_LEAP_CUMULATIVE=[0,31,60,91,121,152,182,213,244,274,305,335];var MONTH_DAYS_REGULAR_CUMULATIVE=[0,31,59,90,120,151,181,212,243,273,304,334];var ydayFromDate=date=>{var leap=isLeapYear(date.getFullYear());var monthDaysCumulative=leap?MONTH_DAYS_LEAP_CUMULATIVE:MONTH_DAYS_REGULAR_CUMULATIVE;var yday=monthDaysCumulative[date.getMonth()]+date.getDate()-1;return yday};function __localtime_js(time,tmPtr){time=bigintToI53Checked(time);tmPtr=bigintToI53Checked(tmPtr);var date=new Date(time*1e3);(growMemViews(),HEAP32)[tmPtr/4]=date.getSeconds();(growMemViews(),HEAP32)[(tmPtr+4)/4]=date.getMinutes();(growMemViews(),HEAP32)[(tmPtr+8)/4]=date.getHours();(growMemViews(),HEAP32)[(tmPtr+12)/4]=date.getDate();(growMemViews(),HEAP32)[(tmPtr+16)/4]=date.getMonth();(growMemViews(),HEAP32)[(tmPtr+20)/4]=date.getFullYear()-1900;(growMemViews(),HEAP32)[(tmPtr+24)/4]=date.getDay();var yday=ydayFromDate(date)|0;(growMemViews(),HEAP32)[(tmPtr+28)/4]=yday;(growMemViews(),HEAP64)[(tmPtr+40)/8]=BigInt(-(date.getTimezoneOffset()*60));var start=new Date(date.getFullYear(),0,1);var summerOffset=new Date(date.getFullYear(),6,1).getTimezoneOffset();var winterOffset=start.getTimezoneOffset();var dst=(summerOffset!=winterOffset&&date.getTimezoneOffset()==Math.min(winterOffset,summerOffset))|0;(growMemViews(),HEAP32)[(tmPtr+32)/4]=dst}function __mmap_js(len,prot,flags,fd,offset,allocated,addr){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(12,0,1,len,prot,flags,fd,offset,allocated,addr);len=bigintToI53Checked(len);offset=bigintToI53Checked(offset);allocated=bigintToI53Checked(allocated);addr=bigintToI53Checked(addr);try{var stream=SYSCALLS.getStreamFromFD(fd);var res=FS.mmap(stream,len,offset,prot,flags);var ptr=res.ptr;(growMemViews(),HEAP32)[allocated/4]=res.allocated;(growMemViews(),HEAPU64)[addr/8]=BigInt(ptr);return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}function __munmap_js(addr,len,prot,flags,fd,offset){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(13,0,1,addr,len,prot,flags,fd,offset);addr=bigintToI53Checked(addr);len=bigintToI53Checked(len);offset=bigintToI53Checked(offset);try{var stream=SYSCALLS.getStreamFromFD(fd);if(prot&2){SYSCALLS.doMsync(addr,stream,len,flags,offset)}}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return-e.errno}}var __tzset_js=function(timezone,daylight,std_name,dst_name){timezone=bigintToI53Checked(timezone);daylight=bigintToI53Checked(daylight);std_name=bigintToI53Checked(std_name);dst_name=bigintToI53Checked(dst_name);var currentYear=(new Date).getFullYear();var winter=new Date(currentYear,0,1);var summer=new Date(currentYear,6,1);var winterOffset=winter.getTimezoneOffset();var summerOffset=summer.getTimezoneOffset();var stdTimezoneOffset=Math.max(winterOffset,summerOffset);(growMemViews(),HEAPU64)[timezone/8]=BigInt(stdTimezoneOffset*60);(growMemViews(),HEAP32)[daylight/4]=Number(winterOffset!=summerOffset);var extractZone=timezoneOffset=>{var sign=timezoneOffset>=0?"-":"+";var absOffset=Math.abs(timezoneOffset);var hours=String(Math.floor(absOffset/60)).padStart(2,"0");var minutes=String(absOffset%60).padStart(2,"0");return`UTC${sign}${hours}${minutes}`};var winterName=extractZone(winterOffset);var summerName=extractZone(summerOffset);if(summerOffset<winterOffset){stringToUTF8(winterName,std_name,17);stringToUTF8(summerName,dst_name,17)}else{stringToUTF8(winterName,dst_name,17);stringToUTF8(summerName,std_name,17)}};var _emscripten_get_now=()=>performance.timeOrigin+performance.now();var _emscripten_date_now=()=>Date.now();var nowIsMonotonic=1;var checkWasiClock=clock_id=>clock_id>=0&&clock_id<=3;function _clock_time_get(clk_id,ignored_precision,ptime){ignored_precision=bigintToI53Checked(ignored_precision);ptime=bigintToI53Checked(ptime);if(!checkWasiClock(clk_id)){return 28}var now;if(clk_id===0){now=_emscripten_date_now()}else if(nowIsMonotonic){now=_emscripten_get_now()}else{return 52}var nsec=Math.round(now*1e3*1e3);(growMemViews(),HEAP64)[ptime/8]=BigInt(nsec);return 0}var _emscripten_check_blocking_allowed=()=>{};var runtimeKeepalivePush=()=>{runtimeKeepaliveCounter+=1};var _emscripten_exit_with_live_runtime=()=>{runtimeKeepalivePush();throw"unwind"};var jsStackTrace=()=>(new Error).stack.toString();var getCallstack=flags=>{var callstack=jsStackTrace();var lines=callstack.split("\\n");callstack="";var firefoxRe=new RegExp("\\\\s*(.*?)@(.*?):([0-9]+):([0-9]+)");var chromeRe=new RegExp("\\\\s*at (.*?) \\\\((.*):(.*):(.*)\\\\)");for(var line of lines){var symbolName="";var file="";var lineno=0;var column=0;var parts=chromeRe.exec(line);if(parts?.length==5){symbolName=parts[1];file=parts[2];lineno=parts[3];column=parts[4]}else{parts=firefoxRe.exec(line);if(parts?.length>=4){symbolName=parts[1];file=parts[2];lineno=parts[3];column=parts[4]|0}else{callstack+=line+"\\n";continue}}if(symbolName=="_emscripten_log"||symbolName=="_emscripten_get_callstack"){callstack="";continue}if(flags&24){if(flags&64){file=file.substring(file.replace(/\\\\/g,"/").lastIndexOf("/")+1)}callstack+=`    at ${symbolName} (${file}:${lineno}:${column})\\n`}}callstack=callstack.replace(/\\s+$/,"");return callstack};function _emscripten_get_callstack(flags,str,maxbytes){str=bigintToI53Checked(str);var callstack=getCallstack(flags);if(!str||maxbytes<=0){return lengthBytesUTF8(callstack)+1}var bytesWrittenExcludingNull=stringToUTF8(callstack,str,maxbytes);return bytesWrittenExcludingNull+1}var getHeapMax=()=>4294967296;var _emscripten_get_heap_max=()=>BigInt(getHeapMax());var _emscripten_has_asyncify=()=>2;var _emscripten_num_logical_cores=()=>ENVIRONMENT_IS_NODE?require("os").cpus().length:navigator["hardwareConcurrency"];var growMemory=size=>{var oldHeapSize=wasmMemory.buffer.byteLength;var pages=(size-oldHeapSize+65535)/65536|0;try{wasmMemory.grow(BigInt(pages));updateMemoryViews();return 1}catch(e){}};function _emscripten_resize_heap(requestedSize){requestedSize=bigintToI53Checked(requestedSize);var oldSize=(growMemViews(),HEAPU8).length;if(requestedSize<=oldSize){return false}var maxHeapSize=getHeapMax();if(requestedSize>maxHeapSize){return false}for(var cutDown=1;cutDown<=4;cutDown*=2){var overGrownHeapSize=oldSize*(1+.2/cutDown);overGrownHeapSize=Math.min(overGrownHeapSize,requestedSize+100663296);var newSize=Math.min(maxHeapSize,alignMemory(Math.max(requestedSize,overGrownHeapSize),65536));var replacement=growMemory(newSize);if(replacement){return true}}return false}var stringToUTF8OnStack=str=>{var size=lengthBytesUTF8(str)+1;var ret=stackAlloc(size);stringToUTF8(str,ret,size);return ret};var writeI53ToI64=(ptr,num)=>{(growMemViews(),HEAPU32)[ptr/4]=num;var lower=(growMemViews(),HEAPU32)[ptr/4];(growMemViews(),HEAPU32)[(ptr+4)/4]=(num-lower)/4294967296};var stringToNewUTF8=str=>{var size=lengthBytesUTF8(str)+1;var ret=_malloc(size);if(ret)stringToUTF8(str,ret,size);return ret};var readI53FromI64=ptr=>(growMemViews(),HEAPU32)[ptr/4]+(growMemViews(),HEAP32)[(ptr+4)/4]*4294967296;var WebGPU={Internals:{jsObjects:[],jsObjectInsert:(ptr,jsObject)=>{WebGPU.Internals.jsObjects[ptr]=jsObject},bufferOnUnmaps:[],futures:[],futureInsert:(futureId,promise)=>{WebGPU.Internals.futures[futureId]=new Promise(resolve=>promise.finally(()=>resolve(futureId)))}},getJsObject:ptr=>{if(!ptr)return undefined;return WebGPU.Internals.jsObjects[ptr]},importJsAdapter:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateAdapter(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsBindGroup:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateBindGroup(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsBindGroupLayout:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateBindGroupLayout(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsBuffer:(buffer,parentPtr=0)=>{assert(buffer.mapState==="unmapped");var bufferPtr=_emwgpuCreateBuffer(parentPtr);WebGPU.Internals.jsObjectInsert(bufferPtr,buffer);return bufferPtr},importJsCommandBuffer:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateCommandBuffer(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsCommandEncoder:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateCommandEncoder(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsComputePassEncoder:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateComputePassEncoder(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsComputePipeline:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateComputePipeline(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsDevice:(device,parentPtr=0)=>{var queuePtr=_emwgpuCreateQueue(parentPtr);var devicePtr=_emwgpuCreateDevice(parentPtr,queuePtr);WebGPU.Internals.jsObjectInsert(queuePtr,device.queue);WebGPU.Internals.jsObjectInsert(devicePtr,device);return devicePtr},importJsExternalTexture:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateExternalTexture(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsPipelineLayout:(obj,parentPtr=0)=>{var ptr=_emwgpuCreatePipelineLayout(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsQuerySet:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateQuerySet(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsQueue:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateQueue(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsRenderBundle:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateRenderBundle(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsRenderBundleEncoder:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateRenderBundleEncoder(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsRenderPassEncoder:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateRenderPassEncoder(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsRenderPipeline:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateRenderPipeline(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsSampler:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateSampler(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsShaderModule:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateShaderModule(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsSurface:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateSurface(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsTexture:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateTexture(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},importJsTextureView:(obj,parentPtr=0)=>{var ptr=_emwgpuCreateTextureView(parentPtr);WebGPU.Internals.jsObjects[ptr]=obj;return ptr},errorCallback:(callback,type,message,userdata)=>{var sp=stackSave();var messagePtr=stringToUTF8OnStack(message);((a1,a2,a3)=>getWasmTableEntry(callback).call(null,a1,BigInt(a2),BigInt(a3)))(type,BigInt(messagePtr),userdata);stackRestore(sp)},iterateExtensions:(root,handlers)=>{for(var ptr=Number((growMemViews(),HEAPU64)[root/8]);ptr;ptr=Number((growMemViews(),HEAPU64)[ptr/8])){var sType=(growMemViews(),HEAP32)[(ptr+8)/4];var handler=handlers[sType](ptr)}},setStringView:(ptr,data,length)=>{(growMemViews(),HEAPU64)[ptr/8]=BigInt(data);(growMemViews(),HEAPU64)[(ptr+8)/8]=BigInt(length)},makeStringFromStringView:stringViewPtr=>{var ptr=Number((growMemViews(),HEAPU64)[stringViewPtr/8]);var length=Number((growMemViews(),HEAPU64)[(stringViewPtr+8)/8]);return UTF8ToString(ptr,length)},makeStringFromOptionalStringView:stringViewPtr=>{var ptr=Number((growMemViews(),HEAPU64)[stringViewPtr/8]);var length=Number((growMemViews(),HEAPU64)[(stringViewPtr+8)/8]);if(!ptr){if(length===0){return""}return undefined}return UTF8ToString(ptr,length)},makeColor:ptr=>({r:(growMemViews(),HEAPF64)[ptr/8],g:(growMemViews(),HEAPF64)[(ptr+8)/8],b:(growMemViews(),HEAPF64)[(ptr+16)/8],a:(growMemViews(),HEAPF64)[(ptr+24)/8]}),makeExtent3D:ptr=>({width:(growMemViews(),HEAPU32)[ptr/4],height:(growMemViews(),HEAPU32)[(ptr+4)/4],depthOrArrayLayers:(growMemViews(),HEAPU32)[(ptr+8)/4]}),makeOrigin3D:ptr=>({x:(growMemViews(),HEAPU32)[ptr/4],y:(growMemViews(),HEAPU32)[(ptr+4)/4],z:(growMemViews(),HEAPU32)[(ptr+8)/4]}),makeTexelCopyTextureInfo:ptr=>({texture:WebGPU.getJsObject(Number((growMemViews(),HEAPU64)[ptr/8])),mipLevel:(growMemViews(),HEAPU32)[(ptr+8)/4],origin:WebGPU.makeOrigin3D(ptr+12),aspect:WebGPU.TextureAspect[(growMemViews(),HEAP32)[(ptr+24)/4]]}),makeTexelCopyBufferLayout:ptr=>{var bytesPerRow=(growMemViews(),HEAPU32)[(ptr+8)/4];var rowsPerImage=(growMemViews(),HEAPU32)[(ptr+12)/4];return{offset:readI53FromI64(ptr),bytesPerRow:bytesPerRow===4294967295?undefined:bytesPerRow,rowsPerImage:rowsPerImage===4294967295?undefined:rowsPerImage}},makeTexelCopyBufferInfo:ptr=>{var layoutPtr=ptr+0;var bufferCopyView=WebGPU.makeTexelCopyBufferLayout(layoutPtr);bufferCopyView["buffer"]=WebGPU.getJsObject(Number((growMemViews(),HEAPU64)[(ptr+16)/8]));return bufferCopyView},makePassTimestampWrites:ptr=>{if(ptr===0)return undefined;return{querySet:WebGPU.getJsObject(Number((growMemViews(),HEAPU64)[(ptr+8)/8])),beginningOfPassWriteIndex:(growMemViews(),HEAPU32)[(ptr+16)/4],endOfPassWriteIndex:(growMemViews(),HEAPU32)[(ptr+20)/4]}},makePipelineConstants:(constantCount,constantsPtr)=>{if(!constantCount)return;var constants={};for(var i=0;i<constantCount;++i){var entryPtr=constantsPtr+32*i;var key=WebGPU.makeStringFromStringView(entryPtr+8);constants[key]=(growMemViews(),HEAPF64)[(entryPtr+24)/8]}return constants},makePipelineLayout:layoutPtr=>{if(!layoutPtr)return"auto";return WebGPU.getJsObject(layoutPtr)},makeComputeState:ptr=>{if(!ptr)return undefined;var desc={module:WebGPU.getJsObject(Number((growMemViews(),HEAPU64)[(ptr+8)/8])),constants:WebGPU.makePipelineConstants(Number((growMemViews(),HEAPU64)[(ptr+32)/8]),Number((growMemViews(),HEAPU64)[(ptr+40)/8])),entryPoint:WebGPU.makeStringFromOptionalStringView(ptr+16)};return desc},makeComputePipelineDesc:descriptor=>{var desc={label:WebGPU.makeStringFromOptionalStringView(descriptor+8),layout:WebGPU.makePipelineLayout(Number((growMemViews(),HEAPU64)[(descriptor+24)/8])),compute:WebGPU.makeComputeState(descriptor+32)};return desc},makeRenderPipelineDesc:descriptor=>{function makePrimitiveState(psPtr){if(!psPtr)return undefined;return{topology:WebGPU.PrimitiveTopology[(growMemViews(),HEAP32)[(psPtr+8)/4]],stripIndexFormat:WebGPU.IndexFormat[(growMemViews(),HEAP32)[(psPtr+12)/4]],frontFace:WebGPU.FrontFace[(growMemViews(),HEAP32)[(psPtr+16)/4]],cullMode:WebGPU.CullMode[(growMemViews(),HEAP32)[(psPtr+20)/4]],unclippedDepth:!!(growMemViews(),HEAPU32)[(psPtr+24)/4]}}function makeBlendComponent(bdPtr){if(!bdPtr)return undefined;return{operation:WebGPU.BlendOperation[(growMemViews(),HEAP32)[bdPtr/4]],srcFactor:WebGPU.BlendFactor[(growMemViews(),HEAP32)[(bdPtr+4)/4]],dstFactor:WebGPU.BlendFactor[(growMemViews(),HEAP32)[(bdPtr+8)/4]]}}function makeBlendState(bsPtr){if(!bsPtr)return undefined;return{alpha:makeBlendComponent(bsPtr+12),color:makeBlendComponent(bsPtr+0)}}function makeColorState(csPtr){var format=WebGPU.TextureFormat[(growMemViews(),HEAP32)[(csPtr+8)/4]];return format?{format,blend:makeBlendState(Number((growMemViews(),HEAPU64)[(csPtr+16)/8])),writeMask:(growMemViews(),HEAPU32)[(csPtr+24)/4]}:undefined}function makeColorStates(count,csArrayPtr){var states=[];for(var i=0;i<count;++i){states.push(makeColorState(csArrayPtr+32*i))}return states}function makeStencilStateFace(ssfPtr){return{compare:WebGPU.CompareFunction[(growMemViews(),HEAP32)[ssfPtr/4]],failOp:WebGPU.StencilOperation[(growMemViews(),HEAP32)[(ssfPtr+4)/4]],depthFailOp:WebGPU.StencilOperation[(growMemViews(),HEAP32)[(ssfPtr+8)/4]],passOp:WebGPU.StencilOperation[(growMemViews(),HEAP32)[(ssfPtr+12)/4]]}}function makeDepthStencilState(dssPtr){if(!dssPtr)return undefined;return{format:WebGPU.TextureFormat[(growMemViews(),HEAP32)[(dssPtr+8)/4]],depthWriteEnabled:!!(growMemViews(),HEAPU32)[(dssPtr+12)/4],depthCompare:WebGPU.CompareFunction[(growMemViews(),HEAP32)[(dssPtr+16)/4]],stencilFront:makeStencilStateFace(dssPtr+20),stencilBack:makeStencilStateFace(dssPtr+36),stencilReadMask:(growMemViews(),HEAPU32)[(dssPtr+52)/4],stencilWriteMask:(growMemViews(),HEAPU32)[(dssPtr+56)/4],depthBias:(growMemViews(),HEAP32)[(dssPtr+60)/4],depthBiasSlopeScale:(growMemViews(),HEAPF32)[(dssPtr+64)/4],depthBiasClamp:(growMemViews(),HEAPF32)[(dssPtr+68)/4]}}function makeVertexAttribute(vaPtr){return{format:WebGPU.VertexFormat[(growMemViews(),HEAP32)[(vaPtr+8)/4]],offset:readI53FromI64(vaPtr+16),shaderLocation:(growMemViews(),HEAPU32)[(vaPtr+24)/4]}}function makeVertexAttributes(count,vaArrayPtr){var vas=[];for(var i=0;i<count;++i){vas.push(makeVertexAttribute(vaArrayPtr+i*32))}return vas}function makeVertexBuffer(vbPtr){if(!vbPtr)return undefined;var stepMode=WebGPU.VertexStepMode[(growMemViews(),HEAP32)[(vbPtr+8)/4]];var attributeCount=Number((growMemViews(),HEAPU64)[(vbPtr+24)/8]);if(!stepMode&&!attributeCount){return null}return{arrayStride:readI53FromI64(vbPtr+16),stepMode,attributes:makeVertexAttributes(attributeCount,Number((growMemViews(),HEAPU64)[(vbPtr+32)/8]))}}function makeVertexBuffers(count,vbArrayPtr){if(!count)return undefined;var vbs=[];for(var i=0;i<count;++i){vbs.push(makeVertexBuffer(vbArrayPtr+i*40))}return vbs}function makeVertexState(viPtr){if(!viPtr)return undefined;var desc={module:WebGPU.getJsObject(Number((growMemViews(),HEAPU64)[(viPtr+8)/8])),constants:WebGPU.makePipelineConstants(Number((growMemViews(),HEAPU64)[(viPtr+32)/8]),Number((growMemViews(),HEAPU64)[(viPtr+40)/8])),buffers:makeVertexBuffers(Number((growMemViews(),HEAPU64)[(viPtr+48)/8]),Number((growMemViews(),HEAPU64)[(viPtr+56)/8])),entryPoint:WebGPU.makeStringFromOptionalStringView(viPtr+16)};return desc}function makeMultisampleState(msPtr){if(!msPtr)return undefined;return{count:(growMemViews(),HEAPU32)[(msPtr+8)/4],mask:(growMemViews(),HEAPU32)[(msPtr+12)/4],alphaToCoverageEnabled:!!(growMemViews(),HEAPU32)[(msPtr+16)/4]}}function makeFragmentState(fsPtr){if(!fsPtr)return undefined;var desc={module:WebGPU.getJsObject(Number((growMemViews(),HEAPU64)[(fsPtr+8)/8])),constants:WebGPU.makePipelineConstants(Number((growMemViews(),HEAPU64)[(fsPtr+32)/8]),Number((growMemViews(),HEAPU64)[(fsPtr+40)/8])),targets:makeColorStates(Number((growMemViews(),HEAPU64)[(fsPtr+48)/8]),Number((growMemViews(),HEAPU64)[(fsPtr+56)/8])),entryPoint:WebGPU.makeStringFromOptionalStringView(fsPtr+16)};return desc}var desc={label:WebGPU.makeStringFromOptionalStringView(descriptor+8),layout:WebGPU.makePipelineLayout(Number((growMemViews(),HEAPU64)[(descriptor+24)/8])),vertex:makeVertexState(descriptor+32),primitive:makePrimitiveState(descriptor+96),depthStencil:makeDepthStencilState(Number((growMemViews(),HEAPU64)[(descriptor+128)/8])),multisample:makeMultisampleState(descriptor+136),fragment:makeFragmentState(Number((growMemViews(),HEAPU64)[(descriptor+160)/8]))};return desc},fillLimitStruct:(limits,limitsOutPtr)=>{var nextInChainPtr=Number((growMemViews(),HEAPU64)[limitsOutPtr/8]);function setLimitValueU32(name,basePtr,limitOffset,fallbackValue=0){var limitValue=limits[name]??fallbackValue;(growMemViews(),HEAPU32)[(basePtr+limitOffset)/4]=limitValue}function setLimitValueU64(name,basePtr,limitOffset,fallbackValue=0){var limitValue=limits[name]??fallbackValue;writeI53ToI64(basePtr+limitOffset,limitValue)}setLimitValueU32("maxTextureDimension1D",limitsOutPtr,8);setLimitValueU32("maxTextureDimension2D",limitsOutPtr,12);setLimitValueU32("maxTextureDimension3D",limitsOutPtr,16);setLimitValueU32("maxTextureArrayLayers",limitsOutPtr,20);setLimitValueU32("maxBindGroups",limitsOutPtr,24);setLimitValueU32("maxBindGroupsPlusVertexBuffers",limitsOutPtr,28);setLimitValueU32("maxBindingsPerBindGroup",limitsOutPtr,32);setLimitValueU32("maxDynamicUniformBuffersPerPipelineLayout",limitsOutPtr,36);setLimitValueU32("maxDynamicStorageBuffersPerPipelineLayout",limitsOutPtr,40);setLimitValueU32("maxSampledTexturesPerShaderStage",limitsOutPtr,44);setLimitValueU32("maxSamplersPerShaderStage",limitsOutPtr,48);setLimitValueU32("maxStorageBuffersPerShaderStage",limitsOutPtr,52);setLimitValueU32("maxStorageTexturesPerShaderStage",limitsOutPtr,56);setLimitValueU32("maxUniformBuffersPerShaderStage",limitsOutPtr,60);setLimitValueU32("minUniformBufferOffsetAlignment",limitsOutPtr,80);setLimitValueU32("minStorageBufferOffsetAlignment",limitsOutPtr,84);setLimitValueU64("maxUniformBufferBindingSize",limitsOutPtr,64);setLimitValueU64("maxStorageBufferBindingSize",limitsOutPtr,72);setLimitValueU32("maxVertexBuffers",limitsOutPtr,88);setLimitValueU64("maxBufferSize",limitsOutPtr,96);setLimitValueU32("maxVertexAttributes",limitsOutPtr,104);setLimitValueU32("maxVertexBufferArrayStride",limitsOutPtr,108);setLimitValueU32("maxInterStageShaderVariables",limitsOutPtr,112);setLimitValueU32("maxColorAttachments",limitsOutPtr,116);setLimitValueU32("maxColorAttachmentBytesPerSample",limitsOutPtr,120);setLimitValueU32("maxComputeWorkgroupStorageSize",limitsOutPtr,124);setLimitValueU32("maxComputeInvocationsPerWorkgroup",limitsOutPtr,128);setLimitValueU32("maxComputeWorkgroupSizeX",limitsOutPtr,132);setLimitValueU32("maxComputeWorkgroupSizeY",limitsOutPtr,136);setLimitValueU32("maxComputeWorkgroupSizeZ",limitsOutPtr,140);setLimitValueU32("maxComputeWorkgroupsPerDimension",limitsOutPtr,144);setLimitValueU32("maxImmediateSize",limitsOutPtr,148);if(nextInChainPtr!==0){var sType=(growMemViews(),HEAP32)[(nextInChainPtr+8)/4];var compatibilityModeLimitsPtr=nextInChainPtr;setLimitValueU32("maxStorageBuffersInVertexStage",compatibilityModeLimitsPtr,16,limits.maxStorageBuffersPerShaderStage);setLimitValueU32("maxStorageBuffersInFragmentStage",compatibilityModeLimitsPtr,24,limits.maxStorageBuffersPerShaderStage);setLimitValueU32("maxStorageTexturesInVertexStage",compatibilityModeLimitsPtr,20,limits.maxStorageTexturesPerShaderStage);setLimitValueU32("maxStorageTexturesInFragmentStage",compatibilityModeLimitsPtr,28,limits.maxStorageTexturesPerShaderStage)}},fillAdapterInfoStruct:(info,infoStruct)=>{(growMemViews(),HEAPU32)[(infoStruct+88)/4]=info.subgroupMinSize;(growMemViews(),HEAPU32)[(infoStruct+92)/4]=info.subgroupMaxSize;var strs=info.vendor+info.architecture+info.device+info.description;var strPtr=stringToNewUTF8(strs);var vendorLen=lengthBytesUTF8(info.vendor);WebGPU.setStringView(infoStruct+8,strPtr,vendorLen);strPtr+=vendorLen;var architectureLen=lengthBytesUTF8(info.architecture);WebGPU.setStringView(infoStruct+24,strPtr,architectureLen);strPtr+=architectureLen;var deviceLen=lengthBytesUTF8(info.device);WebGPU.setStringView(infoStruct+40,strPtr,deviceLen);strPtr+=deviceLen;var descriptionLen=lengthBytesUTF8(info.description);WebGPU.setStringView(infoStruct+56,strPtr,descriptionLen);strPtr+=descriptionLen;(growMemViews(),HEAP32)[(infoStruct+72)/4]=2;var adapterType=info.isFallbackAdapter?3:4;(growMemViews(),HEAP32)[(infoStruct+76)/4]=adapterType;(growMemViews(),HEAPU32)[(infoStruct+80)/4]=0;(growMemViews(),HEAPU32)[(infoStruct+84)/4]=0},AddressMode:[,"clamp-to-edge","repeat","mirror-repeat"],BlendFactor:[,"zero","one","src","one-minus-src","src-alpha","one-minus-src-alpha","dst","one-minus-dst","dst-alpha","one-minus-dst-alpha","src-alpha-saturated","constant","one-minus-constant","src1","one-minus-src1","src1-alpha","one-minus-src1-alpha"],BlendOperation:[,"add","subtract","reverse-subtract","min","max"],BufferBindingType:[,,"uniform","storage","read-only-storage"],BufferMapState:[,"unmapped","pending","mapped"],CompareFunction:[,"never","less","equal","less-equal","greater","not-equal","greater-equal","always"],CompilationInfoRequestStatus:[,"success","callback-cancelled"],ComponentSwizzle:[,"0","1","r","g","b","a"],CompositeAlphaMode:[,"opaque","premultiplied","unpremultiplied","inherit"],CullMode:[,"none","front","back"],ErrorFilter:[,"validation","out-of-memory","internal"],FeatureLevel:[,"compatibility","core"],FeatureName:{1:"core-features-and-limits",2:"depth-clip-control",3:"depth32float-stencil8",4:"texture-compression-bc",5:"texture-compression-bc-sliced-3d",6:"texture-compression-etc2",7:"texture-compression-astc",8:"texture-compression-astc-sliced-3d",9:"timestamp-query",10:"indirect-first-instance",11:"shader-f16",12:"rg11b10ufloat-renderable",13:"bgra8unorm-storage",14:"float32-filterable",15:"float32-blendable",16:"clip-distances",17:"dual-source-blending",18:"subgroups",19:"texture-formats-tier1",20:"texture-formats-tier2",21:"primitive-index",22:"texture-component-swizzle",327692:"chromium-experimental-unorm16-texture-formats",327729:"chromium-experimental-multi-draw-indirect"},FilterMode:[,"nearest","linear"],FrontFace:[,"ccw","cw"],IndexFormat:[,"uint16","uint32"],InstanceFeatureName:[,"timed-wait-any","shader-source-spirv","multiple-devices-per-adapter"],LoadOp:[,"load","clear"],MipmapFilterMode:[,"nearest","linear"],OptionalBool:["false","true"],PowerPreference:[,"low-power","high-performance"],PredefinedColorSpace:[,"srgb","display-p3"],PrimitiveTopology:[,"point-list","line-list","line-strip","triangle-list","triangle-strip"],QueryType:[,"occlusion","timestamp"],SamplerBindingType:[,,"filtering","non-filtering","comparison"],Status:[,"success","error"],StencilOperation:[,"keep","zero","replace","invert","increment-clamp","decrement-clamp","increment-wrap","decrement-wrap"],StorageTextureAccess:[,,"write-only","read-only","read-write"],StoreOp:[,"store","discard"],SurfaceGetCurrentTextureStatus:[,"success-optimal","success-suboptimal","timeout","outdated","lost","error"],TextureAspect:[,"all","stencil-only","depth-only"],TextureDimension:[,"1d","2d","3d"],TextureFormat:[,"r8unorm","r8snorm","r8uint","r8sint","r16unorm","r16snorm","r16uint","r16sint","r16float","rg8unorm","rg8snorm","rg8uint","rg8sint","r32float","r32uint","r32sint","rg16unorm","rg16snorm","rg16uint","rg16sint","rg16float","rgba8unorm","rgba8unorm-srgb","rgba8snorm","rgba8uint","rgba8sint","bgra8unorm","bgra8unorm-srgb","rgb10a2uint","rgb10a2unorm","rg11b10ufloat","rgb9e5ufloat","rg32float","rg32uint","rg32sint","rgba16unorm","rgba16snorm","rgba16uint","rgba16sint","rgba16float","rgba32float","rgba32uint","rgba32sint","stencil8","depth16unorm","depth24plus","depth24plus-stencil8","depth32float","depth32float-stencil8","bc1-rgba-unorm","bc1-rgba-unorm-srgb","bc2-rgba-unorm","bc2-rgba-unorm-srgb","bc3-rgba-unorm","bc3-rgba-unorm-srgb","bc4-r-unorm","bc4-r-snorm","bc5-rg-unorm","bc5-rg-snorm","bc6h-rgb-ufloat","bc6h-rgb-float","bc7-rgba-unorm","bc7-rgba-unorm-srgb","etc2-rgb8unorm","etc2-rgb8unorm-srgb","etc2-rgb8a1unorm","etc2-rgb8a1unorm-srgb","etc2-rgba8unorm","etc2-rgba8unorm-srgb","eac-r11unorm","eac-r11snorm","eac-rg11unorm","eac-rg11snorm","astc-4x4-unorm","astc-4x4-unorm-srgb","astc-5x4-unorm","astc-5x4-unorm-srgb","astc-5x5-unorm","astc-5x5-unorm-srgb","astc-6x5-unorm","astc-6x5-unorm-srgb","astc-6x6-unorm","astc-6x6-unorm-srgb","astc-8x5-unorm","astc-8x5-unorm-srgb","astc-8x6-unorm","astc-8x6-unorm-srgb","astc-8x8-unorm","astc-8x8-unorm-srgb","astc-10x5-unorm","astc-10x5-unorm-srgb","astc-10x6-unorm","astc-10x6-unorm-srgb","astc-10x8-unorm","astc-10x8-unorm-srgb","astc-10x10-unorm","astc-10x10-unorm-srgb","astc-12x10-unorm","astc-12x10-unorm-srgb","astc-12x12-unorm","astc-12x12-unorm-srgb"],TextureSampleType:[,,"float","unfilterable-float","depth","sint","uint"],TextureViewDimension:[,"1d","2d","2d-array","cube","cube-array","3d"],ToneMappingMode:[,"standard","extended"],VertexFormat:[,"uint8","uint8x2","uint8x4","sint8","sint8x2","sint8x4","unorm8","unorm8x2","unorm8x4","snorm8","snorm8x2","snorm8x4","uint16","uint16x2","uint16x4","sint16","sint16x2","sint16x4","unorm16","unorm16x2","unorm16x4","snorm16","snorm16x2","snorm16x4","float16","float16x2","float16x4","float32","float32x2","float32x3","float32x4","uint32","uint32x2","uint32x3","uint32x4","sint32","sint32x2","sint32x3","sint32x4","unorm10-10-10-2","unorm8x4-bgra"],VertexStepMode:[,"vertex","instance"],WGSLLanguageFeatureName:[,"readonly_and_readwrite_storage_textures","packed_4x8_integer_dot_product","unrestricted_pointer_parameters","pointer_composite_access","uniform_buffer_standard_layout","subgroup_id","texture_and_sampler_let","subgroup_uniformity","texture_formats_tier1"]};var emwgpuStringToInt_DeviceLostReason={undefined:1,unknown:1,destroyed:2};var runtimeKeepalivePop=()=>{runtimeKeepaliveCounter-=1};function _emwgpuAdapterRequestDevice(adapterPtr,futureId,deviceLostFutureId,devicePtr,queuePtr,descriptor){adapterPtr=bigintToI53Checked(adapterPtr);futureId=bigintToI53Checked(futureId);deviceLostFutureId=bigintToI53Checked(deviceLostFutureId);devicePtr=bigintToI53Checked(devicePtr);queuePtr=bigintToI53Checked(queuePtr);descriptor=bigintToI53Checked(descriptor);var adapter=WebGPU.getJsObject(adapterPtr);var desc={};if(descriptor){var requiredFeatureCount=Number((growMemViews(),HEAPU64)[(descriptor+24)/8]);if(requiredFeatureCount){var requiredFeaturesPtr=Number((growMemViews(),HEAPU64)[(descriptor+32)/8]);desc["requiredFeatures"]=Array.from((growMemViews(),HEAPU32).subarray(requiredFeaturesPtr/4,(requiredFeaturesPtr+requiredFeatureCount*4)/4),feature=>WebGPU.FeatureName[feature])}var limitsPtr=Number((growMemViews(),HEAPU64)[(descriptor+40)/8]);if(limitsPtr){var nextInChainPtr=Number((growMemViews(),HEAPU64)[limitsPtr/8]);var requiredLimits={};function setLimitU32IfDefined(name,basePtr,limitOffset,ignoreIfZero=false){var ptr=basePtr+limitOffset;var value=(growMemViews(),HEAPU32)[ptr/4];if(value!=4294967295&&(!ignoreIfZero||value!=0)){requiredLimits[name]=value}}function setLimitU64IfDefined(name,basePtr,limitOffset){var ptr=basePtr+limitOffset;var limitPart1=(growMemViews(),HEAPU32)[ptr/4];var limitPart2=(growMemViews(),HEAPU32)[(ptr+4)/4];if(limitPart1!=4294967295||limitPart2!=4294967295){requiredLimits[name]=readI53FromI64(ptr)}}setLimitU32IfDefined("maxTextureDimension1D",limitsPtr,8);setLimitU32IfDefined("maxTextureDimension2D",limitsPtr,12);setLimitU32IfDefined("maxTextureDimension3D",limitsPtr,16);setLimitU32IfDefined("maxTextureArrayLayers",limitsPtr,20);setLimitU32IfDefined("maxBindGroups",limitsPtr,24);setLimitU32IfDefined("maxBindGroupsPlusVertexBuffers",limitsPtr,28);setLimitU32IfDefined("maxBindingsPerBindGroup",limitsPtr,32);setLimitU32IfDefined("maxDynamicUniformBuffersPerPipelineLayout",limitsPtr,36);setLimitU32IfDefined("maxDynamicStorageBuffersPerPipelineLayout",limitsPtr,40);setLimitU32IfDefined("maxSampledTexturesPerShaderStage",limitsPtr,44);setLimitU32IfDefined("maxSamplersPerShaderStage",limitsPtr,48);setLimitU32IfDefined("maxStorageBuffersPerShaderStage",limitsPtr,52);setLimitU32IfDefined("maxStorageTexturesPerShaderStage",limitsPtr,56);setLimitU32IfDefined("maxUniformBuffersPerShaderStage",limitsPtr,60);setLimitU32IfDefined("minUniformBufferOffsetAlignment",limitsPtr,80);setLimitU32IfDefined("minStorageBufferOffsetAlignment",limitsPtr,84);setLimitU64IfDefined("maxUniformBufferBindingSize",limitsPtr,64);setLimitU64IfDefined("maxStorageBufferBindingSize",limitsPtr,72);setLimitU32IfDefined("maxVertexBuffers",limitsPtr,88);setLimitU64IfDefined("maxBufferSize",limitsPtr,96);setLimitU32IfDefined("maxVertexAttributes",limitsPtr,104);setLimitU32IfDefined("maxVertexBufferArrayStride",limitsPtr,108);setLimitU32IfDefined("maxInterStageShaderVariables",limitsPtr,112);setLimitU32IfDefined("maxColorAttachments",limitsPtr,116);setLimitU32IfDefined("maxColorAttachmentBytesPerSample",limitsPtr,120);setLimitU32IfDefined("maxComputeWorkgroupStorageSize",limitsPtr,124);setLimitU32IfDefined("maxComputeInvocationsPerWorkgroup",limitsPtr,128);setLimitU32IfDefined("maxComputeWorkgroupSizeX",limitsPtr,132);setLimitU32IfDefined("maxComputeWorkgroupSizeY",limitsPtr,136);setLimitU32IfDefined("maxComputeWorkgroupSizeZ",limitsPtr,140);setLimitU32IfDefined("maxComputeWorkgroupsPerDimension",limitsPtr,144);setLimitU32IfDefined("maxImmediateSize",limitsPtr,148,true);if(nextInChainPtr!==0){var sType=(growMemViews(),HEAP32)[(nextInChainPtr+8)/4];var compatibilityModeLimitsPtr=nextInChainPtr;if("maxStorageBuffersInVertexStage"in GPUSupportedLimits.prototype){setLimitU32IfDefined("maxStorageBuffersInVertexStage",compatibilityModeLimitsPtr,16);setLimitU32IfDefined("maxStorageTexturesInVertexStage",compatibilityModeLimitsPtr,20);setLimitU32IfDefined("maxStorageBuffersInFragmentStage",compatibilityModeLimitsPtr,24);setLimitU32IfDefined("maxStorageTexturesInFragmentStage",compatibilityModeLimitsPtr,28)}}desc["requiredLimits"]=requiredLimits}var defaultQueuePtr=Number((growMemViews(),HEAPU64)[(descriptor+48)/8]);if(defaultQueuePtr){var defaultQueueDesc={label:WebGPU.makeStringFromOptionalStringView(defaultQueuePtr+8)};desc["defaultQueue"]=defaultQueueDesc}desc["label"]=WebGPU.makeStringFromOptionalStringView(descriptor+8)}runtimeKeepalivePush();WebGPU.Internals.futureInsert(futureId,adapter.requestDevice(desc).then(device=>{runtimeKeepalivePop();callUserCallback(()=>{WebGPU.Internals.jsObjectInsert(queuePtr,device.queue);WebGPU.Internals.jsObjectInsert(devicePtr,device);devicePtr=BigInt(devicePtr);WebGPU.Internals.futureInsert(deviceLostFutureId,device.lost.then(info=>{callUserCallback(()=>{device.onuncapturederror=ev=>{};var sp=stackSave();var messagePtr=stringToUTF8OnStack(info.message);_emwgpuOnDeviceLostCompleted(deviceLostFutureId,emwgpuStringToInt_DeviceLostReason[info.reason],BigInt(messagePtr));stackRestore(sp)})}));device.onuncapturederror=ev=>{var type=5;if(ev.error instanceof GPUValidationError)type=2;else if(ev.error instanceof GPUOutOfMemoryError)type=3;else if(ev.error instanceof GPUInternalError)type=4;var sp=stackSave();var messagePtr=stringToUTF8OnStack(ev.error.message);_emwgpuOnUncapturedError(BigInt(devicePtr),type,BigInt(messagePtr));stackRestore(sp)};_emwgpuOnRequestDeviceCompleted(futureId,1,BigInt(devicePtr),0n)})},ex=>{runtimeKeepalivePop();callUserCallback(()=>{var sp=stackSave();var messagePtr=stringToUTF8OnStack(ex.message);_emwgpuOnRequestDeviceCompleted(futureId,3,BigInt(devicePtr),BigInt(messagePtr));if(deviceLostFutureId){_emwgpuOnDeviceLostCompleted(deviceLostFutureId,4,BigInt(messagePtr))}stackRestore(sp)})}))}function _emwgpuBufferDestroy(bufferPtr){bufferPtr=bigintToI53Checked(bufferPtr);var buffer=WebGPU.getJsObject(bufferPtr);var onUnmap=WebGPU.Internals.bufferOnUnmaps[bufferPtr];if(onUnmap){for(var i=0;i<onUnmap.length;++i){onUnmap[i]()}delete WebGPU.Internals.bufferOnUnmaps[bufferPtr]}buffer.destroy()}var warnOnce=text=>{warnOnce.shown||={};if(!warnOnce.shown[text]){warnOnce.shown[text]=1;if(ENVIRONMENT_IS_NODE)text="warning: "+text;err(text)}};var _emwgpuBufferGetConstMappedRange=function(bufferPtr,offset,size){bufferPtr=bigintToI53Checked(bufferPtr);offset=bigintToI53Checked(offset);size=bigintToI53Checked(size);var ret=(()=>{var buffer=WebGPU.getJsObject(bufferPtr);if(size==-1)size=undefined;var mapped;try{mapped=buffer.getMappedRange(offset,size)}catch(ex){return 0n}var data=_memalign(16,mapped.byteLength);(growMemViews(),HEAPU8).set(new Uint8Array(mapped),data);WebGPU.Internals.bufferOnUnmaps[bufferPtr].push(()=>_free(data));return data})();return BigInt(ret)};var _emwgpuBufferMapAsync=function(bufferPtr,futureId,mode,offset,size){bufferPtr=bigintToI53Checked(bufferPtr);futureId=bigintToI53Checked(futureId);mode=bigintToI53Checked(mode);offset=bigintToI53Checked(offset);size=bigintToI53Checked(size);var buffer=WebGPU.getJsObject(bufferPtr);WebGPU.Internals.bufferOnUnmaps[bufferPtr]=[];if(size==-1)size=undefined;runtimeKeepalivePush();WebGPU.Internals.futureInsert(futureId,buffer.mapAsync(mode,offset,size).then(()=>{runtimeKeepalivePop();callUserCallback(()=>{_emwgpuOnMapAsyncCompleted(futureId,1,0n)})},ex=>{runtimeKeepalivePop();callUserCallback(()=>{var sp=stackSave();var messagePtr=stringToUTF8OnStack(ex.message);var status=ex.name==="AbortError"?4:ex.name==="OperationError"?3:0;_emwgpuOnMapAsyncCompleted(futureId,status,BigInt(messagePtr));delete WebGPU.Internals.bufferOnUnmaps[bufferPtr]})}))};function _emwgpuBufferUnmap(bufferPtr){bufferPtr=bigintToI53Checked(bufferPtr);var buffer=WebGPU.getJsObject(bufferPtr);var onUnmap=WebGPU.Internals.bufferOnUnmaps[bufferPtr];if(!onUnmap){return}for(var i=0;i<onUnmap.length;++i){onUnmap[i]()}delete WebGPU.Internals.bufferOnUnmaps[bufferPtr];buffer.unmap()}function _emwgpuDelete(ptr){ptr=bigintToI53Checked(ptr);delete WebGPU.Internals.jsObjects[ptr]}function _emwgpuDeviceCreateBuffer(devicePtr,descriptor,bufferPtr){devicePtr=bigintToI53Checked(devicePtr);descriptor=bigintToI53Checked(descriptor);bufferPtr=bigintToI53Checked(bufferPtr);var mappedAtCreation=!!(growMemViews(),HEAPU32)[(descriptor+40)/4];var desc={label:WebGPU.makeStringFromOptionalStringView(descriptor+8),usage:(growMemViews(),HEAPU32)[(descriptor+24)/4],size:readI53FromI64(descriptor+32),mappedAtCreation};var device=WebGPU.getJsObject(devicePtr);var buffer;try{buffer=device.createBuffer(desc)}catch(ex){return false}WebGPU.Internals.jsObjectInsert(bufferPtr,buffer);if(mappedAtCreation){WebGPU.Internals.bufferOnUnmaps[bufferPtr]=[]}return true}function _emwgpuDeviceCreateShaderModule(devicePtr,descriptor,shaderModulePtr){devicePtr=bigintToI53Checked(devicePtr);descriptor=bigintToI53Checked(descriptor);shaderModulePtr=bigintToI53Checked(shaderModulePtr);var nextInChainPtr=Number((growMemViews(),HEAPU64)[descriptor/8]);var sType=(growMemViews(),HEAP32)[(nextInChainPtr+8)/4];var desc={label:WebGPU.makeStringFromOptionalStringView(descriptor+8),code:""};switch(sType){case 2:{desc["code"]=WebGPU.makeStringFromStringView(nextInChainPtr+16);break}}var device=WebGPU.getJsObject(devicePtr);WebGPU.Internals.jsObjectInsert(shaderModulePtr,device.createShaderModule(desc))}var _emwgpuDeviceDestroy=devicePtr=>{const device=WebGPU.getJsObject(devicePtr);device.onuncapturederror=null;device.destroy()};function _emwgpuInstanceRequestAdapter(instancePtr,futureId,options,adapterPtr){instancePtr=bigintToI53Checked(instancePtr);futureId=bigintToI53Checked(futureId);options=bigintToI53Checked(options);adapterPtr=bigintToI53Checked(adapterPtr);var opts;if(options){opts={featureLevel:WebGPU.FeatureLevel[(growMemViews(),HEAP32)[(options+8)/4]],powerPreference:WebGPU.PowerPreference[(growMemViews(),HEAP32)[(options+12)/4]],forceFallbackAdapter:!!(growMemViews(),HEAPU32)[(options+16)/4]};var nextInChainPtr=Number((growMemViews(),HEAPU64)[options/8]);if(nextInChainPtr!==0){var sType=(growMemViews(),HEAP32)[(nextInChainPtr+8)/4];var webxrOptions=nextInChainPtr;opts.xrCompatible=!!(growMemViews(),HEAPU32)[(webxrOptions+16)/4]}}if(!("gpu"in navigator)){var sp=stackSave();var messagePtr=stringToUTF8OnStack("WebGPU not available on this browser (navigator.gpu is not available)");_emwgpuOnRequestAdapterCompleted(futureId,3,BigInt(adapterPtr),BigInt(messagePtr));stackRestore(sp);return}runtimeKeepalivePush();WebGPU.Internals.futureInsert(futureId,navigator.gpu.requestAdapter(opts).then(adapter=>{runtimeKeepalivePop();callUserCallback(()=>{if(adapter){WebGPU.Internals.jsObjectInsert(adapterPtr,adapter);_emwgpuOnRequestAdapterCompleted(futureId,1,BigInt(adapterPtr),0n)}else{var sp=stackSave();var messagePtr=stringToUTF8OnStack("WebGPU not available on this browser (requestAdapter returned null)");_emwgpuOnRequestAdapterCompleted(futureId,3,BigInt(adapterPtr),BigInt(messagePtr));stackRestore(sp)}})},ex=>{runtimeKeepalivePop();callUserCallback(()=>{var sp=stackSave();var messagePtr=stringToUTF8OnStack(ex.message);_emwgpuOnRequestAdapterCompleted(futureId,4,BigInt(adapterPtr),BigInt(messagePtr));stackRestore(sp)})}))}var _emwgpuQueueOnSubmittedWorkDone=function(queuePtr,futureId){queuePtr=bigintToI53Checked(queuePtr);futureId=bigintToI53Checked(futureId);var queue=WebGPU.getJsObject(queuePtr);runtimeKeepalivePush();WebGPU.Internals.futureInsert(futureId,queue.onSubmittedWorkDone().then(()=>{runtimeKeepalivePop();callUserCallback(()=>{_emwgpuOnWorkDoneCompleted(futureId,1)})}))};var _emwgpuWaitAny=function(futurePtr,futureCount,timeoutMSPtr){futurePtr=bigintToI53Checked(futurePtr);futureCount=bigintToI53Checked(futureCount);timeoutMSPtr=bigintToI53Checked(timeoutMSPtr);return Asyncify.handleAsync(async()=>{var promises=[];if(timeoutMSPtr){var timeoutMS=(growMemViews(),HEAP32)[timeoutMSPtr/4];promises.length=futureCount+1;promises[futureCount]=new Promise(resolve=>setTimeout(resolve,timeoutMS,0))}else{promises.length=futureCount}for(var i=0;i<futureCount;++i){var futureId=readI53FromI64(futurePtr+i*8);if(!(futureId in WebGPU.Internals.futures)){return futureId}promises[i]=WebGPU.Internals.futures[futureId]}const firstResolvedFuture=await Promise.race(promises);delete WebGPU.Internals.futures[firstResolvedFuture];return firstResolvedFuture})};_emwgpuWaitAny.isAsync=true;var ENV={};var getExecutableName=()=>thisProgram||"./this.program";var getEnvStrings=()=>{if(!getEnvStrings.strings){var lang=(typeof navigator=="object"&&navigator.language||"C").replace("-","_")+".UTF-8";var env={USER:"web_user",LOGNAME:"web_user",PATH:"/",PWD:"/",HOME:"/home/web_user",LANG:lang,_:getExecutableName()};for(var x in ENV){if(ENV[x]===undefined)delete env[x];else env[x]=ENV[x]}var strings=[];for(var x in env){strings.push(`${x}=${env[x]}`)}getEnvStrings.strings=strings}return getEnvStrings.strings};function _environ_get(__environ,environ_buf){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(14,0,1,__environ,environ_buf);__environ=bigintToI53Checked(__environ);environ_buf=bigintToI53Checked(environ_buf);var bufSize=0;var envp=0;for(var string of getEnvStrings()){var ptr=environ_buf+bufSize;(growMemViews(),HEAPU64)[(__environ+envp)/8]=BigInt(ptr);bufSize+=stringToUTF8(string,ptr,Infinity)+1;envp+=8}return 0}function _environ_sizes_get(penviron_count,penviron_buf_size){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(15,0,1,penviron_count,penviron_buf_size);penviron_count=bigintToI53Checked(penviron_count);penviron_buf_size=bigintToI53Checked(penviron_buf_size);var strings=getEnvStrings();(growMemViews(),HEAPU64)[penviron_count/8]=BigInt(strings.length);var bufSize=0;for(var string of strings){bufSize+=lengthBytesUTF8(string)+1}(growMemViews(),HEAPU64)[penviron_buf_size/8]=BigInt(bufSize);return 0}function _fd_close(fd){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(16,0,1,fd);try{var stream=SYSCALLS.getStreamFromFD(fd);FS.close(stream);return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}var doReadv=(stream,iov,iovcnt,offset)=>{var ret=0;for(var i=0;i<iovcnt;i++){var ptr=Number((growMemViews(),HEAPU64)[iov/8]);var len=Number((growMemViews(),HEAPU64)[(iov+8)/8]);iov+=16;var curr=FS.read(stream,(growMemViews(),HEAP8),ptr,len,offset);if(curr<0)return-1;ret+=curr;if(curr<len)break;if(typeof offset!="undefined"){offset+=curr}}return ret};function _fd_read(fd,iov,iovcnt,pnum){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(17,0,1,fd,iov,iovcnt,pnum);iov=bigintToI53Checked(iov);iovcnt=bigintToI53Checked(iovcnt);pnum=bigintToI53Checked(pnum);try{var stream=SYSCALLS.getStreamFromFD(fd);var num=doReadv(stream,iov,iovcnt);(growMemViews(),HEAPU64)[pnum/8]=BigInt(num);return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function _fd_seek(fd,offset,whence,newOffset){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(18,0,1,fd,offset,whence,newOffset);offset=bigintToI53Checked(offset);newOffset=bigintToI53Checked(newOffset);try{if(isNaN(offset))return 61;var stream=SYSCALLS.getStreamFromFD(fd);FS.llseek(stream,offset,whence);(growMemViews(),HEAP64)[newOffset/8]=BigInt(stream.position);if(stream.getdents&&offset===0&&whence===0)stream.getdents=null;return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}var doWritev=(stream,iov,iovcnt,offset)=>{var ret=0;for(var i=0;i<iovcnt;i++){var ptr=Number((growMemViews(),HEAPU64)[iov/8]);var len=Number((growMemViews(),HEAPU64)[(iov+8)/8]);iov+=16;var curr=FS.write(stream,(growMemViews(),HEAP8),ptr,len,offset);if(curr<0)return-1;ret+=curr;if(curr<len){break}if(typeof offset!="undefined"){offset+=curr}}return ret};function _fd_write(fd,iov,iovcnt,pnum){if(ENVIRONMENT_IS_PTHREAD)return proxyToMainThread(19,0,1,fd,iov,iovcnt,pnum);iov=bigintToI53Checked(iov);iovcnt=bigintToI53Checked(iovcnt);pnum=bigintToI53Checked(pnum);try{var stream=SYSCALLS.getStreamFromFD(fd);var num=doWritev(stream,iov,iovcnt);(growMemViews(),HEAPU64)[pnum/8]=BigInt(num);return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function _random_get(buffer,size){buffer=bigintToI53Checked(buffer);size=bigintToI53Checked(size);try{randomFill((growMemViews(),HEAPU8).subarray(buffer,buffer+size));return 0}catch(e){if(typeof FS=="undefined"||!(e.name==="ErrnoError"))throw e;return e.errno}}function _wgpuAdapterGetInfo(adapterPtr,info){adapterPtr=bigintToI53Checked(adapterPtr);info=bigintToI53Checked(info);var adapter=WebGPU.getJsObject(adapterPtr);WebGPU.fillAdapterInfoStruct(adapter.info,info);return 1}function _wgpuAdapterGetLimits(adapterPtr,limitsOutPtr){adapterPtr=bigintToI53Checked(adapterPtr);limitsOutPtr=bigintToI53Checked(limitsOutPtr);var adapter=WebGPU.getJsObject(adapterPtr);WebGPU.fillLimitStruct(adapter.limits,limitsOutPtr);return 1}function _wgpuAdapterHasFeature(adapterPtr,featureEnumValue){adapterPtr=bigintToI53Checked(adapterPtr);var adapter=WebGPU.getJsObject(adapterPtr);return adapter.features.has(WebGPU.FeatureName[featureEnumValue])}var _wgpuBufferGetSize=function(bufferPtr){bufferPtr=bigintToI53Checked(bufferPtr);var ret=(()=>{var buffer=WebGPU.getJsObject(bufferPtr);return buffer.size})();return BigInt(ret)};var _wgpuCommandEncoderBeginComputePass=function(encoderPtr,descriptor){encoderPtr=bigintToI53Checked(encoderPtr);descriptor=bigintToI53Checked(descriptor);var ret=(()=>{var desc;if(descriptor){desc={label:WebGPU.makeStringFromOptionalStringView(descriptor+8),timestampWrites:WebGPU.makePassTimestampWrites(Number((growMemViews(),HEAPU64)[(descriptor+24)/8]))}}var commandEncoder=WebGPU.getJsObject(encoderPtr);var ptr=_emwgpuCreateComputePassEncoder(0n);WebGPU.Internals.jsObjectInsert(ptr,commandEncoder.beginComputePass(desc));return ptr})();return BigInt(ret)};function _wgpuCommandEncoderCopyBufferToBuffer(encoderPtr,srcPtr,srcOffset,dstPtr,dstOffset,size){encoderPtr=bigintToI53Checked(encoderPtr);srcPtr=bigintToI53Checked(srcPtr);srcOffset=bigintToI53Checked(srcOffset);dstPtr=bigintToI53Checked(dstPtr);dstOffset=bigintToI53Checked(dstOffset);size=bigintToI53Checked(size);var commandEncoder=WebGPU.getJsObject(encoderPtr);var src=WebGPU.getJsObject(srcPtr);var dst=WebGPU.getJsObject(dstPtr);commandEncoder.copyBufferToBuffer(src,srcOffset,dst,dstOffset,size)}var _wgpuCommandEncoderFinish=function(encoderPtr,descriptor){encoderPtr=bigintToI53Checked(encoderPtr);descriptor=bigintToI53Checked(descriptor);var ret=(()=>{var commandEncoder=WebGPU.getJsObject(encoderPtr);var ptr=_emwgpuCreateCommandBuffer(0n);WebGPU.Internals.jsObjectInsert(ptr,commandEncoder.finish());return ptr})();return BigInt(ret)};function _wgpuComputePassEncoderDispatchWorkgroups(passPtr,x,y,z){passPtr=bigintToI53Checked(passPtr);var pass=WebGPU.getJsObject(passPtr);pass.dispatchWorkgroups(x,y,z)}function _wgpuComputePassEncoderEnd(passPtr){passPtr=bigintToI53Checked(passPtr);var pass=WebGPU.getJsObject(passPtr);pass.end()}function _wgpuComputePassEncoderSetBindGroup(passPtr,groupIndex,groupPtr,dynamicOffsetCount,dynamicOffsetsPtr){passPtr=bigintToI53Checked(passPtr);groupPtr=bigintToI53Checked(groupPtr);dynamicOffsetCount=bigintToI53Checked(dynamicOffsetCount);dynamicOffsetsPtr=bigintToI53Checked(dynamicOffsetsPtr);var pass=WebGPU.getJsObject(passPtr);var group=WebGPU.getJsObject(groupPtr);if(dynamicOffsetCount==0){pass.setBindGroup(groupIndex,group)}else{pass.setBindGroup(groupIndex,group,(growMemViews(),HEAPU32),dynamicOffsetsPtr/4,dynamicOffsetCount)}}function _wgpuComputePassEncoderSetPipeline(passPtr,pipelinePtr){passPtr=bigintToI53Checked(passPtr);pipelinePtr=bigintToI53Checked(pipelinePtr);var pass=WebGPU.getJsObject(passPtr);var pipeline=WebGPU.getJsObject(pipelinePtr);pass.setPipeline(pipeline)}var _wgpuComputePipelineGetBindGroupLayout=function(pipelinePtr,groupIndex){pipelinePtr=bigintToI53Checked(pipelinePtr);var ret=(()=>{var pipeline=WebGPU.getJsObject(pipelinePtr);var ptr=_emwgpuCreateBindGroupLayout(0n);WebGPU.Internals.jsObjectInsert(ptr,pipeline.getBindGroupLayout(groupIndex));return ptr})();return BigInt(ret)};var _wgpuDeviceCreateBindGroup=function(devicePtr,descriptor){devicePtr=bigintToI53Checked(devicePtr);descriptor=bigintToI53Checked(descriptor);var ret=(()=>{function makeEntry(entryPtr){var bufferPtr=Number((growMemViews(),HEAPU64)[(entryPtr+16)/8]);var samplerPtr=Number((growMemViews(),HEAPU64)[(entryPtr+40)/8]);var textureViewPtr=Number((growMemViews(),HEAPU64)[(entryPtr+48)/8]);var externalTexturePtr=0;WebGPU.iterateExtensions(entryPtr,{327681:ptr=>{externalTexturePtr=Number((growMemViews(),HEAPU64)[(ptr+16)/8])}});var resource;if(bufferPtr){var size=readI53FromI64(entryPtr+32);if(size==-1)size=undefined;resource={buffer:WebGPU.getJsObject(bufferPtr),offset:readI53FromI64(entryPtr+24),size}}else{resource=WebGPU.getJsObject(samplerPtr||textureViewPtr||externalTexturePtr)}return{binding:(growMemViews(),HEAPU32)[(entryPtr+8)/4],resource}}function makeEntries(count,entriesPtrs){var entries=[];for(var i=0;i<count;++i){entries.push(makeEntry(entriesPtrs+56*i))}return entries}var desc={label:WebGPU.makeStringFromOptionalStringView(descriptor+8),layout:WebGPU.getJsObject(Number((growMemViews(),HEAPU64)[(descriptor+24)/8])),entries:makeEntries(Number((growMemViews(),HEAPU64)[(descriptor+32)/8]),Number((growMemViews(),HEAPU64)[(descriptor+40)/8]))};var device=WebGPU.getJsObject(devicePtr);var ptr=_emwgpuCreateBindGroup(0n);WebGPU.Internals.jsObjectInsert(ptr,device.createBindGroup(desc));return ptr})();return BigInt(ret)};var _wgpuDeviceCreateCommandEncoder=function(devicePtr,descriptor){devicePtr=bigintToI53Checked(devicePtr);descriptor=bigintToI53Checked(descriptor);var ret=(()=>{var desc;if(descriptor){desc={label:WebGPU.makeStringFromOptionalStringView(descriptor+8)}}var device=WebGPU.getJsObject(devicePtr);var ptr=_emwgpuCreateCommandEncoder(0n);WebGPU.Internals.jsObjectInsert(ptr,device.createCommandEncoder(desc));return ptr})();return BigInt(ret)};var _wgpuDeviceCreateComputePipeline=function(devicePtr,descriptor){devicePtr=bigintToI53Checked(devicePtr);descriptor=bigintToI53Checked(descriptor);var ret=(()=>{var desc=WebGPU.makeComputePipelineDesc(descriptor);var device=WebGPU.getJsObject(devicePtr);var ptr=_emwgpuCreateComputePipeline(0n);WebGPU.Internals.jsObjectInsert(ptr,device.createComputePipeline(desc));return ptr})();return BigInt(ret)};function _wgpuInstanceHasWGSLLanguageFeature(instance,featureEnumValue){instance=bigintToI53Checked(instance);if(!("wgslLanguageFeatures"in navigator.gpu)){return false}return navigator.gpu.wgslLanguageFeatures.has(WebGPU.WGSLLanguageFeatureName[featureEnumValue])}var _wgpuQueueSubmit=function(queuePtr,commandCount,commands){queuePtr=bigintToI53Checked(queuePtr);commandCount=bigintToI53Checked(commandCount);commands=bigintToI53Checked(commands);var queue=WebGPU.getJsObject(queuePtr);var cmds=Array.from((growMemViews(),HEAP64).subarray(commands/8,(commands+commandCount*8)/8),id=>WebGPU.getJsObject(id));queue.submit(cmds)};function _wgpuQueueWriteBuffer(queuePtr,bufferPtr,bufferOffset,data,size){queuePtr=bigintToI53Checked(queuePtr);bufferPtr=bigintToI53Checked(bufferPtr);bufferOffset=bigintToI53Checked(bufferOffset);data=bigintToI53Checked(data);size=bigintToI53Checked(size);var queue=WebGPU.getJsObject(queuePtr);var buffer=WebGPU.getJsObject(bufferPtr);var subarray=(growMemViews(),HEAPU8).subarray(data,data+size);queue.writeBuffer(buffer,bufferOffset,subarray,0,size)}var Asyncify={instrumentWasmImports(imports){var importPattern=/^(invoke_.*|__asyncjs__.*)$/;for(let[x,original]of Object.entries(imports)){if(typeof original=="function"){let isAsyncifyImport=original.isAsync||importPattern.test(x);if(isAsyncifyImport){imports[x]=original=new WebAssembly.Suspending(original)}}}},instrumentFunction(original){var wrapper=(...args)=>original(...args);return wrapper},instrumentWasmExports(exports){var exportPattern=/^(wllama_start|wllama_action|main|__main_argc_argv)$/;Asyncify.asyncExports=new Set;var ret={};for(let[x,original]of Object.entries(exports)){if(typeof original=="function"){let isAsyncifyExport=exportPattern.test(x);if(isAsyncifyExport){Asyncify.asyncExports.add(original);original=Asyncify.makeAsyncFunction(original)}var wrapper=Asyncify.instrumentFunction(original);ret[x]=wrapper}else{ret[x]=original}}return ret},asyncExports:null,isAsyncExport(func){return Asyncify.asyncExports?.has(func)},handleAsync:async startAsync=>{runtimeKeepalivePush();try{return await startAsync()}finally{runtimeKeepalivePop()}},handleSleep:startAsync=>Asyncify.handleAsync(()=>new Promise(startAsync)),makeAsyncFunction(original){return WebAssembly.promising(original)}};var getCFunc=ident=>{var func=Module["_"+ident];return func};var writeArrayToMemory=(array,buffer)=>{(growMemViews(),HEAP8).set(array,buffer)};var ccall=(ident,returnType,argTypes,args,opts)=>{var toC={pointer:p=>BigInt(p),string:str=>{var ret=0;if(str!==null&&str!==undefined&&str!==0){ret=stringToUTF8OnStack(str)}return BigInt(ret)},array:arr=>{var ret=stackAlloc(arr.length);writeArrayToMemory(arr,ret);return BigInt(ret)}};function convertReturnValue(ret){if(returnType==="string"){return UTF8ToString(Number(ret))}if(returnType==="pointer")return Number(ret);if(returnType==="boolean")return Boolean(ret);return ret}var func=getCFunc(ident);var cArgs=[];var stack=0;if(args){for(var i=0;i<args.length;i++){var converter=toC[argTypes[i]];if(converter){if(stack===0)stack=stackSave();cArgs[i]=converter(args[i])}else{cArgs[i]=args[i]}}}var ret=func(...cArgs);function onDone(ret){if(stack!==0)stackRestore(stack);return convertReturnValue(ret)}var asyncMode=opts?.async;if(asyncMode)return ret.then(onDone);ret=onDone(ret);return ret};var cwrap=(ident,returnType,argTypes,opts)=>{var numericArgs=!argTypes||argTypes.every(type=>type==="number"||type==="boolean");var numericRet=returnType!=="string";if(numericRet&&numericArgs&&!opts){return getCFunc(ident)}return(...args)=>ccall(ident,returnType,argTypes,args,opts)};var FS_createPath=(...args)=>FS.createPath(...args);var FS_unlink=(...args)=>FS.unlink(...args);var FS_createLazyFile=(...args)=>FS.createLazyFile(...args);var FS_createDevice=(...args)=>FS.createDevice(...args);PThread.init();FS.createPreloadedFile=FS_createPreloadedFile;FS.preloadFile=FS_preloadFile;FS.staticInit();{initMemory();if(Module["noExitRuntime"])noExitRuntime=Module["noExitRuntime"];if(Module["preloadPlugins"])preloadPlugins=Module["preloadPlugins"];if(Module["print"])out=Module["print"];if(Module["printErr"])err=Module["printErr"];if(Module["wasmBinary"])wasmBinary=Module["wasmBinary"];if(Module["arguments"])arguments_=Module["arguments"];if(Module["thisProgram"])thisProgram=Module["thisProgram"];if(Module["preInit"]){if(typeof Module["preInit"]=="function")Module["preInit"]=[Module["preInit"]];while(Module["preInit"].length>0){Module["preInit"].shift()()}}}Module["ENV"]=ENV;Module["mmapAlloc"]=mmapAlloc;Module["wasmMemory"]=wasmMemory;Module["addRunDependency"]=addRunDependency;Module["removeRunDependency"]=removeRunDependency;Module["ccall"]=ccall;Module["cwrap"]=cwrap;Module["FS_preloadFile"]=FS_preloadFile;Module["FS_unlink"]=FS_unlink;Module["FS_createPath"]=FS_createPath;Module["FS_createDevice"]=FS_createDevice;Module["FS"]=FS;Module["FS_createDataFile"]=FS_createDataFile;Module["FS_createLazyFile"]=FS_createLazyFile;Module["MEMFS"]=MEMFS;var proxiedFunctionTable=[_proc_exit,exitOnMainThread,pthreadCreateProxied,___syscall_fcntl64,___syscall_fstat64,___syscall_getcwd,___syscall_getdents64,___syscall_ioctl,___syscall_lstat64,___syscall_newfstatat,___syscall_openat,___syscall_stat64,__mmap_js,__munmap_js,_environ_get,_environ_sizes_get,_fd_close,_fd_read,_fd_seek,_fd_write];function __asyncjs__js_file_read(path_ptr,offset,req_size,out_ptr){return Asyncify.handleAsync(async()=>await _wllama_js_file_read(UTF8ToString(Number(path_ptr)),Number(offset),Number(req_size),Number(out_ptr)))}__asyncjs__js_file_read.sig="jjjjj";function wllm_webgpu_runtime_policy_get(key,fallback){try{const policy=typeof Module!=="undefined"&&Module&&Module.WLLM_WEBGPU_POLICY?Module.WLLM_WEBGPU_POLICY:globalThis.WLLM_WEBGPU_POLICY;if(!policy){return fallback}const value=policy[UTF8ToString(key)];return Number.isFinite(value)&&value>0?value|0:fallback}catch(error){return fallback}}wllm_webgpu_runtime_policy_get.sig="iji";var _malloc,_free,_wllama_malloc,_wllama_start,_wllama_action,_wllama_exit,_wllama_debug,_main,_emwgpuCreateBindGroup,_emwgpuCreateBindGroupLayout,_emwgpuCreateCommandBuffer,_emwgpuCreateCommandEncoder,_emwgpuCreateComputePassEncoder,_emwgpuCreateComputePipeline,_emwgpuCreateExternalTexture,_emwgpuCreatePipelineLayout,_emwgpuCreateQuerySet,_emwgpuCreateRenderBundle,_emwgpuCreateRenderBundleEncoder,_emwgpuCreateRenderPassEncoder,_emwgpuCreateRenderPipeline,_emwgpuCreateSampler,_emwgpuCreateSurface,_emwgpuCreateTexture,_emwgpuCreateTextureView,_emwgpuCreateAdapter,_emwgpuCreateBuffer,_emwgpuCreateDevice,_emwgpuCreateQueue,_emwgpuCreateShaderModule,_emwgpuOnDeviceLostCompleted,_emwgpuOnMapAsyncCompleted,_emwgpuOnRequestAdapterCompleted,_emwgpuOnRequestDeviceCompleted,_emwgpuOnWorkDoneCompleted,_emwgpuOnUncapturedError,__emscripten_tls_init,_pthread_self,_emscripten_builtin_memalign,__emscripten_thread_init,__emscripten_thread_crashed,__emscripten_run_js_on_main_thread,__emscripten_thread_free_data,__emscripten_thread_exit,__emscripten_check_mailbox,_memalign,___trap,_emscripten_stack_set_limits,__emscripten_stack_restore,__emscripten_stack_alloc,_emscripten_stack_get_current,__indirect_function_table,wasmTable;function assignWasmExports(wasmExports){_malloc=wasmExports["malloc"];_free=wasmExports["free"];_wllama_malloc=Module["_wllama_malloc"]=wasmExports["wllama_malloc"];_wllama_start=Module["_wllama_start"]=wasmExports["wllama_start"];_wllama_action=Module["_wllama_action"]=wasmExports["wllama_action"];_wllama_exit=Module["_wllama_exit"]=wasmExports["wllama_exit"];_wllama_debug=Module["_wllama_debug"]=wasmExports["wllama_debug"];_main=Module["_main"]=wasmExports["main"];_emwgpuCreateBindGroup=wasmExports["emwgpuCreateBindGroup"];_emwgpuCreateBindGroupLayout=wasmExports["emwgpuCreateBindGroupLayout"];_emwgpuCreateCommandBuffer=wasmExports["emwgpuCreateCommandBuffer"];_emwgpuCreateCommandEncoder=wasmExports["emwgpuCreateCommandEncoder"];_emwgpuCreateComputePassEncoder=wasmExports["emwgpuCreateComputePassEncoder"];_emwgpuCreateComputePipeline=wasmExports["emwgpuCreateComputePipeline"];_emwgpuCreateExternalTexture=wasmExports["emwgpuCreateExternalTexture"];_emwgpuCreatePipelineLayout=wasmExports["emwgpuCreatePipelineLayout"];_emwgpuCreateQuerySet=wasmExports["emwgpuCreateQuerySet"];_emwgpuCreateRenderBundle=wasmExports["emwgpuCreateRenderBundle"];_emwgpuCreateRenderBundleEncoder=wasmExports["emwgpuCreateRenderBundleEncoder"];_emwgpuCreateRenderPassEncoder=wasmExports["emwgpuCreateRenderPassEncoder"];_emwgpuCreateRenderPipeline=wasmExports["emwgpuCreateRenderPipeline"];_emwgpuCreateSampler=wasmExports["emwgpuCreateSampler"];_emwgpuCreateSurface=wasmExports["emwgpuCreateSurface"];_emwgpuCreateTexture=wasmExports["emwgpuCreateTexture"];_emwgpuCreateTextureView=wasmExports["emwgpuCreateTextureView"];_emwgpuCreateAdapter=wasmExports["emwgpuCreateAdapter"];_emwgpuCreateBuffer=wasmExports["emwgpuCreateBuffer"];_emwgpuCreateDevice=wasmExports["emwgpuCreateDevice"];_emwgpuCreateQueue=wasmExports["emwgpuCreateQueue"];_emwgpuCreateShaderModule=wasmExports["emwgpuCreateShaderModule"];_emwgpuOnDeviceLostCompleted=wasmExports["emwgpuOnDeviceLostCompleted"];_emwgpuOnMapAsyncCompleted=wasmExports["emwgpuOnMapAsyncCompleted"];_emwgpuOnRequestAdapterCompleted=wasmExports["emwgpuOnRequestAdapterCompleted"];_emwgpuOnRequestDeviceCompleted=wasmExports["emwgpuOnRequestDeviceCompleted"];_emwgpuOnWorkDoneCompleted=wasmExports["emwgpuOnWorkDoneCompleted"];_emwgpuOnUncapturedError=wasmExports["emwgpuOnUncapturedError"];__emscripten_tls_init=wasmExports["_emscripten_tls_init"];_pthread_self=wasmExports["pthread_self"];_emscripten_builtin_memalign=wasmExports["emscripten_builtin_memalign"];__emscripten_thread_init=wasmExports["_emscripten_thread_init"];__emscripten_thread_crashed=wasmExports["_emscripten_thread_crashed"];__emscripten_run_js_on_main_thread=wasmExports["_emscripten_run_js_on_main_thread"];__emscripten_thread_free_data=wasmExports["_emscripten_thread_free_data"];__emscripten_thread_exit=wasmExports["_emscripten_thread_exit"];__emscripten_check_mailbox=wasmExports["_emscripten_check_mailbox"];_memalign=wasmExports["memalign"];___trap=wasmExports["__trap"];_emscripten_stack_set_limits=wasmExports["emscripten_stack_set_limits"];__emscripten_stack_restore=wasmExports["_emscripten_stack_restore"];__emscripten_stack_alloc=wasmExports["_emscripten_stack_alloc"];_emscripten_stack_get_current=wasmExports["emscripten_stack_get_current"];__indirect_function_table=wasmTable=wasmExports["__indirect_function_table"]}var wasmImports;function assignWasmImports(){wasmImports={__asyncjs__js_file_read,__pthread_create_js:___pthread_create_js,__syscall_fcntl64:___syscall_fcntl64,__syscall_getcwd:___syscall_getcwd,__syscall_getdents64:___syscall_getdents64,__syscall_ioctl:___syscall_ioctl,__syscall_openat:___syscall_openat,__syscall_stat64:___syscall_stat64,_abort_js:__abort_js,_emscripten_init_main_thread_js:__emscripten_init_main_thread_js,_emscripten_notify_mailbox_postmessage:__emscripten_notify_mailbox_postmessage,_emscripten_receive_on_main_thread_js:__emscripten_receive_on_main_thread_js,_emscripten_thread_cleanup:__emscripten_thread_cleanup,_emscripten_thread_mailbox_await:__emscripten_thread_mailbox_await,_emscripten_thread_set_strongref:__emscripten_thread_set_strongref,_localtime_js:__localtime_js,_mmap_js:__mmap_js,_munmap_js:__munmap_js,_tzset_js:__tzset_js,clock_time_get:_clock_time_get,emscripten_check_blocking_allowed:_emscripten_check_blocking_allowed,emscripten_date_now:_emscripten_date_now,emscripten_exit_with_live_runtime:_emscripten_exit_with_live_runtime,emscripten_get_callstack:_emscripten_get_callstack,emscripten_get_heap_max:_emscripten_get_heap_max,emscripten_get_now:_emscripten_get_now,emscripten_has_asyncify:_emscripten_has_asyncify,emscripten_num_logical_cores:_emscripten_num_logical_cores,emscripten_resize_heap:_emscripten_resize_heap,emwgpuAdapterRequestDevice:_emwgpuAdapterRequestDevice,emwgpuBufferDestroy:_emwgpuBufferDestroy,emwgpuBufferGetConstMappedRange:_emwgpuBufferGetConstMappedRange,emwgpuBufferMapAsync:_emwgpuBufferMapAsync,emwgpuBufferUnmap:_emwgpuBufferUnmap,emwgpuDelete:_emwgpuDelete,emwgpuDeviceCreateBuffer:_emwgpuDeviceCreateBuffer,emwgpuDeviceCreateShaderModule:_emwgpuDeviceCreateShaderModule,emwgpuDeviceDestroy:_emwgpuDeviceDestroy,emwgpuInstanceRequestAdapter:_emwgpuInstanceRequestAdapter,emwgpuQueueOnSubmittedWorkDone:_emwgpuQueueOnSubmittedWorkDone,emwgpuWaitAny:_emwgpuWaitAny,environ_get:_environ_get,environ_sizes_get:_environ_sizes_get,exit:_exit,fd_close:_fd_close,fd_read:_fd_read,fd_seek:_fd_seek,fd_write:_fd_write,memory:wasmMemory,random_get:_random_get,wgpuAdapterGetInfo:_wgpuAdapterGetInfo,wgpuAdapterGetLimits:_wgpuAdapterGetLimits,wgpuAdapterHasFeature:_wgpuAdapterHasFeature,wgpuBufferGetSize:_wgpuBufferGetSize,wgpuCommandEncoderBeginComputePass:_wgpuCommandEncoderBeginComputePass,wgpuCommandEncoderCopyBufferToBuffer:_wgpuCommandEncoderCopyBufferToBuffer,wgpuCommandEncoderFinish:_wgpuCommandEncoderFinish,wgpuComputePassEncoderDispatchWorkgroups:_wgpuComputePassEncoderDispatchWorkgroups,wgpuComputePassEncoderEnd:_wgpuComputePassEncoderEnd,wgpuComputePassEncoderSetBindGroup:_wgpuComputePassEncoderSetBindGroup,wgpuComputePassEncoderSetPipeline:_wgpuComputePassEncoderSetPipeline,wgpuComputePipelineGetBindGroupLayout:_wgpuComputePipelineGetBindGroupLayout,wgpuDeviceCreateBindGroup:_wgpuDeviceCreateBindGroup,wgpuDeviceCreateCommandEncoder:_wgpuDeviceCreateCommandEncoder,wgpuDeviceCreateComputePipeline:_wgpuDeviceCreateComputePipeline,wgpuInstanceHasWGSLLanguageFeature:_wgpuInstanceHasWGSLLanguageFeature,wgpuQueueSubmit:_wgpuQueueSubmit,wgpuQueueWriteBuffer:_wgpuQueueWriteBuffer,wllm_webgpu_runtime_policy_get}}function applySignatureConversions(wasmExports){wasmExports=Object.assign({},wasmExports);var makeWrapper_pp=f=>a0=>Number(f(BigInt(a0)));var makeWrapper__p=f=>a0=>f(BigInt(a0));var makeWrapper___PP=f=>(a0,a1,a2)=>f(a0,BigInt(a1?a1:0),BigInt(a2?a2:0));var makeWrapper_p=f=>()=>Number(f());var makeWrapper_ppp=f=>(a0,a1)=>Number(f(BigInt(a0),BigInt(a1)));var makeWrapper__p_____=f=>(a0,a1,a2,a3,a4,a5)=>f(BigInt(a0),a1,a2,a3,a4,a5);var makeWrapper___p_p_=f=>(a0,a1,a2,a3,a4)=>f(a0,BigInt(a1),a2,BigInt(a3),a4);var makeWrapper__pp=f=>(a0,a1)=>f(BigInt(a0),BigInt(a1));wasmExports["malloc"]=makeWrapper_pp(wasmExports["malloc"]);wasmExports["free"]=makeWrapper__p(wasmExports["free"]);wasmExports["main"]=makeWrapper___PP(wasmExports["main"]);wasmExports["pthread_self"]=makeWrapper_p(wasmExports["pthread_self"]);wasmExports["emscripten_builtin_memalign"]=makeWrapper_ppp(wasmExports["emscripten_builtin_memalign"]);wasmExports["_emscripten_thread_init"]=makeWrapper__p_____(wasmExports["_emscripten_thread_init"]);wasmExports["_emscripten_run_js_on_main_thread"]=makeWrapper___p_p_(wasmExports["_emscripten_run_js_on_main_thread"]);wasmExports["_emscripten_thread_free_data"]=makeWrapper__p(wasmExports["_emscripten_thread_free_data"]);wasmExports["_emscripten_thread_exit"]=makeWrapper__p(wasmExports["_emscripten_thread_exit"]);wasmExports["memalign"]=makeWrapper_ppp(wasmExports["memalign"]);wasmExports["emscripten_stack_set_limits"]=makeWrapper__pp(wasmExports["emscripten_stack_set_limits"]);wasmExports["_emscripten_stack_restore"]=makeWrapper__p(wasmExports["_emscripten_stack_restore"]);wasmExports["_emscripten_stack_alloc"]=makeWrapper_pp(wasmExports["_emscripten_stack_alloc"]);wasmExports["emscripten_stack_get_current"]=makeWrapper_p(wasmExports["emscripten_stack_get_current"]);return wasmExports}async function callMain(){var entryFunction=_main;var argc=0;var argv=0;try{var ret=entryFunction(argc,BigInt(argv));ret=await ret;exitJS(ret,true);return ret}catch(e){return handleException(e)}}function run(){if(runDependencies>0){dependenciesFulfilled=run;return}if(ENVIRONMENT_IS_PTHREAD){initRuntime();return}preRun();if(runDependencies>0){dependenciesFulfilled=run;return}async function doRun(){Module["calledRun"]=true;if(ABORT)return;initRuntime();preMain();Module["onRuntimeInitialized"]?.();var noInitialRun=Module["noInitialRun"]||false;if(!noInitialRun)await callMain();postRun()}if(Module["setStatus"]){Module["setStatus"]("Running...");setTimeout(()=>{setTimeout(()=>Module["setStatus"](""),1);doRun()},1)}else{doRun()}}var wasmExports;if(!ENVIRONMENT_IS_PTHREAD){createWasm();run()}\n';
+
+// src/worker.ts
+var FILE_READ_REQ_EVENT = "fs.read_req";
+var JSPI_STUB = `
+if (!WebAssembly.Suspending) {
+  // JSPI not available - stubs that keep the import/export tables valid.
+  // Suspending wraps imports: identity is fine since async imports won't be called.
+  WebAssembly.Suspending = function (fn) {
+    // console.log(fn.toString());
+    return fn;
+  };
+  // promising wraps exports: must return a Promise so ccall's ret.then() works.
+  WebAssembly.promising = function (fn) {
+    return function (...args) {
+      try {
+        return Promise.resolve(fn(...args));
+      } catch (e) {
+        return Promise.reject(e);
+      }
+    };
+  };
+}
+`;
+var ProxyToWorker = class {
+  // filename -> Blob for async reads
+  constructor(resources, nbThread, suppressNativeLog, logger) {
+    __publicField(this, "resources");
+    __publicField(this, "logger");
+    __publicField(this, "suppressNativeLog");
+    __publicField(this, "taskQueue", []);
+    __publicField(this, "taskId", 1);
+    __publicField(this, "resultQueue", []);
+    __publicField(this, "busy", false);
+    // is the work loop is running?
+    __publicField(this, "worker");
+    __publicField(this, "multiThread");
+    __publicField(this, "nbThread");
+    __publicField(this, "useAsyncFile");
+    __publicField(this, "fileBlobs", /* @__PURE__ */ new Map());
+    this.resources = resources;
+    this.nbThread = nbThread;
+    this.multiThread = nbThread > 0;
+    this.logger = logger;
+    this.suppressNativeLog = suppressNativeLog;
+    this.useAsyncFile = canUseAsyncFileRead(resources.compat);
+  }
+  getModuleCode() {
+    return __async(this, null, function* () {
+      if (!this.resources.jsPath) {
+        if (this.resources.compat) {
+          throw new Error(
+            "compat mode is enabled but no jsPath was provided. Pass a worker JS via setCompat() or install @wllama/wllama-compat."
+          );
+        }
+        return WLLAMA_EMSCRIPTEN_CODE;
+      } else if (this.resources.jsPath.code) {
+        return this.resources.jsPath.code;
+      } else if (isString(this.resources.jsPath)) {
+        const response = yield fetch(this.resources.jsPath);
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch worker code from ${this.resources.jsPath}`
+          );
+        }
+        return yield response.text();
+      } else {
+        throw new Error("No JS code provided for worker");
+      }
+    });
+  }
+  moduleInit(ggufFiles) {
+    return __async(this, null, function* () {
+      var _a;
+      let moduleCode = JSPI_STUB + (yield this.getModuleCode());
+      if (this.resources.noWebGPU) {
+        moduleCode = 'try{Object.defineProperty(WorkerNavigator.prototype,"gpu",{get:()=>({requestAdapter:async()=>null})});}catch(e){}' + moduleCode;
+      }
+      let mainModuleCode = moduleCode.replace("var Module", "var ___Module");
+      const runOptions = {
+        pathConfig: {
+          "wllama.wasm": this.resources.wasmPath
+        },
+        nbThread: this.nbThread,
+        compat: this.resources.compat,
+        env: (_a = this.resources.runtimeEnv) != null ? _a : {}
+      };
+      const completeCode = [
+        `const RUN_OPTIONS = ${JSON.stringify(runOptions)};`,
+        `function wModuleInit() { ${mainModuleCode}; return Module; }`,
+        LLAMA_CPP_WORKER_CODE
+      ].join(";\n\n");
+      this.worker = createWorker(completeCode);
+      this.worker.onmessage = this.onRecvMsg.bind(this);
+      this.worker.onerror = this.logger.error;
+      const res = yield this.pushTask({
+        verb: "module.init",
+        args: [
+          new Blob([moduleCode], { type: "text/javascript" }),
+          this.useAsyncFile
+        ],
+        callbackId: this.taskId++
+      });
+      const nativeFiles = [];
+      for (const file of ggufFiles) {
+        const needAllocBuffer = !this.useAsyncFile;
+        const id = yield this.fileAlloc(
+          file.name,
+          file.blob.size,
+          needAllocBuffer
+        );
+        nativeFiles.push(__spreadValues({ id }, file));
+        if (this.useAsyncFile) {
+          this.fileBlobs.set(file.name, file.blob);
+        }
+      }
+      if (!this.useAsyncFile) {
+        yield Promise.all(
+          nativeFiles.map((file) => {
+            return this.fileWrite(file.id, file.blob);
+          })
+        );
+      }
+      return res;
+    });
+  }
+  wllamaStart() {
+    return __async(this, null, function* () {
+      const result = yield this.pushTask({
+        verb: "wllama.start",
+        args: [],
+        callbackId: this.taskId++
+      });
+      const parsedResult = this.parseResult(result);
+      return parsedResult;
+    });
+  }
+  setRuntimePolicy(policy) {
+    if (!this.worker) {
+      throw new Error("Wllama worker is not initialized");
+    }
+    this.worker.postMessage({
+      verb: "runtime.policy",
+      args: [policy]
+    });
+  }
+  wllamaAction(name, body) {
+    return __async(this, null, function* () {
+      const encodedMsg = glueSerialize(body);
+      const result = yield this.pushTask({
+        verb: "wllama.action",
+        args: [name, encodedMsg],
+        callbackId: this.taskId++
+      });
+      const parsedResult = glueDeserialize(result);
+      return parsedResult;
+    });
+  }
+  wllamaExit() {
+    return __async(this, null, function* () {
+      if (this.worker) {
+        this.worker.terminate();
+      }
+    });
+  }
+  wllamaDebug() {
+    return __async(this, null, function* () {
+      const result = yield this.pushTask({
+        verb: "wllama.debug",
+        args: [],
+        callbackId: this.taskId++
+      });
+      return JSON.parse(result);
+    });
+  }
+  ///////////////////////////////////////
+  /**
+   * Allocate a new file in heapfs
+   * @returns fileId, to be used by fileWrite()
+   */
+  fileAlloc(fileName, size, allocBuffer) {
+    return __async(this, null, function* () {
+      const result = yield this.pushTask({
+        verb: "fs.alloc",
+        args: [fileName, size, allocBuffer],
+        callbackId: this.taskId++
+      });
+      return result.fileId;
+    });
+  }
+  /**
+   * Write a Blob to heapfs
+   */
+  fileWrite(fileId, blob) {
+    return __async(this, null, function* () {
+      const reader = blob.stream().getReader();
+      let offset = 0;
+      while (true) {
+        const { done, value } = yield reader.read();
+        if (done) break;
+        const size = value.byteLength;
+        yield this.pushTask(
+          {
+            verb: "fs.write",
+            args: [fileId, value, offset],
+            callbackId: this.taskId++
+          },
+          // @ts-ignore Type 'ArrayBufferLike' is not assignable to type 'ArrayBuffer'
+          [value.buffer]
+        );
+        offset += size;
+      }
+    });
+  }
+  fileReadResponse(name, offset, size) {
+    return __async(this, null, function* () {
+      var _a;
+      try {
+        const blob = this.fileBlobs.get(name);
+        if (!blob) {
+          throw new Error(`blob not found for name="${name}"`);
+        }
+        const chunk = blob.slice(offset, offset + size);
+        const buffer = yield chunk.arrayBuffer();
+        this.worker.postMessage(
+          { verb: "fs.read_res", args: [buffer] },
+          { transfer: [buffer] }
+        );
+      } catch (err) {
+        this.logger.error("fileReadResponse failed, terminating worker:", err);
+        (_a = this.worker) == null ? void 0 : _a.terminate();
+        this.worker = void 0;
+        this.abort(`File read failed: ${err}`, err.stack || "");
+      }
+    });
+  }
+  /**
+   * Parse JSON result returned by cpp code.
+   * Throw new Error if "__exception" is present in the response
+   *
+   * TODO: get rid of this function once everything is migrated to Glue
+   */
+  parseResult(result) {
+    const parsedResult = JSON.parse(result);
+    if (parsedResult && parsedResult["error"]) {
+      throw new WllamaRuntimeError("Unknown error, please see console.log", "");
+    }
+    return parsedResult;
+  }
+  /**
+   * Push a new task to taskQueue
+   */
+  pushTask(param, buffers) {
+    return new Promise((resolve, reject) => {
+      this.taskQueue.push({ resolve, reject, param, buffers });
+      this.runTaskLoop();
+    });
+  }
+  /**
+   * Main loop for processing tasks
+   */
+  runTaskLoop() {
+    return __async(this, null, function* () {
+      var _a;
+      if (this.busy) {
+        return;
+      }
+      this.busy = true;
+      while (true) {
+        const task = this.taskQueue.shift();
+        if (!task) break;
+        this.resultQueue.push(task);
+        this.worker.postMessage(
+          task.param,
+          isSafariMobile() ? void 0 : {
+            transfer: (_a = task.buffers) != null ? _a : []
+          }
+        );
+      }
+      this.busy = false;
+    });
+  }
+  /**
+   * Handle messages from worker
+   */
+  onRecvMsg(e) {
+    if (!e.data) return;
+    const { verb, args } = e.data;
+    const isCompatBuild = this.resources.compat;
+    if (verb && verb.startsWith("console.")) {
+      if (this.suppressNativeLog) {
+        return;
+      }
+      if (verb.endsWith("debug")) this.logger.debug(...args);
+      if (verb.endsWith("log")) this.logger.log(...args);
+      if (verb.endsWith("warn")) this.logger.warn(...args);
+      if (verb.endsWith("error")) this.logger.error(...args);
+      return;
+    } else if (verb === "signal.abort") {
+      const [signalType, message, rawStack, originalErr] = args;
+      if (originalErr) {
+        this.logger.error(originalErr);
+      }
+      (() => __async(this, null, function* () {
+        let stack = "";
+        let newMsg = message.replace(
+          "Build with -sASSERTIONS for more info.",
+          ""
+        );
+        if (signalType === "abort") {
+          newMsg = `(ABORT) ${newMsg}`;
+          stack = rawStack.replace(/\|/g, "\n");
+        } else if (signalType === "exception") {
+          stack = rawStack;
+        }
+        const decoded = yield Debug.decodeStackTrace(stack, isCompatBuild);
+        this.logger.error(`Stack trace (${signalType}):
+` + decoded);
+        this.abort(newMsg, decoded);
+      }))();
+      return;
+    }
+    if (verb === FILE_READ_REQ_EVENT) {
+      const [name, offset, size] = args;
+      this.fileReadResponse(name, offset, size).catch(() => {
+      });
+      return;
+    }
+    const { callbackId, result, err } = e.data;
+    if (callbackId) {
+      const idx = this.resultQueue.findIndex(
+        (t) => t.param.callbackId === callbackId
+      );
+      if (idx !== -1) {
+        const waitingTask = this.resultQueue.splice(idx, 1)[0];
+        if (err) waitingTask.reject(err);
+        else waitingTask.resolve(result);
+      } else {
+        this.logger.error(
+          `Cannot find waiting task with callbackId = ${callbackId}`
+        );
+      }
+    }
+  }
+  abort(text, stack) {
+    const error = new WllamaRuntimeError(
+      text.length == 0 ? "(unknown error)" : text,
+      stack
+    );
+    while (this.resultQueue.length > 0) {
+      const waitingTask = this.resultQueue.pop();
+      if (!waitingTask) break;
+      waitingTask.reject(error);
+    }
+    while (this.taskQueue.length > 0) {
+      const pendingTask = this.taskQueue.pop();
+      if (!pendingTask) break;
+      pendingTask.reject(error);
+    }
+  }
+};
+
+// src/huggingface.ts
+var HF_BASE = "https://huggingface.co";
+var DEFAULT_QUANTS = ["Q4_K_M", "Q8_0"];
+function fetchRepoFiles(repo, token) {
+  return __async(this, null, function* () {
+    var _a;
+    const url = `${HF_BASE}/api/models/${repo}/tree/main?recursive=true`;
+    const headers = { Accept: "application/json" };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    const res = yield fetch(url, { headers });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try {
+        msg = (_a = (yield res.json()).error) != null ? _a : msg;
+      } catch (e) {
+      }
+      throw new Error(`HF API error (${res.status}): ${msg}`);
+    }
+    return res.json();
+  });
+}
+function firstShardPath(files, path) {
+  const m = path.match(/^(.+)-(\d{5})-of-(\d{5})\.gguf$/i);
+  if (!m) return path;
+  const first = `${m[1]}-00001-of-${m[3]}.gguf`;
+  return files.some((f) => f.path === first) ? first : path;
+}
+function selectFile(files, quant, mmprojOnly) {
+  const candidates = files.filter((f) => {
+    if (f.type !== "file" || !f.path.toLowerCase().endsWith(".gguf"))
+      return false;
+    const ismmproj = f.path.toLowerCase().includes("mmproj");
+    return mmprojOnly ? ismmproj : !ismmproj;
+  });
+  if (candidates.length === 0) return null;
+  if (quant) {
+    const upper = quant.toUpperCase();
+    const match = candidates.find((f) => f.path.toUpperCase().includes(upper));
+    if (match) return firstShardPath(candidates, match.path);
+    return null;
+  }
+  for (const q of DEFAULT_QUANTS) {
+    const match = candidates.find((f) => f.path.toUpperCase().includes(q));
+    if (match) return firstShardPath(candidates, match.path);
+  }
+  return firstShardPath(candidates, candidates[0].path);
+}
+function getHFModelSource(config) {
+  return __async(this, null, function* () {
+    const { repo, file, quant, mmprojFile, mmprojQuant, hfToken } = config;
+    const files = yield fetchRepoFiles(repo, hfToken);
+    const modelPath = file != null ? file : selectFile(files, quant, false);
+    if (!modelPath) {
+      throw new Error(`No GGUF file found in repo "${repo}"`);
+    }
+    const source = {
+      url: `${HF_BASE}/${repo}/resolve/main/${modelPath}`
+    };
+    if (mmprojFile || mmprojQuant !== void 0) {
+      const mmpath = mmprojFile != null ? mmprojFile : selectFile(files, mmprojQuant, true);
+      if (mmpath) {
+        source.mmprojUrl = `${HF_BASE}/${repo}/resolve/main/${mmpath}`;
+      }
+    }
+    if (hfToken) {
+      const params = new URLSearchParams({ token: hfToken });
+      source.url += `?${params}`;
+      if (source.mmprojUrl) {
+        source.mmprojUrl += `?${params}`;
+      }
+    }
+    return source;
+  });
+}
+function getHFFileSHA256(url, headers) {
+  return __async(this, null, function* () {
+    if (!url.includes("/resolve/")) return void 0;
+    const rawUrl = url.replace("/resolve/", "/raw/");
+    try {
+      const text = yield fetch(rawUrl, { headers }).then((r) => r.text());
+      const match = text.match(/^oid sha256:([0-9a-f]{64})$/m);
+      return match ? match[1] : void 0;
+    } catch (e) {
+      return void 0;
+    }
+  });
+}
+
+// src/storage/opfs.ts
+var OPFSBackend = class {
+  isSupported() {
+    var _a;
+    return typeof navigator !== "undefined" && "storage" in navigator && !!((_a = navigator.storage) == null ? void 0 : _a.getDirectory);
+  }
+  read(key) {
+    return __async(this, null, function* () {
+      try {
+        const cacheDir = yield getCacheDir();
+        const fileHandle = yield cacheDir.getFileHandle(key);
+        return yield fileHandle.getFile();
+      } catch (e) {
+        return null;
+      }
+    });
+  }
+  write(key, stream) {
+    return __async(this, null, function* () {
+      const writable = yield openWritable(key);
+      yield writable.truncate(0);
+      const reader = stream.getReader();
+      try {
+        while (true) {
+          const { done, value } = yield reader.read();
+          if (done) break;
+          yield writable.write(value);
+        }
+      } finally {
+        yield writable.close();
+      }
+    });
+  }
+  getSize(key) {
+    return __async(this, null, function* () {
+      try {
+        const cacheDir = yield getCacheDir();
+        const fileHandle = yield cacheDir.getFileHandle(key);
+        const file = yield fileHandle.getFile();
+        return file.size;
+      } catch (e) {
+        return -1;
+      }
+    });
+  }
+  list() {
+    return __async(this, null, function* () {
+      const cacheDir = yield getCacheDir();
+      const result = [];
+      try {
+        for (var iter = __forAwait(cacheDir.entries()), more, temp, error; more = !(temp = yield iter.next()).done; more = false) {
+          const [name, handle] = temp.value;
+          if (handle.kind === "file") {
+            const file = yield handle.getFile();
+            result.push({ key: name, size: file.size });
+          }
+        }
+      } catch (temp) {
+        error = [temp];
+      } finally {
+        try {
+          more && (temp = iter.return) && (yield temp.call(iter));
+        } finally {
+          if (error)
+            throw error[0];
+        }
+      }
+      return result;
+    });
+  }
+  delete(key) {
+    return __async(this, null, function* () {
+      try {
+        const cacheDir = yield getCacheDir();
+        yield cacheDir.removeEntry(key);
+      } catch (e) {
+        if ((e == null ? void 0 : e.name) !== "NotFoundError") throw e;
+      }
+    });
+  }
+};
+function getCacheDir() {
+  return __async(this, null, function* () {
+    const opfsRoot = yield navigator.storage.getDirectory();
+    return opfsRoot.getDirectoryHandle("cache", { create: true });
+  });
+}
+function openWritable(fileName) {
+  return __async(this, null, function* () {
+    const worker = createWorker(OPFS_UTILS_WORKER_CODE);
+    let pResolve;
+    let pReject;
+    worker.onmessage = (e) => {
+      if (e.data.ok) pResolve(null);
+      else if (e.data.err) pReject(e.data.err);
+    };
+    worker.onerror = (e) => {
+      var _a;
+      return pReject == null ? void 0 : pReject((_a = e.message) != null ? _a : e);
+    };
+    const workerExec = (data) => new Promise((resolve, reject) => {
+      pResolve = resolve;
+      pReject = reject;
+      worker.postMessage(
+        data,
+        isSafariMobile() ? void 0 : { transfer: "buf" in data && data.buf ? [data.buf.buffer] : [] }
+      );
+    });
+    yield workerExec({ action: "open", filename: fileName });
+    return {
+      truncate: () => __async(null, null, function* () {
+      }),
+      write: (value) => workerExec({ action: "write", buf: value }),
+      close: () => __async(null, null, function* () {
+        yield workerExec({ action: "close" });
+        worker.terminate();
+      })
+    };
+  });
+}
+
+// src/storage/cos.ts
+function makeHash(key) {
+  return { algorithm: "SHA-256", value: key };
+}
+var COSInternalBackend = class {
+  isSupported() {
+    return typeof navigator !== "undefined" && "crossOriginStorage" in navigator;
+  }
+  // IMPORTANT: key must be SHA-256 hash of the data
+  read(key) {
+    return __async(this, null, function* () {
+      try {
+        const handle = yield navigator.crossOriginStorage.requestFileHandle(
+          makeHash(key)
+        );
+        return handle.getFile();
+      } catch (e) {
+        return null;
+      }
+    });
+  }
+  // IMPORTANT: key must be SHA-256 hash of the data
+  write(key, stream) {
+    return __async(this, null, function* () {
+      const handle = yield navigator.crossOriginStorage.requestFileHandle(
+        makeHash(key),
+        { create: true }
+      );
+      const writable = yield handle.createWritable();
+      const reader = stream.getReader();
+      try {
+        while (true) {
+          const { done, value } = yield reader.read();
+          if (done) break;
+          yield writable.write(value);
+        }
+      } finally {
+        yield writable.close();
+      }
+    });
+  }
+  // IMPORTANT: key must be SHA-256 hash of the data
+  getSize(key) {
+    return __async(this, null, function* () {
+      try {
+        const handle = yield navigator.crossOriginStorage.requestFileHandle(
+          makeHash(key)
+        );
+        const file = yield handle.getFile();
+        return file.size;
+      } catch (e) {
+        return -1;
+      }
+    });
+  }
+  list() {
+    return __async(this, null, function* () {
+      throw new Error("not implemented");
+    });
+  }
+  delete(_key) {
+    return __async(this, null, function* () {
+      throw new Error("not implemented");
+    });
+  }
+};
+var COSBackend = class {
+  constructor() {
+    __publicField(this, "cos", new COSInternalBackend());
+    __publicField(this, "priv", new OPFSBackend());
+  }
+  isSupported() {
+    return this.priv.isSupported();
+  }
+  read(key, hint) {
+    return __async(this, null, function* () {
+      if ((hint == null ? void 0 : hint.sha256) && this.cos.isSupported()) {
+        const blob = yield this.cos.read(hint.sha256);
+        if (blob) return blob;
+      }
+      return this.priv.read(key);
+    });
+  }
+  write(key, stream, hint) {
+    return __async(this, null, function* () {
+      if ((hint == null ? void 0 : hint.sha256) && this.cos.isSupported()) {
+        yield this.cos.write(hint.sha256, stream);
+      } else {
+        yield this.priv.write(key, stream);
+      }
+    });
+  }
+  getSize(key, hint) {
+    return __async(this, null, function* () {
+      if ((hint == null ? void 0 : hint.sha256) && this.cos.isSupported()) {
+        const size = yield this.cos.getSize(hint.sha256);
+        if (size !== -1) return size;
+      }
+      return this.priv.getSize(key);
+    });
+  }
+  list() {
+    return __async(this, null, function* () {
+      return this.priv.list();
+    });
+  }
+  delete(key) {
+    return __async(this, null, function* () {
+      return this.priv.delete(key);
+    });
+  }
+};
+
+// src/cache-manager.ts
+var PREFIX_METADATA = "__metadata__";
+var POLYFILL_ETAG = "polyfill_for_older_version";
+function hintFromMetadata(metadata) {
+  if (!metadata) return void 0;
+  if (metadata.sha256) return { sha256: metadata.sha256 };
+  return void 0;
+}
+var CacheManager = class {
+  /**
+   * @param backends Array of storage backends to use, in order of preference ; if first is available, use it, otherwise try the next one.
+   */
+  constructor(backends = [new COSBackend()]) {
+    __publicField(this, "sb");
+    for (const backend of backends) {
+      if (backend.isSupported()) {
+        this.sb = backend;
+        return;
+      }
+    }
+    throw new Error("No supported storage backend found");
+  }
+  /**
+   * Convert a given URL into a storage key.
+   *
+   * Format: `${hashSHA1(fullURL)}_${fileName}`
+   */
+  getNameFromURL(url) {
+    return __async(this, null, function* () {
+      return urlToFileName(url, "");
+    });
+  }
+  /**
+   * @deprecated Use `download()` instead
+   *
+   * Write a new file to cache. This will overwrite existing file.
+   *
+   * @param name The file name returned by `getNameFromURL()` or `list()`
+   */
+  write(name, stream, metadata) {
+    return __async(this, null, function* () {
+      yield this.sb.write(name, stream);
+      yield this.writeMetadata(name, metadata);
+    });
+  }
+  download(_0) {
+    return __async(this, arguments, function* (url, options = {}) {
+      var _a, _b, _c, _d;
+      const fileKey = yield urlToFileName(url, "");
+      const sha256 = yield getHFFileSHA256(url, (_a = options.headers) != null ? _a : {});
+      const hint = sha256 ? { sha256 } : void 0;
+      const cachedSize = yield this.sb.getSize(fileKey, hint);
+      if (cachedSize !== -1) {
+        const metadata2 = yield this.readMetadata(fileKey);
+        if ((metadata2 == null ? void 0 : metadata2.originalURL) === url && metadata2.originalSize === cachedSize) {
+          return;
+        }
+        const head = yield fetch(url, __spreadValues({
+          method: "HEAD"
+        }, options.headers ? { headers: options.headers } : {}));
+        const originalSize = parseInt(
+          (_b = head.headers.get("content-length")) != null ? _b : "0",
+          10
+        );
+        const etag2 = (head.headers.get("etag") || "").replace(
+          /[^A-Za-z0-9]/g,
+          ""
+        );
+        if (originalSize > 0 && originalSize === cachedSize) {
+          yield this.writeMetadata(fileKey, __spreadValues({
+            originalURL: url,
+            originalSize,
+            etag: etag2,
+            sha256
+          }, (_c = options.metadataAdditional) != null ? _c : {}));
+          return;
+        }
+        yield this.sb.delete(fileKey);
+        yield this.sb.delete(`${PREFIX_METADATA}${fileKey}`);
+      }
+      const response = yield fetch(url, __spreadValues(__spreadValues({}, options.headers ? { headers: options.headers } : {}), options.signal ? { signal: options.signal } : {}));
+      if (!response.ok || !response.body) {
+        throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
+      }
+      const contentLength = response.headers.get("content-length");
+      const etag = (response.headers.get("etag") || "").replace(
+        /[^A-Za-z0-9]/g,
+        ""
+      );
+      const total = parseInt(contentLength != null ? contentLength : "0", 10);
+      const progressCallback = options.progressCallback;
+      let loaded = 0;
+      let lastProgressAt = 0;
+      const progressStream = new TransformStream({
+        transform(chunk, controller) {
+          loaded += chunk.byteLength;
+          if (progressCallback) {
+            const now = Date.now();
+            if (now - lastProgressAt > 100) {
+              lastProgressAt = now;
+              progressCallback({ loaded, total });
+            }
+          }
+          controller.enqueue(chunk);
+        },
+        flush() {
+          progressCallback == null ? void 0 : progressCallback({ loaded, total: total || loaded });
+        }
+      });
+      const metadata = __spreadValues({
+        originalURL: url,
+        originalSize: total,
+        etag
+      }, (_d = options.metadataAdditional) != null ? _d : {});
+      if (sha256) {
+        metadata.sha256 = sha256;
+      }
+      yield this.sb.write(
+        fileKey,
+        response.body.pipeThrough(progressStream),
+        hint
+      );
+      yield this.writeMetadata(fileKey, metadata);
+    });
+  }
+  /**
+   * Open a file in cache for reading
+   *
+   * @param nameOrURL The file name returned by `getNameFromURL()` or `list()`, or the original URL of the remote file
+   * @returns Blob, or null if file does not exist
+   */
+  open(nameOrURL) {
+    return __async(this, null, function* () {
+      const hint1 = hintFromMetadata(yield this.getMetadata(nameOrURL));
+      const direct = yield this.sb.read(nameOrURL, hint1);
+      if (direct) return direct;
+      const key = yield urlToFileName(nameOrURL, "");
+      const hint2 = hintFromMetadata(yield this.getMetadata(key));
+      return this.sb.read(key, hint2);
+    });
+  }
+  /**
+   * Get the size of a file in stored cache
+   *
+   * NOTE: in case the download is stopped mid-way (i.e. user close browser tab), the file maybe corrupted, size maybe different from `metadata.originalSize`
+   *
+   * @param name The file name returned by `getNameFromURL()` or `list()`
+   * @returns number of bytes, or -1 if file does not exist
+   */
+  getSize(name) {
+    return __async(this, null, function* () {
+      const hint = hintFromMetadata(yield this.getMetadata(name));
+      return this.sb.getSize(name, hint);
+    });
+  }
+  /**
+   * Get metadata of a cached file
+   */
+  getMetadata(name) {
+    return __async(this, null, function* () {
+      const metadata = yield this.readMetadata(name);
+      if (metadata) return metadata;
+      const cachedSize = yield this.sb.getSize(name);
+      return cachedSize > 0 ? (
+        // files created by older version of wllama don't have metadata; polyfill it
+        {
+          etag: POLYFILL_ETAG,
+          originalSize: cachedSize,
+          originalURL: ""
+        }
+      ) : (
+        // cached file not found
+        null
+      );
+    });
+  }
+  /**
+   * Same as `getMetadata()`, but without polyfill. Returns null if the file has no metadata.
+   */
+  readMetadata(name) {
+    return __async(this, null, function* () {
+      const blob = yield this.sb.read(`${PREFIX_METADATA}${name}`);
+      if (!blob) return null;
+      try {
+        return yield new Response(blob).json();
+      } catch (e) {
+        return null;
+      }
+    });
+  }
+  /**
+   * List all files currently in cache
+   */
+  list() {
+    return __async(this, null, function* () {
+      const all = yield this.sb.list();
+      const metadataMap = {};
+      for (const { key } of all) {
+        if (key.startsWith(PREFIX_METADATA)) {
+          const blob = yield this.sb.read(key);
+          if (blob) {
+            const meta = yield new Response(blob).json().catch(() => null);
+            metadataMap[key.slice(PREFIX_METADATA.length)] = meta;
+          }
+        }
+      }
+      const result = [];
+      for (const { key, size } of all) {
+        if (!key.startsWith(PREFIX_METADATA)) {
+          result.push({
+            name: key,
+            size,
+            metadata: metadataMap[key] || {
+              originalSize: size,
+              originalURL: "",
+              etag: ""
+            }
+          });
+        }
+      }
+      return result;
+    });
+  }
+  /**
+   * Clear all files currently in cache
+   */
+  clear() {
+    return __async(this, null, function* () {
+      yield this.deleteMany(() => true);
+    });
+  }
+  /**
+   * Delete a single file in cache
+   *
+   * @param nameOrURL Can be either an URL or a name returned by `getNameFromURL()` or `list()`
+   */
+  delete(nameOrURL) {
+    return __async(this, null, function* () {
+      const name2 = yield this.getNameFromURL(nameOrURL);
+      yield this.deleteMany(
+        (entry) => entry.name === nameOrURL || entry.name === name2
+      );
+    });
+  }
+  /**
+   * Delete multiple files in cache.
+   *
+   * @param predicate A predicate like `array.filter(item => boolean)`
+   */
+  deleteMany(predicate) {
+    return __async(this, null, function* () {
+      const list = yield this.list();
+      for (const item of list) {
+        if (predicate(item)) {
+          yield this.sb.delete(item.name);
+          yield this.sb.delete(`${PREFIX_METADATA}${item.name}`);
+        }
+      }
+    });
+  }
+  /**
+   * Write the metadata of the file to disk.
+   */
+  writeMetadata(name, metadata) {
+    return __async(this, null, function* () {
+      const blob = new Blob([JSON.stringify(metadata)], { type: "text/plain" });
+      yield this.sb.write(`${PREFIX_METADATA}${name}`, blob.stream());
+    });
+  }
+};
+var cache_manager_default = CacheManager;
+function urlToFileName(url, prefix) {
+  return __async(this, null, function* () {
+    const hashBuffer = yield crypto.subtle.digest(
+      "SHA-1",
+      new TextEncoder().encode(url)
+    );
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `${prefix}${hashHex}_${url.split("/").pop()}`;
+  });
+}
+
+// src/model-manager.ts
+var DEFAULT_PARALLEL_DOWNLOADS = 3;
+var ModelValidationStatus = /* @__PURE__ */ ((ModelValidationStatus2) => {
+  ModelValidationStatus2["VALID"] = "valid";
+  ModelValidationStatus2["INVALID"] = "invalid";
+  ModelValidationStatus2["DELETED"] = "deleted";
+  return ModelValidationStatus2;
+})(ModelValidationStatus || {});
+var Model = class {
+  constructor(modelManager, url, mmprojUrl, savedFiles) {
+    __publicField(this, "modelManager");
+    /**
+     * URL to the GGUF file (in case it contains multiple shards, the URL should point to the first shard)
+     *
+     * This URL will be used to identify the model in the cache. There can't be 2 models with the same URL.
+     */
+    __publicField(this, "url");
+    /**
+     * URL to mmproj file, if exists
+     */
+    __publicField(this, "mmprojUrl");
+    /**
+     * Size in bytes (total size of all shards).
+     *
+     * A value of -1 means the model is deleted from the cache. You must call `ModelManager.downloadModel` to re-download the model.
+     */
+    __publicField(this, "size");
+    /**
+     * List of all shards in the cache, sorted by original URL (ascending order)
+     */
+    __publicField(this, "files");
+    this.modelManager = modelManager;
+    this.url = url;
+    this.mmprojUrl = mmprojUrl;
+    if (savedFiles) {
+      this.files = this.getAllFiles(savedFiles);
+      this.size = sumArr(this.files.map((f) => f.metadata.originalSize));
+    } else {
+      this.files = [];
+      this.size = 0;
+    }
+  }
+  /**
+   * Open and get a list of all shards as Blobs
+   */
+  open() {
+    return __async(this, null, function* () {
+      if (this.size === -1) {
+        throw new WllamaError(
+          `Model is deleted from the cache; Call ModelManager.downloadModel to re-download the model`,
+          "load_error"
+        );
+      }
+      const blobs = [];
+      for (const file of this.files) {
+        const blob = yield this.modelManager.cacheManager.open(file.name);
+        if (!blob) {
+          throw new Error(
+            `Failed to open file ${file.name}; Hint: the model may be invalid, please refresh it`
+          );
+        }
+        blobs.push(blob);
+      }
+      return blobs;
+    });
+  }
+  /**
+   * Validate the model files.
+   *
+   * If the model is invalid, the model manager will not be able to use it. You must call `refresh` to re-download the model.
+   *
+   * Cases that model is invalid:
+   * - The model is deleted from the cache
+   * - The model files are missing (or the download is interrupted)
+   */
+  validate() {
+    let nbShards = ModelManager.parseModelUrl(this.url).length;
+    if (this.mmprojUrl) {
+      nbShards += 1;
+    }
+    if (this.size === -1) {
+      return "deleted" /* DELETED */;
+    }
+    if (this.size < 16 || this.files.length !== nbShards) {
+      return "invalid" /* INVALID */;
+    }
+    for (const file of this.files) {
+      if (!file.metadata || file.metadata.originalSize !== file.size) {
+        return "invalid" /* INVALID */;
+      }
+    }
+    return "valid" /* VALID */;
+  }
+  /**
+   * In case the model is invalid, call this function to re-download the model
+   */
+  refresh() {
+    return __async(this, arguments, function* (options = {}) {
+      var _a;
+      const urls = ModelManager.parseModelUrl(this.url);
+      if (this.mmprojUrl) {
+        urls.push(this.mmprojUrl);
+      }
+      const works = urls.map((url, index) => ({
+        url,
+        index
+      }));
+      this.modelManager.logger.debug("Downloading model files:", urls);
+      const nParallel = (_a = this.modelManager.params.parallelDownloads) != null ? _a : DEFAULT_PARALLEL_DOWNLOADS;
+      const totalSize = yield this.getTotalDownloadSize(urls);
+      const loadedSize = [];
+      const worker = () => __async(this, null, function* () {
+        while (works.length > 0) {
+          const w = works.shift();
+          if (!w) break;
+          yield this.modelManager.cacheManager.download(w.url, __spreadProps(__spreadValues({}, options), {
+            metadataAdditional: {
+              originalURL: w.url,
+              mmprojURL: this.mmprojUrl
+            },
+            progressCallback: ({ loaded }) => {
+              var _a2;
+              loadedSize[w.index] = loaded;
+              (_a2 = options.progressCallback) == null ? void 0 : _a2.call(options, {
+                loaded: sumArr(loadedSize),
+                total: totalSize
+              });
+            }
+          }));
+        }
+      });
+      const promises = [];
+      for (let i = 0; i < nParallel; i++) {
+        promises.push(worker());
+        loadedSize.push(0);
+      }
+      yield Promise.all(promises);
+      this.files = this.getAllFiles(yield this.modelManager.cacheManager.list());
+      this.size = this.files.reduce((acc, f) => acc + f.metadata.originalSize, 0);
+    });
+  }
+  /**
+   * Remove the model from the cache
+   */
+  remove() {
+    return __async(this, null, function* () {
+      this.files = this.getAllFiles(yield this.modelManager.cacheManager.list());
+      yield this.modelManager.cacheManager.deleteMany(
+        (f) => !!this.files.find((file) => file.name === f.name)
+      );
+      this.size = -1;
+    });
+  }
+  getAllFiles(savedFiles) {
+    const allUrls = new Set(ModelManager.parseModelUrl(this.url));
+    if (this.mmprojUrl) {
+      allUrls.add(this.mmprojUrl);
+    }
+    const allFiles = [];
+    for (const url of allUrls) {
+      const file = savedFiles.find((f) => f.metadata.originalURL === url);
+      if (!file) {
+        throw new Error(`Model file not found: ${url}`);
+      }
+      allFiles.push(file);
+    }
+    allFiles.sort(
+      (a, b) => a.metadata.originalURL.localeCompare(b.metadata.originalURL)
+    );
+    return allFiles;
+  }
+  getTotalDownloadSize(urls) {
+    return __async(this, null, function* () {
+      const responses = yield Promise.all(
+        urls.map((url) => fetch(url, { method: "HEAD" }))
+      );
+      const sizes = responses.map(
+        (res) => Number(res.headers.get("content-length") || "0")
+      );
+      return sumArr(sizes);
+    });
+  }
+};
+var ModelManager = class _ModelManager {
+  constructor(params = {}) {
+    // The CacheManager singleton, can be accessed by user
+    __publicField(this, "cacheManager");
+    __publicField(this, "params");
+    __publicField(this, "logger");
+    this.cacheManager = params.cacheManager || new cache_manager_default();
+    this.params = params;
+    this.logger = params.logger || console;
+  }
+  /**
+   * Parses a model URL and returns an array of URLs based on the following patterns:
+   * - If the input URL is an array, it returns the array itself.
+   * - If the input URL is a string in the `gguf-split` format, it returns an array containing the URL of each shard in ascending order.
+   * - Otherwise, it returns an array containing the input URL as a single element array.
+   * @param modelUrl URL or list of URLs
+   */
+  static parseModelUrl(modelUrl) {
+    var _a;
+    if (Array.isArray(modelUrl)) {
+      return modelUrl;
+    }
+    const urlPartsRegex = /-(\d{5})-of-(\d{5})\.gguf(?:\?.*)?$/;
+    const queryMatch = modelUrl.match(/\.gguf(\?.*)?$/);
+    const queryParams = (_a = queryMatch == null ? void 0 : queryMatch[1]) != null ? _a : "";
+    const matches = modelUrl.match(urlPartsRegex);
+    if (!matches) {
+      return [modelUrl];
+    }
+    const baseURL = modelUrl.replace(urlPartsRegex, "");
+    const total = matches[2];
+    const paddedShardIds = Array.from(
+      { length: Number(total) },
+      (_, index) => (index + 1).toString().padStart(5, "0")
+    );
+    return paddedShardIds.map(
+      (current) => `${baseURL}-${current}-of-${total}.gguf${queryParams}`
+    );
+  }
+  /**
+   * Get all models in the cache
+   */
+  getModels() {
+    return __async(this, arguments, function* (opts = {}) {
+      const cachedFiles = yield this.cacheManager.list();
+      let models = [];
+      for (const file of cachedFiles) {
+        if (!file.metadata.originalURL) continue;
+        const shards = _ModelManager.parseModelUrl(file.metadata.originalURL);
+        const mmprojUrl = file.metadata.mmprojURL;
+        const isFirstShard = shards.length === 1 || shards[0] === file.metadata.originalURL;
+        if (isFirstShard) {
+          models.push(
+            new Model(this, file.metadata.originalURL, mmprojUrl, cachedFiles)
+          );
+        }
+      }
+      if (!opts.includeInvalid) {
+        models = models.filter(
+          (m) => m.validate() === "valid" /* VALID */
+        );
+      }
+      return models;
+    });
+  }
+  /**
+   * Download a model from the given URL.
+   *
+   * The URL must end with `.gguf`
+   */
+  downloadModel(_0) {
+    return __async(this, arguments, function* (sourceOrURL, options = {}) {
+      const source = isString(sourceOrURL) ? { url: sourceOrURL } : sourceOrURL;
+      if (!isValidGgufFile(source.url)) {
+        throw new WllamaError(
+          `Invalid model URL: ${source.url}; URL must ends with ".gguf"`,
+          "download_error"
+        );
+      }
+      const model = new Model(this, source.url, source.mmprojUrl);
+      const validity = model.validate();
+      if (validity !== "valid" /* VALID */) {
+        yield model.refresh(options);
+      }
+      return model;
+    });
+  }
+  /**
+   * Get a model from the cache or download it if it's not available.
+   */
+  getModelOrDownload(_0) {
+    return __async(this, arguments, function* (source, options = {}) {
+      var _a;
+      const models = yield this.getModels();
+      const model = models.find((m) => m.url === source.url);
+      if (model) {
+        (_a = options.progressCallback) == null ? void 0 : _a.call(options, { loaded: model.size, total: model.size });
+        return model;
+      }
+      return this.downloadModel(source, options);
+    });
+  }
+  /**
+   * Remove all models from the cache
+   */
+  clear() {
+    return __async(this, null, function* () {
+      yield this.cacheManager.clear();
+    });
+  }
+};
+
+// src/types/types.ts
+var LogLevel = /* @__PURE__ */ ((LogLevel2) => {
+  LogLevel2[LogLevel2["DEBUG"] = 1] = "DEBUG";
+  LogLevel2[LogLevel2["INFO"] = 2] = "INFO";
+  LogLevel2[LogLevel2["WARN"] = 3] = "WARN";
+  LogLevel2[LogLevel2["ERROR"] = 4] = "ERROR";
+  return LogLevel2;
+})(LogLevel || {});
+
+// src/wasm-from-cdn.ts
+var WasmCompatFromCDN = {
+  worker: "https://cdn.jsdelivr.net/npm/@wllama/wllama-compat@3.6.1/wasm/wllama.js",
+  wasm: "https://cdn.jsdelivr.net/npm/@wllama/wllama-compat@3.6.1/wasm/wllama.wasm"
+};
+
+// src/wllama.ts
+var LoggerWithoutDebug = __spreadProps(__spreadValues({}, console), {
+  debug: () => {
+  }
+});
+var WllamaError = class extends Error {
+  constructor(message, type = "unknown_error") {
+    super(message);
+    __publicField(this, "type");
+    this.type = type;
+  }
+};
+var WllamaAbortError = class extends Error {
+  constructor() {
+    super("Operation aborted");
+    __publicField(this, "name", "AbortError");
+  }
+};
+var WllamaRuntimeError = class extends Error {
+  constructor(message, stack) {
+    super(message);
+    __publicField(this, "name", "RuntimeError");
+    __publicField(this, "stack");
+    this.stack = stack;
+  }
+};
+var Wllama = class {
+  constructor(pathConfig, wllamaConfig = {}) {
+    // The CacheManager and ModelManager are singleton, can be accessed by user
+    __publicField(this, "cacheManager");
+    __publicField(this, "modelManager");
+    __publicField(this, "compat", null);
+    __publicField(this, "proxy", null);
+    __publicField(this, "config");
+    __publicField(this, "pathConfig");
+    __publicField(this, "useMultiThread", false);
+    __publicField(this, "nbThreads", 1);
+    __publicField(this, "useEmbeddings", false);
+    __publicField(this, "useRerank", false);
+    // available when loaded
+    __publicField(this, "loadedContextInfo", null);
+    __publicField(this, "seed");
+    __publicField(this, "bosToken", -1);
+    __publicField(this, "eosToken", -1);
+    __publicField(this, "eotToken", -1);
+    __publicField(this, "eogTokens", /* @__PURE__ */ new Set());
+    __publicField(this, "addBosToken", false);
+    __publicField(this, "addEosToken", false);
+    __publicField(this, "mediaMarker");
+    __publicField(this, "chatTemplate");
+    __publicField(this, "metadata");
+    __publicField(this, "hasEncoder", false);
+    __publicField(this, "decoderStartToken", -1);
+    // note: we overlay instead of using llama-server default_template_kwargs, because we cannot transfer complex data structure via GLUE
+    // overlay allow mixed data type or nested structure for kwargs
+    __publicField(this, "chatTemplateKwargs", {});
+    var _a, _b, _c;
+    checkEnvironmentCompatible();
+    if (!pathConfig) throw new WllamaError("AssetsPathConfig is required");
+    this.pathConfig = pathConfig;
+    this.config = wllamaConfig;
+    this.cacheManager = (_a = wllamaConfig.cacheManager) != null ? _a : new cache_manager_default();
+    this.modelManager = (_c = wllamaConfig.modelManager) != null ? _c : new ModelManager({
+      cacheManager: this.cacheManager,
+      logger: (_b = wllamaConfig.logger) != null ? _b : console,
+      parallelDownloads: wllamaConfig.parallelDownloads,
+      allowOffline: wllamaConfig.allowOffline
+    });
+    this.setCompat("default");
+  }
+  logger() {
+    var _a;
+    return (_a = this.config.logger) != null ? _a : console;
+  }
+  checkModelLoaded() {
+    if (!this.isModelLoaded()) {
+      throw new WllamaError(
+        "loadModel() is not yet called",
+        "model_not_loaded"
+      );
+    }
+  }
+  /**
+   * Update the WebGPU submission policy without reloading the model.
+   * The native backend reads the values at graph boundaries.
+   */
+  setWebGpuPolicy(policy) {
+    this.checkModelLoaded();
+    this.proxy.setRuntimePolicy(__spreadValues(__spreadValues({}, policy.commandSubmitBatchSize !== void 0 ? { commandSubmitBatchSize: policy.commandSubmitBatchSize } : {}), policy.maxInflightBatches !== void 0 ? { maxInflightBatches: policy.maxInflightBatches } : {}));
+  }
+  /**
+   * Get the libllama version string, e.g. "b6327-4d74393".
+   *
+   * @returns version string embedded at build time.
+   */
+  static getLibllamaVersion() {
+    return LIBLLAMA_VERSION;
+  }
+  /**
+   * Set compatibility options for Wllama.
+   * @param compat Set to null to disable compatibility, or 'default' to use the default compat resources from CDN.
+   * @param mode 'safari' by default; If set to 'firefox_safari', the compat mode will **also** be enabled on Firefox, which will significantly degrade the performance but allow using WebGPU on Firefox.
+   */
+  setCompat(compat, mode = "safari") {
+    if (mode === "safari") {
+      if (isFirefox()) {
+        this.compat = null;
+        return;
+      }
+    }
+    this.compat = compat === "default" ? WasmCompatFromCDN : compat;
+  }
+  /**
+   * Check if the model is loaded via `loadModel()`
+   */
+  isModelLoaded() {
+    return !!this.proxy && !!this.metadata;
+  }
+  /**
+   * Get token ID associated to BOS (begin of sentence) token.
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns -1 if the model is not loaded.
+   */
+  getBOS() {
+    return this.bosToken;
+  }
+  /**
+   * Get token ID associated to EOS (end of sentence) token.
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns -1 if the model is not loaded.
+   */
+  getEOS() {
+    return this.eosToken;
+  }
+  /**
+   * Get token ID associated to EOT (end of turn) token.
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns -1 if the model is not loaded.
+   */
+  getEOT() {
+    return this.eotToken;
+  }
+  /**
+   * Check if a given token is end-of-generation token (e.g. EOS, EOT, etc.)
+   *
+   * @param token the token ID to be checked
+   * @returns true if the token is EOS, EOT, or any other end-of-generation tokens
+   */
+  isTokenEOG(token) {
+    return token === this.eosToken || token === this.eotToken || this.eogTokens.has(token);
+  }
+  /**
+   * Get token ID associated to token used by decoder, to start generating output sequence(only usable for encoder-decoder architecture). In other words, encoder uses normal BOS and decoder uses this token.
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns -1 if the model is not loaded.
+   */
+  getDecoderStartToken() {
+    return this.decoderStartToken;
+  }
+  /**
+   * Get model hyper-parameters and metadata
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns ModelMetadata
+   */
+  getModelMetadata() {
+    this.checkModelLoaded();
+    return this.metadata;
+  }
+  /**
+   * Check if we're currently using multi-thread build.
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns true if multi-thread is used.
+   */
+  isMultithread() {
+    this.checkModelLoaded();
+    return this.useMultiThread;
+  }
+  /**
+   * Get number of threads used in the current context.
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns number of threads
+   */
+  getNumThreads() {
+    this.checkModelLoaded();
+    return this.useMultiThread ? this.nbThreads : 1;
+  }
+  /**
+   * Check if the current model uses encoder-decoder architecture
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns true if multi-thread is used.
+   */
+  isEncoderDecoderArchitecture() {
+    this.checkModelLoaded();
+    return this.hasEncoder;
+  }
+  /**
+   * Must we add BOS token to the tokenized sequence?
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns true if BOS token must be added to the sequence
+   */
+  mustAddBosToken() {
+    this.checkModelLoaded();
+    return this.addBosToken;
+  }
+  /**
+   * Must we add EOS token to the tokenized sequence?
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns true if EOS token must be added to the sequence
+   */
+  mustAddEosToken() {
+    this.checkModelLoaded();
+    return this.addEosToken;
+  }
+  /**
+   * Get the jinja chat template comes with the model. It only available if the original model (before converting to gguf) has the template in `tokenizer_config.json`
+   *
+   * NOTE: This can only being used after `loadModel` is called.
+   *
+   * @returns the jinja template. null if there is no template in gguf
+   */
+  getChatTemplate() {
+    var _a;
+    this.checkModelLoaded();
+    return (_a = this.chatTemplate) != null ? _a : null;
+  }
+  /**
+   * Check if WebGPU is supported by the current environment.
+   * @returns true if WebGPU is supported
+   */
+  isSupportWebGPU() {
+    return isSupportWebGPU();
+  }
+  /**
+   * Load model from a given URL (or a list of URLs, in case the model is splitted into smaller files)
+   * - If the model already been downloaded (via `downloadModel()`), then we will use the cached model
+   * - Else, we download the model from internet
+   * @param modelSourceOrURL
+   * @param params
+   */
+  loadModelFromUrl(_0) {
+    return __async(this, arguments, function* (modelSourceOrURL, params = {}) {
+      var _a;
+      const source = isString(modelSourceOrURL) ? { url: modelSourceOrURL } : modelSourceOrURL;
+      const useCache = (_a = params.useCache) != null ? _a : true;
+      const model = useCache ? yield this.modelManager.getModelOrDownload(source, params) : yield this.modelManager.downloadModel(source, params);
+      const blobs = yield model.open();
+      return yield this.loadModel(blobs, params);
+    });
+  }
+  /**
+   * Load model from a given Hugging Face model ID and file path.
+   *
+   * @param hfOptions
+   * @param params
+   */
+  loadModelFromHF(_0) {
+    return __async(this, arguments, function* (hfOptions, params = {}) {
+      const source = yield getHFModelSource(hfOptions);
+      return yield this.loadModelFromUrl(source, params);
+    });
+  }
+  /**
+   * Load model from a given list of Blob.
+   *
+   * You can pass multiple buffers into the function (in case the model contains multiple shards).
+   *
+   * @param ggufBlobsOrModel Can be either list of Blobs (in case you use local file), or a Model object (in case you use ModelManager)
+   * @param params LoadModelParams
+   */
+  loadModel(_0) {
+    return __async(this, arguments, function* (ggufBlobsOrModel, params = {}) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      const blobs = ggufBlobsOrModel instanceof Model ? yield ggufBlobsOrModel.open() : [...ggufBlobsOrModel];
+      if (blobs.some((b) => b.size === 0)) {
+        throw new WllamaError(
+          "Input model (or splits) must be non-empty Blob or File",
+          "load_error"
+        );
+      }
+      if (!this.pathConfig["default"]) {
+        throw new WllamaError(
+          '"default" is missing from pathConfig',
+          "load_error"
+        );
+      }
+      if (this.proxy) {
+        throw new WllamaError("Module is already initialized", "load_error");
+      }
+      const supportMultiThread = yield isSupportMultiThread();
+      const hwConccurency = Math.floor((navigator.hardwareConcurrency || 1) / 2);
+      const nbThreads = (_a = params.n_threads) != null ? _a : hwConccurency;
+      this.nbThreads = nbThreads;
+      this.useMultiThread = supportMultiThread && nbThreads > 1;
+      const workerResources = this.getWorkerResources();
+      if (params.n_gpu_layers === 0) {
+        workerResources.noWebGPU = true;
+      }
+      this.proxy = new ProxyToWorker(
+        workerResources,
+        this.useMultiThread ? nbThreads : 0,
+        // 0 means disable pthread
+        (_b = this.config.suppressNativeLog) != null ? _b : false,
+        this.logger()
+      );
+      let logLevel = (_c = params.log_level) != null ? _c : 2 /* INFO */;
+      if (this.config.suppressNativeLog) {
+        logLevel = 9999;
+      }
+      const modelFiles = yield prepareBlobs(blobs);
+      yield this.proxy.moduleInit(modelFiles.all);
+      this.logger().debug("Calling wllamaStart...");
+      const startResult = yield this.proxy.wllamaStart();
+      if (!startResult.success) {
+        throw new WllamaError(
+          `Error while calling start function, result = ${startResult}`
+        );
+      }
+      this.logger().debug("Loading model...");
+      const loadResult = yield this.proxy.wllamaAction("load", {
+        _name: "load_req",
+        log_level: logLevel,
+        // if async read is not supported, use mmap; refer to README-dev.md for more details
+        use_mmap: !canUseAsyncFileRead(workerResources.compat),
+        use_mlock: false,
+        n_gpu_layers: (_d = params.n_gpu_layers) != null ? _d : 99999,
+        n_ctx: (_e = params.n_ctx) != null ? _e : 1024,
+        n_threads: this.useMultiThread ? nbThreads : 1,
+        n_ctx_auto: false,
+        // not supported for now
+        mmproj_path: modelFiles.mmproj ? `/models/${MMPROJ_FILE_NAME}` : void 0,
+        model_paths: modelFiles.llm.map((f) => `models/${f.name}`),
+        embeddings: params.embeddings,
+        offload_kqv: params.offload_kqv,
+        n_batch: params.n_batch,
+        n_ubatch: params.n_ubatch,
+        pooling_type: params.pooling_type,
+        rope_scaling_type: params.rope_scaling_type,
+        rope_freq_base: params.rope_freq_base,
+        rope_freq_scale: params.rope_freq_scale,
+        yarn_ext_factor: params.yarn_ext_factor,
+        yarn_attn_factor: params.yarn_attn_factor,
+        yarn_beta_fast: params.yarn_beta_fast,
+        yarn_beta_slow: params.yarn_beta_slow,
+        yarn_orig_ctx: params.yarn_orig_ctx,
+        cache_type_k: params.cache_type_k,
+        cache_type_v: params.cache_type_v,
+        // with unified KV, all sequences share one n_ctx cache, so each request can still use the full context
+        n_parallel: (_f = params.n_parallel) != null ? _f : 4,
+        kv_unified: (_g = params.kv_unified) != null ? _g : true,
+        flash_attn: params.flash_attn,
+        swa_full: params.swa_full,
+        chat_template: params.chat_template,
+        jinja: params.jinja,
+        reasoning: params.reasoning,
+        image_min_tokens: params.image_min_tokens,
+        image_max_tokens: params.image_max_tokens,
+        warmup: params.warmup,
+        no_kv_offload: params.no_kv_offload,
+        mmproj_offload: params.mmproj_offload,
+        cont_batching: params.cont_batching,
+        n_keep: params.n_keep,
+        ctx_shift: params.ctx_shift,
+        cache_idle_slots: params.cache_idle_slots,
+        n_cache_reuse: params.n_cache_reuse,
+        lora_paths: (_h = params.lora_adapters) == null ? void 0 : _h.map((a) => a.path),
+        lora_scales: (_i = params.lora_adapters) == null ? void 0 : _i.map((a) => {
+          var _a2;
+          return (_a2 = a.scale) != null ? _a2 : 1;
+        }),
+        lora_init_without_apply: params.lora_init_without_apply,
+        spec_draft_model: params.spec_draft_model,
+        spec_draft_ngl: params.spec_draft_ngl,
+        spec_draft_n_max: params.spec_draft_n_max,
+        spec_draft_n_min: params.spec_draft_n_min,
+        spec_draft_p_min: params.spec_draft_p_min,
+        spec_draft_threads: params.spec_draft_threads,
+        spec_draft_threads_batch: params.spec_draft_threads_batch,
+        kv_overrides_keys: params.kv_overrides ? Object.keys(params.kv_overrides) : void 0,
+        kv_overrides_vals: params.kv_overrides ? Object.values(params.kv_overrides) : void 0,
+        reasoning_budget_tokens: params.reasoning_budget_tokens,
+        reasoning_budget_message: params.reasoning_budget_message,
+        reasoning_format: params.reasoning_format,
+        skip_chat_parsing: params.skip_chat_parsing,
+        prefill_assistant: params.prefill_assistant
+      });
+      const loadedCtxInfo = __spreadProps(__spreadValues({}, loadResult), {
+        metadata: {}
+      });
+      for (let i = 0; i < loadResult.metadata_key.length; i++) {
+        loadedCtxInfo.metadata[loadResult.metadata_key[i]] = loadResult.metadata_val[i];
+      }
+      this.seed = params.seed;
+      this.bosToken = loadedCtxInfo.token_bos;
+      this.eosToken = loadedCtxInfo.token_eos;
+      this.eotToken = loadedCtxInfo.token_eot;
+      this.useEmbeddings = !!params.embeddings;
+      this.useRerank = params.pooling_type == "rank";
+      this.metadata = {
+        hparams: {
+          nVocab: loadedCtxInfo.n_vocab,
+          nCtxTrain: loadedCtxInfo.n_ctx_train,
+          nEmbd: loadedCtxInfo.n_embd,
+          nLayer: loadedCtxInfo.n_layer
+        },
+        meta: loadedCtxInfo.metadata
+      };
+      this.hasEncoder = !!loadedCtxInfo.has_encoder;
+      this.decoderStartToken = loadedCtxInfo.token_decoder_start;
+      this.addBosToken = loadedCtxInfo.add_bos_token;
+      this.addEosToken = loadedCtxInfo.add_eos_token;
+      this.chatTemplate = loadedCtxInfo.metadata["tokenizer.chat_template"];
+      this.loadedContextInfo = loadedCtxInfo;
+      this.eogTokens = new Set(loadedCtxInfo.list_tokens_eog);
+      this.mediaMarker = loadedCtxInfo.media_marker;
+      this.chatTemplateKwargs = (_j = params.default_template_kwargs) != null ? _j : {};
+      this.logger().debug({ loadedCtxInfo });
+    });
+  }
+  getLoadedContextInfo() {
+    this.checkModelLoaded();
+    if (!this.loadedContextInfo) {
+      throw new WllamaError("Loaded context info is not available");
+    }
+    return __spreadValues({}, this.loadedContextInfo);
+  }
+  //////////////////////////////////////////////
+  // High level API
+  /**
+   * Calculate embedding vector for a given text.
+   * By default, BOS and EOS tokens will be added automatically. You can use the "skipBOS" and "skipEOS" option to disable it.
+   * @param options OAI-compatible embedding creation options
+   * @returns OAI-compatible embedding response
+   */
+  createEmbedding(options) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      if (!this.useEmbeddings) {
+        throw new WllamaError(
+          "Embeddings is not enabled. Please set it via LoadModelParams.embeddings"
+        );
+      }
+      const result = yield this.proxy.wllamaAction(
+        "embedding",
+        {
+          _name: "embd_req",
+          data_json: JSON.stringify(options),
+          files: []
+          // TODO: support file input
+        }
+      );
+      if (!result.success) {
+        throw new WllamaError(
+          "Model failed to start inference",
+          "inference_error"
+        );
+      }
+      return yield this.getResponse(options, false, result.req_id);
+    });
+  }
+  /**
+   * Rerank a list of documents against a query.
+   * Requires the model to be loaded with embeddings: true and pooling_type: 'rank'.
+   * @param options Reranking options (query, documents, top_n)
+   * @returns Reranking response with relevance scores sorted highest first
+   */
+  createRerank(options) {
+    return __async(this, null, function* () {
+      var _a, _b;
+      this.checkModelLoaded();
+      if (!this.useEmbeddings || !this.useRerank) {
+        throw new WllamaError(
+          "Rerank is not enabled. Please set it via LoadModelParams: embeddings = true and pooling_type = rank"
+        );
+      }
+      const top_n = (_a = options.top_n) != null ? _a : options.documents.length;
+      let totalTokens = 0;
+      const rawResults = [];
+      for (let i = 0; i < options.documents.length; i++) {
+        const result = yield this.proxy.wllamaAction("rerank", {
+          _name: "rrnk_req",
+          data_json: JSON.stringify({
+            query: options.query,
+            document: options.documents[i]
+          })
+        });
+        if (!result.success) {
+          throw new WllamaError(
+            "Model failed to start reranking",
+            "inference_error"
+          );
+        }
+        const { score, tokens_evaluated } = yield this.getRerankResult(
+          result.req_id
+        );
+        totalTokens += tokens_evaluated;
+        rawResults.push({ index: i, score });
+      }
+      rawResults.sort((a, b) => b.score - a.score);
+      return {
+        model: (_b = this.getModelMetadata().meta["general.name"]) != null ? _b : "",
+        object: "list",
+        usage: { prompt_tokens: totalTokens, total_tokens: totalTokens },
+        results: rawResults.slice(0, top_n).map(({ index, score }) => ({
+          index,
+          relevance_score: score
+        }))
+      };
+    });
+  }
+  createChatCompletion(options) {
+    return __async(this, null, function* () {
+      var _a;
+      if (Object.keys(this.chatTemplateKwargs).length > 0) {
+        options = __spreadProps(__spreadValues({}, options), {
+          chat_template_kwargs: __spreadValues(__spreadValues({}, this.chatTemplateKwargs), (_a = options.chat_template_kwargs) != null ? _a : {})
+        });
+      }
+      if (options.stream && options.onData) {
+        yield this.createCompletionImpl(options);
+      } else if (options.stream) {
+        return yield this.createCompletionGenerator(options);
+      } else {
+        return yield this.createCompletionImpl(__spreadProps(__spreadValues({}, options), { stream: false }));
+      }
+    });
+  }
+  createCompletion(options) {
+    return __async(this, null, function* () {
+      if (options.stream && options.onData) {
+        yield this.createCompletionImpl(options);
+      } else if (options.stream) {
+        return yield this.createCompletionGenerator(options);
+      } else {
+        return yield this.createCompletionImpl(__spreadProps(__spreadValues({}, options), { stream: false }));
+      }
+    });
+  }
+  /**
+   * Private implementation of createCompletion
+   */
+  createCompletionImpl(options) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      const isStream = !!options.stream;
+      const isChat = !!options.messages;
+      const customOpt = {};
+      if (this.seed !== void 0) {
+        customOpt.seed = this.seed;
+      }
+      let files = [];
+      if (isChat) {
+        const tmp = this.prepareMultimodalInput(
+          options
+        );
+        options = tmp.params;
+        files = tmp.files;
+      }
+      const result = yield this.proxy.wllamaAction(
+        "completion",
+        {
+          _name: "cmpl_req",
+          is_chat: isChat,
+          data_json: JSON.stringify(__spreadValues(__spreadValues({}, options), customOpt)),
+          files: files.map((f) => new Uint8Array(f))
+        }
+      );
+      if (!result.success) {
+        throw new WllamaError(
+          "Model failed to start inference",
+          "inference_error"
+        );
+      }
+      return yield this.getResponse(
+        options,
+        isStream,
+        result.req_id
+      );
+    });
+  }
+  /**
+   * Same with `createCompletion`, but returns an async iterator instead.
+   * Only called when stream=true and no onData is provided.
+   */
+  createCompletionGenerator(options) {
+    return new Promise((resolve) => {
+      const createGenerator = cbToAsyncIter(
+        (callback) => {
+          this.createCompletionImpl(__spreadProps(__spreadValues({}, options), {
+            onData: (chunk) => callback(chunk)
+          })).then(() => callback(void 0, true)).catch((err) => callback(void 0, false, err));
+        }
+      );
+      resolve(createGenerator());
+    });
+  }
+  /**
+   * Whether the currently loaded model supports a specific input modality (e.g. image or audio).
+   * @param modality
+   * @returns
+   */
+  supportInputModality(modality) {
+    this.checkModelLoaded();
+    if (modality === "image") {
+      return !!this.loadedContextInfo.has_image_input;
+    } else if (modality === "audio") {
+      return !!this.loadedContextInfo.has_audio_input;
+    } else {
+      throw new WllamaError(
+        "Unsupported modality: " + modality,
+        "unknown_error"
+      );
+    }
+  }
+  /**
+   * Unload the model and free all memory.
+   *
+   * Note: This function will NOT crash if model is not yet loaded
+   */
+  exit() {
+    return __async(this, null, function* () {
+      var _a;
+      yield (_a = this.proxy) == null ? void 0 : _a.wllamaExit();
+      this.proxy = null;
+    });
+  }
+  /**
+   * [FOR DEBUGGING ONLY] Run ggml backend ops tests without loading any model.
+   *
+   * Initializes the wasm runtime, executes `test-backend-ops` with the given args, then shuts down.
+   *
+   * For more info, please refer to guides/debug.md
+   *
+   * @param args Arguments forwarded to test-backend-ops (e.g. ["-o", "ADD"])
+   * @returns retcode (0 = all tests passed) and success flag
+   */
+  testBackendOps() {
+    return __async(this, arguments, function* (args = []) {
+      var _a;
+      if (!this.pathConfig["default"]) {
+        throw new WllamaError(
+          '"default" is missing from pathConfig',
+          "load_error"
+        );
+      }
+      if (!(yield isSupportMultiThread())) {
+        throw new WllamaError(
+          "Multi-threading is required to run backend ops tests, but it is not supported in the current environment."
+        );
+      }
+      const tmpProxy = new ProxyToWorker(
+        this.getWorkerResources(),
+        0,
+        // single-thread; no model needed
+        (_a = this.config.suppressNativeLog) != null ? _a : false,
+        this.logger()
+      );
+      try {
+        yield tmpProxy.moduleInit([]);
+        const startResult = yield tmpProxy.wllamaStart();
+        if (!startResult.success) {
+          throw new WllamaError(
+            `Error while calling start function, result = ${startResult}`
+          );
+        }
+        const result = yield tmpProxy.wllamaAction(
+          "test_backend_ops",
+          { _name: "tbop_req", args: ["test-backend-ops", ...args] }
+        );
+        return { retcode: result.retcode, success: result.success };
+      } finally {
+        yield tmpProxy.wllamaExit();
+      }
+    });
+  }
+  //////////////////////////////////////////////
+  // Low level API
+  // TODO: add back
+  /**
+   * get debug info
+   */
+  _getDebugInfo() {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      return yield this.proxy.wllamaDebug();
+    });
+  }
+  //////////////////////////////////////////////
+  // Utils
+  jsonDecode(data_json) {
+    try {
+      return JSON.parse(data_json);
+    } catch (e) {
+      this.logger().error("Failed to parse JSON:", data_json);
+      throw new WllamaError("Failed to parse model output", "inference_error");
+    }
+  }
+  prepareMultimodalInput(params) {
+    const msg = params.messages;
+    const msgNew = [];
+    const files = [];
+    for (const m of msg) {
+      if (Array.isArray(m.content)) {
+        const newContent = [];
+        for (const c of m.content) {
+          if (c.type === "text") {
+            newContent.push(c);
+          } else {
+            if (!this.mediaMarker) {
+              throw new WllamaError(
+                "Media marker is undefined",
+                "inference_error"
+              );
+            }
+            files.push(c.data);
+            newContent.push({
+              type: "text",
+              text: this.mediaMarker
+            });
+          }
+        }
+        msgNew.push(__spreadProps(__spreadValues({}, m), {
+          content: newContent
+        }));
+      } else {
+        msgNew.push(m);
+      }
+    }
+    return {
+      params: __spreadProps(__spreadValues({}, params), {
+        messages: msgNew
+      }),
+      files
+    };
+  }
+  // release the slot occupied by the request; cancelling an already-finished request is a no-op
+  // bounded serving: copy the KV state of an idle slot out of the context
+  exportSlotState(_0) {
+    return __async(this, arguments, function* (slotId, options = {}) {
+      var _a;
+      this.checkModelLoaded();
+      const res = yield this.proxy.wllamaAction("kv_save", {
+        _name: "kvsv_req",
+        slot_id: slotId,
+        drop: (_a = options.drop) != null ? _a : true
+      });
+      if (!res.success) {
+        throw new WllamaError(
+          `Failed to export slot state (status ${res.status})`,
+          "inference_error"
+        );
+      }
+      return {
+        slotId,
+        kv: res.data,
+        tokens: [...res.tokens],
+        tokenCount: res.n_tokens,
+        byteLength: res.n_bytes
+      };
+    });
+  }
+  // bounded serving: install a previously exported KV state into an idle slot
+  importSlotState(slotId, state) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      const res = yield this.proxy.wllamaAction("kv_load", {
+        _name: "kvld_req",
+        slot_id: slotId,
+        tokens: [...state.tokens],
+        data: state.kv
+      });
+      if (!res.success) {
+        throw new WllamaError(
+          `Failed to import slot state (status ${res.status})`,
+          "inference_error"
+        );
+      }
+      return res.n_tokens;
+    });
+  }
+  // bounded serving: release the KV state of an idle slot without exporting it
+  dropSlotState(slotId) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      const res = yield this.proxy.wllamaAction("kv_drop", {
+        _name: "kvdr_req",
+        slot_id: slotId
+      });
+      if (!res.success) {
+        throw new WllamaError(
+          `Failed to drop slot state (status ${res.status})`,
+          "inference_error"
+        );
+      }
+      return res.n_tokens;
+    });
+  }
+  // tier two: park the sequence state inside the wasm heap and release the slot,
+  // so a parked node costs the host one handle and no heap copy
+  parkSlotState(slotId) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      const res = yield this.proxy.wllamaAction("kv_park", {
+        _name: "kvpk_req",
+        slot_id: slotId
+      });
+      if (!res.success) {
+        throw new WllamaError(
+          `Failed to park slot state (status ${res.status})`,
+          "inference_error"
+        );
+      }
+      return {
+        handle: res.handle,
+        tokenCount: res.n_tokens,
+        byteLength: res.n_bytes
+      };
+    });
+  }
+  // tier two: install a parked state into an idle slot without re-prefilling it
+  resumeSlotState(handle, slotId) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      const res = yield this.proxy.wllamaAction("kv_resume", {
+        _name: "kvrs_req",
+        handle,
+        slot_id: slotId
+      });
+      if (!res.success) {
+        throw new WllamaError(
+          `Failed to resume parked slot state (status ${res.status})`,
+          "inference_error"
+        );
+      }
+      return res.n_tokens;
+    });
+  }
+  // tier three: serialize a parked state out of the wasm heap. The native copy
+  // stays until releaseSlotState() is called, so a failed write loses no state.
+  readParkedSlotState(handle) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      const res = yield this.proxy.wllamaAction("kv_read", {
+        _name: "kvrq_req",
+        handle
+      });
+      if (!res.success) {
+        throw new WllamaError(
+          `Failed to read parked slot state (status ${res.status})`,
+          "inference_error"
+        );
+      }
+      return {
+        handle,
+        kv: res.data,
+        tokens: [...res.tokens],
+        tokenCount: res.n_tokens,
+        byteLength: res.n_bytes
+      };
+    });
+  }
+  // tier three: drop the wasm-heap copy once its serialized form is durable
+  releaseParkedSlotState(handle) {
+    return __async(this, null, function* () {
+      this.checkModelLoaded();
+      const res = yield this.proxy.wllamaAction("kv_release", {
+        _name: "kvfd_req",
+        handle
+      });
+      if (!res.success) {
+        throw new WllamaError(
+          `Failed to release parked slot state (status ${res.status})`,
+          "inference_error"
+        );
+      }
+      return { tokenCount: res.n_tokens, byteLength: res.n_bytes };
+    });
+  }
+  cancelRequest(reqId) {
+    return __async(this, null, function* () {
+      try {
+        yield this.proxy.wllamaAction("cancel", {
+          _name: "cncl_req",
+          req_id: reqId
+        });
+      } catch (e) {
+        this.logger().warn("Failed to cancel request", reqId, e);
+      }
+    });
+  }
+  getRerankResult(reqId) {
+    return __async(this, null, function* () {
+      let completed = false;
+      try {
+        while (true) {
+          const chunk = yield this.proxy.wllamaAction(
+            "get_result",
+            { _name: "gres_req", req_id: reqId }
+          );
+          const jsonString = chunk.data_json;
+          if (jsonString && jsonString.length > 0) {
+            if (chunk.is_error) {
+              const jsonData = this.jsonDecode(jsonString);
+              throw new WllamaError(
+                jsonData.message || "Unknown reranking error",
+                "inference_error"
+              );
+            }
+            completed = true;
+            return this.jsonDecode(jsonString);
+          }
+          if (!chunk.has_more) {
+            completed = true;
+            break;
+          }
+        }
+        throw new WllamaError("No reranking result received", "inference_error");
+      } finally {
+        if (!completed) {
+          yield this.cancelRequest(reqId);
+        }
+      }
+    });
+  }
+  getResponse(options, isStream, reqId) {
+    return __async(this, null, function* () {
+      var _a, _b;
+      let finalResult = null;
+      let completed = false;
+      try {
+        while (true) {
+          if ((_a = options.abortSignal) == null ? void 0 : _a.aborted) {
+            throw new WllamaAbortError();
+          }
+          const result_chunk = yield this.proxy.wllamaAction(
+            "get_result",
+            {
+              _name: "gres_req",
+              req_id: reqId
+            }
+          );
+          const jsonString = result_chunk.data_json;
+          if (!jsonString || jsonString.length === 0) {
+            if (!result_chunk.has_more) {
+              completed = true;
+              break;
+            } else {
+              continue;
+            }
+          }
+          if (jsonString == "null") {
+            continue;
+          }
+          let jsonData = this.jsonDecode(jsonString);
+          finalResult = jsonData;
+          if (result_chunk.is_error) {
+            this.logger().error("Model returned an error:", jsonData);
+            throw new WllamaError(
+              jsonData.message || "Unknown inference error",
+              "inference_error"
+            );
+          }
+          if (isStream) {
+            if (!Array.isArray(jsonData)) {
+              jsonData = [jsonData];
+            }
+            for (const chunk of jsonData) {
+              (_b = options.onData) == null ? void 0 : _b.call(options, chunk);
+              finalResult = chunk;
+            }
+          }
+          if (!result_chunk.has_more) {
+            completed = true;
+            break;
+          }
+        }
+      } finally {
+        if (!completed) {
+          yield this.cancelRequest(reqId);
+        }
+      }
+      return finalResult;
+    });
+  }
+  getWorkerResources() {
+    const workerResources = __spreadValues({
+      wasmPath: absoluteUrl(this.pathConfig["default"]),
+      compat: false
+    }, this.config.runtimeEnv ? { runtimeEnv: __spreadValues({}, this.config.runtimeEnv) } : {});
+    if (needCompat()) {
+      if (!this.compat) {
+        this.logger().warn(
+          "Not using compat mode" + (isFirefox() ? " (expected on Firefox - WebGPU will be disabled)" : "")
+        );
+      } else {
+        const isUsingDefault = this.compat.worker === WasmCompatFromCDN.worker && this.compat.wasm === WasmCompatFromCDN.wasm;
+        if (isUsingDefault) {
+          this.logger().warn(
+            "Compatibility mode is activated, using resources from CDN. To use local resources, please refer to @wllama/wllama-compat package."
+          );
+          this.logger().warn(
+            "IMPORTANT: Performance will be significantly degraded in compatibility mode."
+          );
+        }
+        workerResources.wasmPath = absoluteUrl(this.compat.wasm);
+        workerResources.jsPath = this.compat.worker;
+        workerResources.compat = true;
+      }
+    }
+    if (isFirefox()) {
+      if (workerResources.compat) {
+        this.logger().warn(
+          'Using compat mode on Firefox, performance will be significantly degraded; Consider enabling "javascript.options.wasm_js_promise_integration" in "about:config".'
+        );
+      } else if (!isSupportJSPI()) {
+        this.logger().warn(
+          'WebGPU is disabled on Firefox due to missing JSPI support. Please consider enabling compat mode, or enabling "javascript.options.wasm_js_promise_integration" in "about:config".'
+        );
+      }
+    }
+    return workerResources;
+  }
+};
+export {
+  CacheManager,
+  LogLevel,
+  LoggerWithoutDebug,
+  Model,
+  ModelManager,
+  ModelValidationStatus,
+  POLYFILL_ETAG,
+  Wllama,
+  WllamaAbortError,
+  WllamaError,
+  WllamaRuntimeError,
+  getHFFileSHA256,
+  getHFModelSource,
+  isValidGgufFile
+};

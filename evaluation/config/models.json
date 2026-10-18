@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "directory": "public/models",
+  "models": [
+    {
+      "id": "llama-3.2-1b-instruct",
+      "label": "Llama 3.2 1B Instruct Q4_K_M",
+      "family": "llama",
+      "sizeClass": "small",
+      "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "sizeBytes": 807694368,
+      "sha256": "3f5a22426976ab26cfe84dba63c1d08391717abb1af893e10f1b2968d862dcc1",
+      "sourceUrl": "https://huggingface.co/unsloth/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "downloadUrl": "https://hf-mirror.com/unsloth/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "license": "Llama 3.2 Community License",
+      "promptFormat": "llama3-chat",
+      "runtime": {
+        "nCtx": 2048,
+        "nBatch": 128,
+        "nParallel": 4
+      },
+      "usage": ["e2e", "ablation"]
+    },
+    {
+      "id": "llama-3.2-3b-instruct",
+      "label": "Llama 3.2 3B Instruct Q4_K_M",
+      "family": "llama",
+      "sizeClass": "large",
+      "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "sizeBytes": 2019377600,
+      "sha256": "6c99cc00ae910f6a532a80022cb4bc1939094527a089c29294b841c0bd87f74d",
+      "sourceUrl": "https://huggingface.co/unsloth/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "downloadUrl": "https://hf-mirror.com/unsloth/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "license": "Llama 3.2 Community License",
+      "promptFormat": "llama3-chat",
+      "runtime": {
+        "nCtx": 2048,
+        "nBatch": 128,
+        "nParallel": 4
+      },
+      "usage": ["e2e"]
+    },
+    {
+      "id": "qwen2.5-1.5b-instruct",
+      "label": "Qwen2.5 1.5B Instruct Q4_K_M",
+      "family": "qwen",
+      "sizeClass": "small",
+      "filename": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+      "sizeBytes": 1117320736,
+      "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "downloadUrl": "https://hf-mirror.com/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "license": "Apache-2.0",
+      "promptFormat": "qwen-chatml",
+      "runtime": {
+        "nCtx": 2048,
+        "nBatch": 128,
+        "nParallel": 4
+      },
+      "usage": ["e2e", "ablation"]
+    },
+    {
+      "id": "qwen2.5-3b-instruct",
+      "label": "Qwen2.5 3B Instruct Q4_K_M",
+      "family": "qwen",
+      "sizeClass": "large",
+      "filename": "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+      "sizeBytes": 2104932768,
+      "sha256": "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "downloadUrl": "https://hf-mirror.com/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+      "license": "Qwen Research License",
+      "promptFormat": "qwen-chatml",
+      "runtime": {
+        "nCtx": 2048,
+        "nBatch": 128,
+        "nParallel": 4
+      },
+      "usage": ["e2e"]
+    }
+  ]
+}

@@ -1,0 +1,471 @@
+diff --git a/tools/server/server-common.cpp b/tools/server/server-common.cpp
+index c30955e..cd70d94 100644
+--- a/tools/server/server-common.cpp
++++ b/tools/server/server-common.cpp
+@@ -79,6 +79,13 @@ json server_slot_stats::to_json() const {
+         {"predicted_per_second",   n_gen_tps()},
+     };
+ 
++    if (bounded_stop) {
++        base["bounded_stop"] = true;
++        if (!bounded_stop_reason.empty()) {
++            base["bounded_stop_reason"] = bounded_stop_reason;
++        }
++    }
++
+     if (n_draft_tokens > 0) {
+         base["draft_n"]          = n_draft_tokens;
+         base["draft_n_accepted"] = n_draft_accepted;
+diff --git a/tools/server/server-common.h b/tools/server/server-common.h
+index 6c681a2..725a2cb 100644
+--- a/tools/server/server-common.h
++++ b/tools/server/server-common.h
+@@ -354,6 +354,13 @@ struct server_slot_stats {
+     uint64_t n_prompt_processed = 0;
+     uint64_t n_gen              = 0;
+ 
++    // bounded serving: the task stopped at a token boundary because it used
++    // up its per-unit time budget, rather than because the model finished
++    bool bounded_stop = false;
++    // exact native budget that closed the task, surfaced alongside
++    // bounded_stop so the host does not have to infer it from counters
++    std::string bounded_stop_reason;
++
+     // speculative decoding stats
+     // note: the per-position breakdown lives in server_slot, it is not needed in a task result
+     uint64_t n_draft_tokens      = 0;
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index f547735..323b560 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -19,6 +19,7 @@
+ 
+ #include <algorithm>
+ #include <cstddef>
++#include <cstring>
+ #include <cinttypes>
+ #include <exception>
+ #include <memory>
+@@ -1519,6 +1520,191 @@ private:
+         return nullptr;
+     }
+ 
++    // bounded serving: layout of the blob produced by slot_state_export()
++    //   [0:4)   magic "SLST"
++    //   [4:8)   format version
++    //   [8:16)  main context state size in bytes
++    //   [16:24) draft context state size in bytes
++    //   [24:..) main context state, then optional draft context state
++    static constexpr uint32_t SLOT_STATE_MAGIC   = 0x54534c53U;
++    static constexpr uint32_t SLOT_STATE_VERSION = 1;
++    static constexpr size_t   SLOT_STATE_HEADER  = 24;
++
++    bool slot_state_export(int id_slot, server_slot_state & out, bool clear_state) {
++        out = server_slot_state();
++
++        server_slot * slot = get_slot_by_id(id_slot);
++        if (slot == nullptr) {
++            out.status = SERVER_SLOT_STATE_INVALID_SLOT;
++            return false;
++        }
++        if (slot->is_processing()) {
++            out.status = SERVER_SLOT_STATE_BUSY;
++            out.n_tokens = (int32_t) slot->prompt.tokens.size();
++            return false;
++        }
++        if (slot->prompt.tokens.size() == 0) {
++            out.status = SERVER_SLOT_STATE_EMPTY;
++            return false;
++        }
++
++        const size_t size_main = llama_state_seq_get_size_ext(ctx_tgt, slot->id, LLAMA_STATE_SEQ_FLAGS_NONE);
++        const size_t size_drft = ctx_dft == nullptr ? 0 : llama_state_seq_get_size_ext(ctx_dft, slot->id, LLAMA_STATE_SEQ_FLAGS_NONE);
++        if (size_main == 0) {
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++
++        std::vector<char> packed;
++        try {
++            packed = slot->prompt.tokens.serialize();
++        } catch (const std::exception & err) {
++            SRV_ERR("unable to serialize slot prompt: %s\n", err.what());
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++        if (packed.empty() || packed.size() % sizeof(llama_token) != 0) {
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++
++        out.kv.resize(SLOT_STATE_HEADER + size_main + size_drft);
++        const uint32_t version       = SLOT_STATE_VERSION;
++        const uint64_t size_main_u64 = size_main;
++        const uint64_t size_drft_u64 = size_drft;
++        std::memcpy(out.kv.data(),      &SLOT_STATE_MAGIC, sizeof(SLOT_STATE_MAGIC));
++        std::memcpy(out.kv.data() + 4,  &version,          sizeof(version));
++        std::memcpy(out.kv.data() + 8,  &size_main_u64,    sizeof(size_main_u64));
++        std::memcpy(out.kv.data() + 16, &size_drft_u64,    sizeof(size_drft_u64));
++
++        uint8_t * dst = out.kv.data() + SLOT_STATE_HEADER;
++
++        const size_t n_main = llama_state_seq_get_data_ext(ctx_tgt, dst, size_main, slot->id, LLAMA_STATE_SEQ_FLAGS_NONE);
++        if (n_main != size_main) {
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++        if (size_drft > 0) {
++            const size_t n_drft = llama_state_seq_get_data_ext(ctx_dft, dst + size_main, size_drft, slot->id, LLAMA_STATE_SEQ_FLAGS_NONE);
++            if (n_drft != size_drft) {
++                out.status = SERVER_SLOT_STATE_INTERNAL;
++                return false;
++            }
++        }
++
++        const llama_token * packed_tokens = reinterpret_cast<const llama_token *>(packed.data());
++        out.tokens.assign(packed_tokens, packed_tokens + packed.size() / sizeof(llama_token));
++        out.n_tokens = (int32_t) slot->prompt.tokens.size();
++
++        if (clear_state) {
++            // release the slot's share of the KV cache so the host can park the state elsewhere
++            slot->prompt_clear();
++        }
++
++        out.status = SERVER_SLOT_STATE_OK;
++        return true;
++    }
++
++    bool slot_state_import(int id_slot, const server_slot_state & in, server_slot_state & out) {
++        out = server_slot_state();
++
++        server_slot * slot = get_slot_by_id(id_slot);
++        if (slot == nullptr) {
++            out.status = SERVER_SLOT_STATE_INVALID_SLOT;
++            return false;
++        }
++        if (slot->is_processing()) {
++            out.status = SERVER_SLOT_STATE_BUSY;
++            out.n_tokens = (int32_t) slot->prompt.tokens.size();
++            return false;
++        }
++        if (in.kv.size() < SLOT_STATE_HEADER || in.tokens.empty()) {
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++
++        uint32_t magic     = 0;
++        uint32_t version   = 0;
++        uint64_t size_main = 0;
++        uint64_t size_drft = 0;
++        std::memcpy(&magic,     in.kv.data(),      sizeof(magic));
++        std::memcpy(&version,   in.kv.data() + 4,  sizeof(version));
++        std::memcpy(&size_main, in.kv.data() + 8,  sizeof(size_main));
++        std::memcpy(&size_drft, in.kv.data() + 16, sizeof(size_drft));
++
++        if (magic != SLOT_STATE_MAGIC || version != SLOT_STATE_VERSION || size_main == 0) {
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++        if (in.kv.size() != SLOT_STATE_HEADER + size_main + size_drft) {
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++        if (size_drft > 0 && ctx_dft == nullptr) {
++            // the parked state carries a draft context that this instance cannot restore
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++
++        server_tokens restored;
++        try {
++            restored = server_tokens::deserialize(in.tokens, mctx != nullptr);
++        } catch (const std::exception & err) {
++            SRV_ERR("unable to deserialize slot prompt: %s\n", err.what());
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++        if (restored.size() == 0 || !restored.validate(ctx_tgt)) {
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++
++        // drop whatever the slot currently holds before installing the parked state
++        slot->prompt_clear();
++
++        const size_t n_main = llama_state_seq_set_data_ext(ctx_tgt, in.kv.data() + SLOT_STATE_HEADER, (size_t) size_main, slot->id, LLAMA_STATE_SEQ_FLAGS_NONE);
++        if (n_main == 0) {
++            slot->prompt_clear();
++            out.status = SERVER_SLOT_STATE_INTERNAL;
++            return false;
++        }
++        if (size_drft > 0) {
++            const size_t n_drft = llama_state_seq_set_data_ext(ctx_dft, in.kv.data() + SLOT_STATE_HEADER + size_main, (size_t) size_drft, slot->id, LLAMA_STATE_SEQ_FLAGS_NONE);
++            if (n_drft == 0) {
++                slot->prompt_clear();
++                out.status = SERVER_SLOT_STATE_INTERNAL;
++                return false;
++            }
++        }
++
++        // restore the prompt bookkeeping so the next request on this slot reuses the restored prefix
++        slot->prompt.tokens = std::move(restored);
++
++        out.status   = SERVER_SLOT_STATE_OK;
++        out.n_tokens = (int32_t) slot->prompt.tokens.size();
++        return true;
++    }
++
++    bool slot_state_clear(int id_slot, server_slot_state & out) {
++        out = server_slot_state();
++
++        server_slot * slot = get_slot_by_id(id_slot);
++        if (slot == nullptr) {
++            out.status = SERVER_SLOT_STATE_INVALID_SLOT;
++            return false;
++        }
++        if (slot->is_processing()) {
++            out.status = SERVER_SLOT_STATE_BUSY;
++            out.n_tokens = (int32_t) slot->prompt.tokens.size();
++            return false;
++        }
++
++        out.n_tokens = (int32_t) slot->prompt.tokens.size();
++        slot->prompt_clear();
++        out.status = SERVER_SLOT_STATE_OK;
++        return true;
++    }
++
+     server_slot * get_slot_by_cmpl_id(const std::string & cmpl_id) {
+         if (cmpl_id.empty()) {
+             return nullptr;
+@@ -1889,6 +2075,55 @@ private:
+             SLT_DBG(slot, "stopped by limit, n_gen = %d, n_predict = %d\n", (int) slot.stats.n_gen, slot.task->params.n_predict);
+         }
+ 
++        // bounded serving: a per-unit token budget closes the task at a token
++        // boundary. This is deterministic on every backend, unlike the
++        // wall-clock budget, because it does not depend on how llama.cpp
++        // accumulates prediction time between tokens. The slot keeps its
++        // prompt and KV cache, so the next unit resumes where this one
++        // stopped and the host scheduler regains control without aborting.
++        if (slot.has_next_token &&
++                slot.task->params.n_decode_max > 0 &&
++                slot.stats.n_gen >= (uint64_t) slot.task->params.n_decode_max) {
++            slot.stop              = STOP_TYPE_LIMIT;
++            slot.has_next_token    = false;
++            slot.stats.bounded_stop = true;
++            slot.stats.bounded_stop_reason = "decode-budget";
++
++            SLT_DBG(slot, "stopped by unit token budget, n_gen = %d, n_decode_max = %d\n", (int) slot.stats.n_gen, slot.task->params.n_decode_max);
++        }
++
++        // bounded serving: enforce a wall-clock quantum against the full
++        // task lifetime, not only the accumulated prediction timer. The
++        // check still runs at a token boundary, so the slot can be resumed
++        // without discarding the KV cache.
++        if (slot.has_next_token &&
++                slot.task->params.t_unit_max_ms > 0 &&
++                slot.stats.t_elapsed_us() >= slot.task->params.t_unit_max_ms * 1000) {
++            slot.stop              = STOP_TYPE_LIMIT;
++            slot.has_next_token    = false;
++            slot.stats.bounded_stop = true;
++            slot.stats.bounded_stop_reason = "unit-time-budget";
++
++            SLT_DBG(slot, "stopped by unit wall-clock budget, n_gen = %d, elapsed = %.1f ms, budget = %" PRId64 " ms\n",
++                    (int) slot.stats.n_gen, slot.stats.t_elapsed_us() / 1000.0, slot.task->params.t_unit_max_ms);
++        }
++
++        // bounded serving: a per-unit wall-clock budget stops the task at a
++        // token boundary. The slot keeps its prompt and KV cache, so the next
++        // unit resumes without prefill and the host scheduler regains control
++        // without having to abort an in-flight request.
++        if (slot.has_next_token &&
++                slot.task->params.t_max_predict_ms > 0 &&
++                slot.stats.t_gen_ms() >= (double) slot.task->params.t_max_predict_ms) {
++            slot.stop               = STOP_TYPE_LIMIT;
++            slot.has_next_token     = false;
++            slot.stats.bounded_stop = true;
++            slot.stats.bounded_stop_reason = "predict-time-budget";
++
++            SLT_DBG(slot, "stopped by unit time budget, n_gen = %d, t_gen = %.1f ms, budget = %d ms\n",
++                    (int) slot.stats.n_gen, slot.stats.t_gen_ms(), (int) slot.task->params.t_max_predict_ms);
++        }
++
+         if (slot.has_new_line) {
+             // require that each new line has a whitespace prefix (i.e. indentation) of at least slot.params.n_indent
+             if (slot.task->params.n_indent > 0) {
+@@ -3495,6 +3730,15 @@ private:
+ 
+                     // add prompt tokens for processing in the current batch
+                     while (slot.prompt.n_tokens() < slot.task->n_tokens() && batch.size() < n_batch) {
++                        // bounded serving: stop this task at a native prompt-chunk
++                        // boundary. The slot keeps the evaluated prefix, so the
++                        // next request can continue from its KV cache.
++                        if (slot.task->params.n_prefill_max > 0 &&
++                            slot.stats.n_prompt_processed + (batch.size() - n_tokens_prev) >=
++                                (size_t) slot.task->params.n_prefill_max) {
++                            break;
++                        }
++
+                         // get next token to process
+                         llama_token cur_tok = input_tokens[slot.prompt.n_tokens()];
+                         if (cur_tok == LLAMA_TOKEN_NULL) {
+@@ -3783,6 +4027,25 @@ private:
+                 }
+             }
+ 
++            // bounded serving: the request only paid for one prompt chunk.
++            // Finish this task while keeping the prompt and KV in the slot;
++            // the next request resumes from the cached prefix.
++            if (!slot.stats.bounded_stop &&
++                slot.state == SLOT_STATE_PROCESSING_PROMPT &&
++                slot.task->params.n_prefill_max > 0 &&
++                slot.stats.n_prompt_processed >=
++                    (uint64_t) slot.task->params.n_prefill_max) {
++                slot.stop           = STOP_TYPE_LIMIT;
++                slot.has_next_token = false;
++                slot.stats.bounded_stop = true;
++                slot.stats.bounded_stop_reason = "prefill-budget";
++                slot.i_batch        = -1;
++                slot.print_timings();
++                send_final_response(slot);
++                slot.release();
++                return;
++            }
++
+             if (!is_inside_view(slot.i_batch)) {
+                 // the required token not in this sub-batch, skip
+                 return;
+@@ -4147,6 +4410,18 @@ llama_context * server_context::get_llama_context() const {
+     return impl->ctx_tgt;
+ }
+ 
++bool server_context::slot_state_export(int id_slot, server_slot_state & out, bool clear_state) {
++    return impl->slot_state_export(id_slot, out, clear_state);
++}
++
++bool server_context::slot_state_import(int id_slot, const server_slot_state & in, server_slot_state & out) {
++    return impl->slot_state_import(id_slot, in, out);
++}
++
++bool server_context::slot_state_clear(int id_slot, server_slot_state & out) {
++    return impl->slot_state_clear(id_slot, out);
++}
++
+ server_response_reader server_context::get_response_reader() {
+     return impl->get_response_reader();
+ }
+diff --git a/tools/server/server-context.h b/tools/server/server-context.h
+index 0acbbff..4189906 100644
+--- a/tools/server/server-context.h
++++ b/tools/server/server-context.h
+@@ -81,6 +81,26 @@ static server_state server_state_from_str(const std::string & str) {
+ 
+ using server_state_callback_t = std::function<void(server_state, json /* payload */)>;
+ 
++// bounded serving support: in-memory transfer of a single slot's sequence state
++// (sequence KV cache bytes + prompt token bookkeeping), so that a serving slot
++// can be parked and later resumed without re-evaluating its prompt.
++enum server_slot_state_status {
++    SERVER_SLOT_STATE_OK           = 0,
++    SERVER_SLOT_STATE_INVALID_SLOT = 1,
++    SERVER_SLOT_STATE_BUSY         = 2,
++    SERVER_SLOT_STATE_EMPTY        = 3,
++    SERVER_SLOT_STATE_INTERNAL     = 4,
++};
++
++struct server_slot_state {
++    int status = SERVER_SLOT_STATE_OK;
++    int32_t n_tokens = 0;
++    // token-aligned serialization of the slot prompt, see server_tokens::serialize()
++    std::vector<llama_token> tokens;
++    // opaque sequence state blob (main context state followed by optional draft state)
++    std::vector<uint8_t> kv;
++};
++
+ struct server_context {
+     std::unique_ptr<server_context_impl> impl;
+ 
+@@ -108,6 +128,12 @@ struct server_context {
+     // not thread-safe, should only be used from the main thread
+     server_context_meta get_meta() const;
+ 
++    // bounded serving: export/import/clear the sequence state of a single slot.
++    // not thread-safe, must be called from the main thread while the slot is idle.
++    bool slot_state_export(int id_slot, server_slot_state & out, bool clear_state = false);
++    bool slot_state_import(int id_slot, const server_slot_state & in, server_slot_state & out);
++    bool slot_state_clear(int id_slot, server_slot_state & out);
++
+     // note: must be set before load_model() is called
+     void set_state_callback(server_state_callback_t callback);
+ };
+diff --git a/tools/server/server-schema.cpp b/tools/server/server-schema.cpp
+index 64b9251..be28062 100644
+--- a/tools/server/server-schema.cpp
++++ b/tools/server/server-schema.cpp
+@@ -47,6 +47,18 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
+         ->add_alias("max_tokens")
+         ->set_desc("Set the maximum number of tokens to predict. When 0, no tokens will be generated but the prompt is evaluated into the cache"));
+ 
++    add((new field_num("n_prefill_max", params.n_prefill_max))
++        ->set_hard_limits(-1, INT32_MAX)
++        ->set_desc("Set the maximum number of uncached prompt tokens to evaluate in this request. The slot keeps the evaluated prefix for a later request; values <= 0 disable the limit"));
++
++    add((new field_num("n_decode_max", params.n_decode_max))
++        ->set_hard_limits(-1, INT32_MAX)
++        ->set_desc("Set the maximum number of tokens to decode in this request. The task stops at a token boundary and reports bounded_stop in its timings while keeping the slot KV cache for a later request; values <= 0 disable the limit"));
++
++    add((new field_num("t_unit_max_ms", params.t_unit_max_ms))
++        ->set_hard_limits(-1, std::numeric_limits<int64_t>::max())
++        ->set_desc("Set the maximum wall-clock time for this request unit in milliseconds. The limit covers prompt and decode work and is checked at token boundaries; a bounded stop keeps the slot KV cache for the next unit. Values <= 0 disable the limit"));
++
+     add((new field_num("n_indent", params.n_indent))
+         ->set_hard_limits(0, INT32_MAX)
+         ->set_desc("Specify the minimum line indentation for the generated text in number of whitespace characters. Useful for code completion tasks"));
+@@ -73,7 +85,7 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
+ 
+     add((new field_num("t_max_predict_ms", params.t_max_predict_ms))
+         ->set_hard_limits(-1, std::numeric_limits<int64_t>::max())
+-        ->set_desc("Set a time limit in milliseconds for the prediction phase. The timeout triggers if generation exceeds this time (measured since the first token) and a newline has been generated. Useful for FIM applications"));
++        ->set_desc("Set a time limit in milliseconds for the prediction phase. The limit is checked at token boundaries (measured since the first token), so a bounded unit can stop cleanly while the slot keeps its KV cache for the next unit. Useful for bounded serving and FIM applications"));
+ 
+     add((new field_json("response_fields"))
+         ->set_desc("A list of response fields to return. Missing fields are omitted without error. Fields with a slash are unnested (e.g. generation_settings/n_predict moves n_predict to the root)")
+diff --git a/tools/server/server-task.cpp b/tools/server/server-task.cpp
+index 0d3beb3..e2121e5 100644
+--- a/tools/server/server-task.cpp
++++ b/tools/server/server-task.cpp
+@@ -67,6 +67,9 @@ json task_params::to_json(bool only_metrics) const {
+             {"adaptive_decay",            sampling.adaptive_decay},
+             {"max_tokens",                n_predict},
+             {"n_predict",                 n_predict}, // TODO: deduplicate?
++            {"n_prefill_max",             n_prefill_max},
++            {"n_decode_max",              n_decode_max},
++            {"t_unit_max_ms",             t_unit_max_ms},
+             {"n_keep",                    n_keep},
+             {"n_discard",                 n_discard},
+             {"ignore_eos",                sampling.ignore_eos},
+@@ -121,6 +124,9 @@ json task_params::to_json(bool only_metrics) const {
+         {"stop",                      antiprompt},
+         {"max_tokens",                n_predict},
+         {"n_predict",                 n_predict}, // TODO: deduplicate?
++        {"n_prefill_max",             n_prefill_max},
++        {"n_decode_max",              n_decode_max},
++        {"t_unit_max_ms",             t_unit_max_ms},
+         {"n_keep",                    n_keep},
+         {"n_discard",                 n_discard},
+         {"ignore_eos",                sampling.ignore_eos},
+diff --git a/tools/server/server-task.h b/tools/server/server-task.h
+index 9c99143..dca1c9b 100644
+--- a/tools/server/server-task.h
++++ b/tools/server/server-task.h
+@@ -59,6 +59,9 @@ struct task_params {
+     int32_t n_keep    =  0; // number of tokens to keep from initial prompt
+     int32_t n_discard =  0; // number of tokens after n_keep that may be discarded when shifting context, 0 defaults to half
+     int32_t n_predict = -1; // new tokens to predict
++    int32_t n_prefill_max = -1; // max uncached prompt tokens to evaluate in this task, <= 0 means no limit
++    int32_t n_decode_max = -1; // max tokens to decode in this task at a token boundary, <= 0 means no limit
++    int64_t t_unit_max_ms = -1; // max wall-clock time for this task unit, checked at token boundaries; <= 0 means no limit
+     int32_t n_indent  =  0; // minimum line indentation for the generated text in number of whitespace characters
+     int32_t n_cmpl    =  1; // number of completions to generate from this prompt
+ 

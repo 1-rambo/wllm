@@ -1,0 +1,60 @@
+{
+  "name": "wllm-browser-serving",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bounded multi-session browser LLM serving prototype built on a pinned wllama fork.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "postinstall": "node scripts/verify-wllama-prebuilt.mjs",
+    "build": "npm run typecheck && vite build",
+    "build:lib": "tsc -p tsconfig.json",
+    "model:fetch": "node scripts/fetch-demo-model.mjs",
+    "model:check": "node scripts/fetch-demo-model.mjs --check",
+    "demo": "vite",
+    "demo:preview": "vite preview",
+    "sync:wllama-prebuilt": "node scripts/sync-wllama-prebuilt.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "test:preliminary": "vitest run test/preliminary.test.ts",
+    "evaluation:setup": "npm run evaluation:models && npm run evaluation:prepare && npm run evaluation:check && npm run evaluation:verify",
+    "evaluation:models": "node evaluation/scripts/prepare-models.mjs",
+    "evaluation:prepare": "node evaluation/scripts/prepare-apps.mjs",
+    "evaluation:check": "node evaluation/scripts/check-environment.mjs",
+    "evaluation:verify": "node evaluation/scripts/verify-independence.mjs",
+    "evaluation:run": "node evaluation/scripts/run.mjs",
+    "evaluation:e2e-1:smoke": "node evaluation/scripts/run.mjs --experiment e2e-1 --mode smoke --no-judge",
+    "evaluation:e2e-1:pilot": "node evaluation/scripts/run.mjs --experiment e2e-1 --mode pilot --no-judge",
+    "evaluation:e2e-1": "node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal",
+    "evaluation:e2e-2:smoke": "node evaluation/scripts/run.mjs --experiment e2e-2 --mode smoke --no-judge",
+    "evaluation:e2e-2:pilot": "node evaluation/scripts/run.mjs --experiment e2e-2 --mode pilot --no-judge",
+    "evaluation:e2e-2": "node evaluation/scripts/run.mjs --experiment e2e-2 --mode formal",
+    "evaluation:abl-1": "node evaluation/scripts/run.mjs --experiment abl-1 --mode formal --no-judge",
+    "evaluation:abl-2": "node evaluation/scripts/run.mjs --experiment abl-2 --mode formal --no-judge",
+    "evaluation:abl-3": "node evaluation/scripts/run.mjs --experiment abl-3 --mode formal --no-judge",
+    "evaluation:report": "node evaluation/scripts/report.mjs",
+    "smoke:browser": "node scripts/smoke-browser.mjs",
+    "smoke:engine-pages": "vite-node scripts/smoke-engine-pages.ts",
+    "verify:pin": "node scripts/verify-wllama-pin.mjs",
+    "verify:prebuilt": "node scripts/verify-wllama-prebuilt.mjs",
+    "verify:runtime": "npm run verify:pin && npm run verify:prebuilt",
+    "verify:demo": "npm run model:check && npm run verify:runtime && npm run evaluation:verify && npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "playwright-core": "^1.55.0",
+    "typescript": "5.4.5",
+    "vite": "^5.4.10",
+    "vitest": "2.1.9"
+  },
+  "dependencies": {
+    "@wllama/wllama": "file:vendor/wllama-prebuilt/wllama",
+    "@wllama/wllama-compat": "file:vendor/wllama-prebuilt/wllama-compat",
+    "lucide": "^1.47.0"
+  }
+}

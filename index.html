@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A multi-session browser LLM serving demo powered by wllama."
+    />
+    <title>wLLM Browser Serving Demo</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">w</span>
+          <div>
+            <h1>wLLM Browser Serving</h1>
+            <p>SharedWorker coordination, wllama native runtime, bounded streaming</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button id="new-tab" class="button secondary" type="button" title="Open another agent tab">
+            <i data-lucide="panel-top-open" aria-hidden="true"></i>
+            <span>New agent tab</span>
+          </button>
+          <button id="clear-finished" class="button ghost" type="button" title="Clear finished requests">
+            <i data-lucide="eraser" aria-hidden="true"></i>
+            <span>Clear finished</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="status-strip" aria-label="Runtime status">
+        <div class="status-item">
+          <span class="status-icon" id="runtime-icon"><i data-lucide="cpu" aria-hidden="true"></i></span>
+          <div>
+            <span class="status-label">Runtime</span>
+            <strong id="runtime-status">Starting</strong>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-icon" id="connection-icon"><i data-lucide="radio" aria-hidden="true"></i></span>
+          <div>
+            <span class="status-label">Agent</span>
+            <strong id="agent-status">Connecting</strong>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-icon"><i data-lucide="layers-3" aria-hidden="true"></i></span>
+          <div>
+            <span class="status-label">Open requests</span>
+            <strong id="queue-count">0</strong>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-icon"><i data-lucide="database" aria-hidden="true"></i></span>
+          <div>
+            <span class="status-label">KV state L1 / L2 / L3</span>
+            <strong id="state-tiers">0 tok / 0 tok / 0 B</strong>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-icon"><i data-lucide="activity" aria-hidden="true"></i></span>
+          <div>
+            <span class="status-label">Foreground frames</span>
+            <strong id="frame-status">sampling</strong>
+          </div>
+        </div>
+        <div class="status-item status-progress">
+          <div class="progress-copy">
+            <span class="status-label">Model warmup</span>
+            <strong id="model-progress-text">0%</strong>
+          </div>
+          <div
+            id="model-progress"
+            class="progress-track"
+            role="progressbar"
+            aria-label="Model warmup progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <span></span>
+          </div>
+        </div>
+      </section>
+
+      <main class="workspace">
+        <section class="composer-panel" aria-labelledby="composer-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="composer-title">Generate</h2>
+              <p id="session-label">Session pending</p>
+            </div>
+            <div class="lifecycle-switch" role="group" aria-label="Lifecycle state">
+              <button class="mode-button active" data-mode="foreground" type="button" aria-pressed="true">
+                <i data-lucide="zap" aria-hidden="true"></i>
+                <span>Foreground</span>
+              </button>
+              <button class="mode-button" data-mode="background" type="button" aria-pressed="false">
+                <i data-lucide="moon" aria-hidden="true"></i>
+                <span>Background</span>
+              </button>
+            </div>
+          </div>
+
+          <label class="field-label" for="prompt">Prompt</label>
+          <textarea id="prompt" rows="7" spellcheck="false">Once upon a time</textarea>
+
+          <div class="composer-controls">
+            <label class="compact-field" for="max-tokens">
+              <span>Max tokens</span>
+              <input id="max-tokens" type="number" min="4" max="512" step="4" value="64" />
+            </label>
+            <label class="compact-field" for="seed">
+              <span>Seed</span>
+              <input id="seed" type="number" min="0" step="1" value="7" />
+            </label>
+            <button id="submit" class="button primary" type="button" title="Start generation">
+              <i data-lucide="play" aria-hidden="true"></i>
+              <span>Run</span>
+            </button>
+            <button id="burst" class="button secondary" type="button" title="Queue four short session continuations">
+              <i data-lucide="list-plus" aria-hidden="true"></i>
+              <span>Queue burst</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="trace-panel" aria-labelledby="trace-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="trace-title">Serving trace</h2>
+              <p>Bounded units arrive from the coordinator</p>
+            </div>
+            <span class="trace-counter" id="trace-counter">0 units</span>
+          </div>
+          <ol id="trace" class="trace-list" aria-live="polite"></ol>
+        </section>
+
+        <section class="frame-panel" aria-labelledby="frame-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="frame-title">Foreground animation</h2>
+              <p id="frame-metrics">Waiting for animation frames</p>
+            </div>
+            <div class="frame-actions">
+              <button id="frame-mark" class="button secondary" type="button" title="Time a marker to the second animation frame after it">
+                <i data-lucide="radio" aria-hidden="true"></i>
+                <span>Mark</span>
+              </button>
+              <button id="frame-reset" class="text-button" type="button">Reset</button>
+            </div>
+          </div>
+          <div class="frame-track" aria-hidden="true"><span id="frame-sweep"></span></div>
+        </section>
+
+        <section class="requests-panel" aria-labelledby="requests-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="requests-title">Requests</h2>
+              <p>Streaming output and unit-level progress</p>
+            </div>
+          </div>
+          <div id="requests" class="request-list"></div>
+          <div id="empty-state" class="empty-state">
+            <i data-lucide="inbox" aria-hidden="true"></i>
+            <strong>No requests yet</strong>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/src/demo/main.ts"></script>
+  </body>
+</html>

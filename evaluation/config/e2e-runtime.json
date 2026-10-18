@@ -1,0 +1,23 @@
+{
+  "execution": {
+    "schedulerForegroundBurstUnits": 64,
+    "queueWaitTimeoutMs": 300000,
+    "webgpuCommandSubmitBatchSize": 32,
+    "webgpuMaxInflightBatches": 4,
+    "leaseBatchSize": 8,
+    "leaseWorkConservingQuantumMs": 5000,
+    "leaseWorkConservingBarrier": true,
+    "leaseBackgroundBarrier": true,
+    "batchHandoff": false,
+    "handoffBatchSize": 1,
+    "handoffPrefillTokens": 512
+  },
+  "armOverrides": {
+    "e2e-2": {
+      "ours": {
+        "completedTier": "L1",
+        "parkCompleted": false
+      }
+    }
+  }
+}

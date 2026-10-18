@@ -1,0 +1,257 @@
+{
+  "schemaVersion": 1,
+  "id": "artifex-tavern-e2e-prereg-v3",
+  "status": "frozen",
+  "frozenAt": "2026-10-18",
+  "config": "e2e.json",
+  "configSha256": "792de18335688747fc239cea2978566bbd7a593dbf3608bb0065de24a9e6b7f1",
+  "calibration": "2026-10-18: the previous E2E-1 formal at impl/artifacts/evaluation/e2e-priority-pressure/darwin/llama-3.2-1b-instruct/2026-10-18T00-55-08.157Z/ was complete but exposed a protocol-validity flaw: 45 of 54 target records had already finished before their scheduled high-priority write, so the completion endpoint mostly compared unpromoted work. This version keeps the pressure ladder, ten-tab layout, models, prompts, token budget, five-percent completion threshold, and arm definitions unchanged. It uses one target per trial, applies high priority 500 ms after simultaneous task submission, keeps that target high until task completion, rotates the target across trials, excludes targets that finish before the priority write from completion, and adds a 90-percent active-at-request validity gate.",
+  "scope": {
+    "mainExperiments": ["e2e-1", "e2e-2"],
+    "ablationExperiments": ["abl-1", "abl-2", "abl-3"],
+    "platforms": {
+      "main": ["darwin", "win32"],
+      "ablation": ["darwin"]
+    },
+    "models": {
+      "main": [
+        "llama-3.2-1b-instruct",
+        "llama-3.2-3b-instruct",
+        "qwen2.5-1.5b-instruct",
+        "qwen2.5-3b-instruct"
+      ],
+      "ablation": [
+        "llama-3.2-1b-instruct",
+        "qwen2.5-1.5b-instruct"
+      ]
+    }
+  },
+  "protocol": {
+    "priorityApi": "setSessionPriority",
+    "priorityValues": ["high", "normal"],
+    "visibilityDerivedPriority": false,
+    "pressureSchedule": [
+      { "id": "clear-1", "triangles": 0 },
+      { "id": "pressure-250", "triangles": 250 },
+      { "id": "pressure-500", "triangles": 500 },
+      { "id": "pressure-750", "triangles": 750 },
+      { "id": "pressure-1000", "triangles": 1000 },
+      { "id": "clear-return", "triangles": 0 }
+    ],
+    "tabLayout": {
+      "appTabs": 9,
+      "artifexTabs": 1,
+      "pressureTabs": 1,
+      "totalTabs": 10
+    },
+    "repeats": 3,
+    "samePromptAcrossArms": true,
+    "samePressureAcrossArms": true,
+    "sameRecoveryTimelineAcrossArms": true,
+    "priorityTargetsPerTrial": 1,
+    "targetHeldHighThroughCompletion": true,
+    "blindJudge": true
+  },
+  "gates": {
+    "e2e-1": [
+      {
+        "id": "e2e1-completeness",
+        "type": "completeness",
+        "description": "Every scheduled arm, pressure level, repeat, model, app, and target must have a terminal task record."
+      },
+      {
+        "id": "e2e1-priority-applied",
+        "type": "priority-applied",
+        "description": "The explicit priority API must reach the exported coordinator policy on every ours trial."
+      },
+      {
+        "id": "e2e1-priority-target-active",
+        "type": "threshold",
+        "metric": "priorityTargetActiveAtRequest",
+        "threshold": 0.9,
+        "direction": "higher",
+        "description": "At least 90 percent of terminal target tasks must still be running when the priority write is issued."
+      },
+      {
+        "id": "e2e1-priority-ttft",
+        "type": "paired-directional",
+        "metric": "priorityFirstTokenLatencyMs",
+        "comparator": "wllama-per-tab",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.08
+      },
+      {
+        "id": "e2e1-priority-completion",
+        "type": "paired-directional",
+        "metric": "priorityCompletionMs",
+        "comparator": "wllama-per-tab",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.05
+      },
+      {
+        "id": "e2e1-frame-tail",
+        "type": "paired-directional",
+        "metric": "frameP95Ms",
+        "comparator": "wllama-per-tab",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.0
+      },
+      {
+        "id": "e2e1-background-progress",
+        "type": "threshold",
+        "metric": "backgroundCompletionRate",
+        "threshold": 0.9,
+        "direction": "higher"
+      },
+      {
+        "id": "e2e1-resource-integrity",
+        "type": "resource-integrity"
+      },
+      {
+        "id": "e2e1-quality-nonregression",
+        "type": "quality-nonregression",
+        "comparator": "wllama-per-tab",
+        "metric": "judgeScore",
+        "minimumMargin": -1.0
+      }
+    ],
+    "e2e-2": [
+      {
+        "id": "e2e2-completeness",
+        "type": "completeness",
+        "description": "Every scheduled recovery trial must have warm, hidden, frozen, reload, restore, and recovery records."
+      },
+      {
+        "id": "e2e2-lifecycle-observed",
+        "type": "lifecycle-observed",
+        "description": "Each target must expose hidden, frozen, reload, and active observations."
+      },
+      {
+        "id": "e2e2-priority-applied",
+        "type": "priority-applied",
+        "description": "Each ours recovery target must promote its restored session through the public priority API before the recovery turn is submitted."
+      },
+      {
+        "id": "e2e2-recovery-ttft",
+        "type": "paired-directional",
+        "metric": "recoveryFirstTokenLatencyMs",
+        "comparator": "wllama-per-tab",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.2
+      },
+      {
+        "id": "e2e2-recovery-completion",
+        "type": "paired-directional",
+        "metric": "recoveryCompletionMs",
+        "comparator": "wllama-per-tab",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.15
+      },
+      {
+        "id": "e2e2-replayed-tokens",
+        "type": "paired-directional",
+        "metric": "replayedTokens",
+        "comparator": "wllama-per-tab",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.5
+      },
+      {
+        "id": "e2e2-output-consistency",
+        "type": "output-consistency",
+        "description": "A fresh-session control and the restored-session follow-up use the same complete chat history. After removing parenthetical action text, their normalized token sequences must reach at least 0.65 lexical consistency (hardware-validated from the smoke phase); the separate blind-judge gate checks task quality."
+      },
+      {
+        "id": "e2e2-resource-integrity",
+        "type": "resource-integrity"
+      },
+      {
+        "id": "e2e2-quality-nonregression",
+        "type": "quality-nonregression",
+        "comparator": "wllama-per-tab",
+        "metric": "judgeScore",
+        "minimumMargin": -1.0
+      }
+    ],
+    "abl-1": [
+      {
+        "id": "abl1-completeness",
+        "type": "completeness"
+      },
+      {
+        "id": "abl1-frame-tail",
+        "type": "paired-directional",
+        "metric": "frameP95Ms",
+        "comparator": "ours-no-exec",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.2
+      },
+      {
+        "id": "abl1-priority-latency",
+        "type": "paired-directional",
+        "metric": "priorityFirstTokenLatencyMs",
+        "comparator": "ours-no-exec",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.1
+      },
+      {
+        "id": "abl1-resource-integrity",
+        "type": "resource-integrity"
+      }
+    ],
+    "abl-2": [
+      {
+        "id": "abl2-completeness",
+        "type": "completeness"
+      },
+      {
+        "id": "abl2-priority-gap",
+        "type": "paired-directional",
+        "metric": "priorityAdvantageGapMs",
+        "comparator": "ours-no-priority",
+        "direction": "higher",
+        "minimumRelativeEffect": 0.1
+      },
+      {
+        "id": "abl2-background-progress",
+        "type": "threshold",
+        "metric": "backgroundCompletionRate",
+        "threshold": 0.9,
+        "direction": "higher"
+      },
+      {
+        "id": "abl2-resource-integrity",
+        "type": "resource-integrity"
+      }
+    ],
+    "abl-3": [
+      {
+        "id": "abl3-completeness",
+        "type": "completeness"
+      },
+      {
+        "id": "abl3-recovery-ttft",
+        "type": "paired-directional",
+        "metric": "recoveryFirstTokenLatencyMs",
+        "comparator": "ours-no-state",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.2
+      },
+      {
+        "id": "abl3-replayed-tokens",
+        "type": "paired-directional",
+        "metric": "replayedTokens",
+        "comparator": "ours-no-state",
+        "direction": "lower",
+        "minimumRelativeEffect": 0.5
+      },
+      {
+        "id": "abl3-output-consistency",
+        "type": "output-consistency"
+      },
+      {
+        "id": "abl3-resource-integrity",
+        "type": "resource-integrity"
+      }
+    ]
+  }
+}

@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 2,
+  "id": "artifex-tavern-e2e-v2",
+  "description": "Cross-platform end-to-end evaluation for ArtifexWebGame and Holtwick Tavern under explicit session priority, real lifecycle transitions, and raw WebGPU render pressure.",
+  "modelSets": {
+    "main": [
+      "llama-3.2-1b-instruct",
+      "llama-3.2-3b-instruct",
+      "qwen2.5-1.5b-instruct",
+      "qwen2.5-3b-instruct"
+    ],
+    "ablation": [
+      "llama-3.2-1b-instruct",
+      "qwen2.5-1.5b-instruct"
+    ]
+  },
+  "platforms": {
+    "darwin": {
+      "label": "macOS",
+      "e2e": true,
+      "ablation": true
+    },
+    "win32": {
+      "label": "Windows",
+      "e2e": true,
+      "ablation": false
+    }
+  },
+  "apps": {
+    "artifex": {
+      "label": "ArtifexWebGame",
+      "entry": "/apps/artifex/game.html",
+      "staticRoot": "vendor/artifex-webgame/dist",
+      "sourceRoot": "vendor/artifex-webgame",
+      "canvasSelector": "#game-canvas",
+      "inputSelector": "#npc-chat-input",
+      "sendSelector": "#npc-chat-send",
+      "replySelector": "#npc-chat-history .msg.assistant:not(.thinking)",
+      "tasks": [
+        {
+          "id": "artifex-identity",
+          "prompt": "Tell me who you are and what you do here.",
+          "systemPrompt": "You are a villager in a persistent medieval settlement. Stay in character, answer briefly, and use only the local settlement context.",
+          "rubric": "Identify the NPC in a way consistent with the live Artifex persona and local settlement context.",
+          "followUp": "What should a traveller remember about speaking with you?"
+        },
+        {
+          "id": "artifex-wilderness",
+          "prompt": "What should a traveller know before heading into the wilderness?",
+          "systemPrompt": "You are a guard in a persistent medieval settlement. Give practical in-world wilderness advice and stay in character.",
+          "rubric": "Give practical in-world wilderness advice without breaking character.",
+          "followUp": "Which warning matters most after dark?"
+        },
+        {
+          "id": "artifex-danger",
+          "prompt": "Have you seen anything strange or dangerous nearby?",
+          "systemPrompt": "You are a guard in a persistent medieval settlement. Describe plausible dangers in your own voice.",
+          "rubric": "Describe plausible nearby dangers or observations in the NPC voice.",
+          "followUp": "What should I do if I encounter it?"
+        },
+        {
+          "id": "artifex-settlement",
+          "prompt": "What do you think of the folk in this settlement?",
+          "systemPrompt": "You are a villager in a persistent medieval settlement. Reflect local relationships without modern context.",
+          "rubric": "Reflect the NPC role and relationships without unrelated modern context.",
+          "followUp": "Who should I trust first here?"
+        },
+        {
+          "id": "artifex-trade",
+          "prompt": "What goods do you have for sale, and what do they cost?",
+          "systemPrompt": "You are a merchant in a persistent medieval settlement. Stay in the local trade context.",
+          "rubric": "Stay in the NPC trade context and describe goods or prices plausibly.",
+          "followUp": "Which of those goods travels best?"
+        },
+        {
+          "id": "artifex-road",
+          "prompt": "What do you know about the road ahead?",
+          "systemPrompt": "You are a farmer in a persistent medieval settlement. Give an in-world route or travel observation.",
+          "rubric": "Give an in-world route or travel observation rather than a generic assistant answer.",
+          "followUp": "Where should I stop before nightfall?"
+        },
+        {
+          "id": "artifex-news",
+          "prompt": "What news have you heard lately?",
+          "systemPrompt": "You are a villager in a persistent medieval settlement. Offer local news or rumours in your own voice.",
+          "rubric": "Offer local news or rumours in the NPC voice.",
+          "followUp": "Is any part of that story confirmed?"
+        },
+        {
+          "id": "artifex-caution",
+          "prompt": "What is one thing I should be careful about out here?",
+          "systemPrompt": "You are a guard in a persistent medieval settlement. Give one concrete setting-appropriate caution.",
+          "rubric": "Give one concrete setting-appropriate caution and remain in character.",
+          "followUp": "How would you handle that yourself?"
+        }
+      ]
+    },
+    "tavern": {
+      "label": "Holtwick Tavern",
+      "entry": "/apps/tavern/index.html",
+      "staticRoot": "vendor/holtwick-tavern",
+      "sourceRoot": "vendor/holtwick-tavern",
+      "canvasSelector": "#game-container canvas",
+      "inputSelector": "#chat-input",
+      "sendSelector": "#chat-send",
+      "replySelector": "#chat-messages .msg.npc:not(.streaming)",
+      "tasks": [
+        {
+          "id": "tavern-edda-where",
+          "npcId": "edda",
+          "prompt": "Where am I?",
+          "systemPrompt": "You are Edda the blacksmith in Holtwick. Answer briefly and stay in the frontier village setting.",
+          "rubric": "Answer as Edda in Holtwick and preserve the blacksmith persona.",
+          "followUp": "What is across the square from your forge?"
+        },
+        {
+          "id": "tavern-edda-forge",
+          "npcId": "edda",
+          "prompt": "Show me what you forge here.",
+          "systemPrompt": "You are Edda the blacksmith in Holtwick. Describe the forge and your craft in a short in-character way.",
+          "rubric": "Describe Edda's forge and craft in a short in-character way.",
+          "followUp": "Which piece takes the longest to finish?"
+        },
+        {
+          "id": "tavern-edda-travel",
+          "npcId": "edda",
+          "prompt": "What should I know before traveling?",
+          "systemPrompt": "You are Edda the blacksmith in Holtwick. Give brief practical advice in her voice.",
+          "rubric": "Give brief practical advice consistent with Edda's world and voice.",
+          "followUp": "Would you make anything different for a long road?"
+        },
+        {
+          "id": "tavern-finn-edda",
+          "npcId": "finn",
+          "prompt": "Tell me about Edda.",
+          "systemPrompt": "You are Finn the tavern keeper in Holtwick. Preserve the established relationship between Finn and Edda.",
+          "rubric": "Use Finn's established view of Edda without contradicting the Tavern canon.",
+          "followUp": "What does Edda think of you?"
+        },
+        {
+          "id": "tavern-finn-mill",
+          "npcId": "finn",
+          "prompt": "What happened to the mill?",
+          "systemPrompt": "You are Finn the tavern keeper in Holtwick. Preserve the in-world account of the burned mill.",
+          "rubric": "Preserve Finn's in-world account of the burned mill.",
+          "followUp": "Who was there when it happened?"
+        },
+        {
+          "id": "tavern-finn-news",
+          "npcId": "finn",
+          "prompt": "What is the news in Holtwick?",
+          "systemPrompt": "You are Finn the tavern keeper in Holtwick. Offer local gossip without modern or AI references.",
+          "rubric": "Provide local gossip in Finn's voice without modern or AI references.",
+          "followUp": "Which rumour do you believe?"
+        },
+        {
+          "id": "tavern-edda-finn",
+          "npcId": "edda",
+          "prompt": "Tell me about Finn.",
+          "systemPrompt": "You are Edda the blacksmith in Holtwick. Reflect her established relationship to Finn and the village.",
+          "rubric": "Reflect Edda's established relationship to Finn and the village.",
+          "followUp": "What would Finn say if I asked him the same?"
+        },
+        {
+          "id": "tavern-finn-inn",
+          "npcId": "finn",
+          "prompt": "What do you serve at the inn?",
+          "systemPrompt": "You are Finn the tavern keeper in Holtwick. Describe the food, drink, or hearth in character.",
+          "rubric": "Describe the Holtwick Tankard food, drink, or hearth in character.",
+          "followUp": "What would you recommend after a cold journey?"
+        }
+      ]
+    }
+  },
+  "layout": {
+    "appTabs": 9,
+    "artifexTabs": 1,
+    "pressureTabs": 1,
+    "totalTabs": 10
+  },
+  "pressure": {
+    "schedule": [
+      { "id": "clear-1", "triangles": 0 },
+      { "id": "pressure-250", "triangles": 250 },
+      { "id": "pressure-500", "triangles": 500 },
+      { "id": "pressure-750", "triangles": 750 },
+      { "id": "pressure-1000", "triangles": 1000 },
+      { "id": "clear-return", "triangles": 0 }
+    ],
+    "pilotSchedule": [
+      { "id": "clear-1", "triangles": 0 },
+      { "id": "pressure-500", "triangles": 500 },
+      { "id": "pressure-1000", "triangles": 1000 },
+      { "id": "clear-return", "triangles": 0 }
+    ],
+    "smokeSchedule": [
+      { "id": "clear-1", "triangles": 0 }
+    ],
+    "complexity": 128,
+    "passes": 1,
+    "settleMs": 2500,
+    "pollMs": 250,
+    "startGateMs": 1200,
+    "relayToSharedEngine": true,
+    "requireVisiblePressureTab": true
+  },
+  "priority": {
+    "api": "setSessionPriority",
+    "initial": "normal",
+    "sequence": [0, 4, 7, 2, 9, 1, 6, 3, 8, 5],
+    "switchIntervalMs": 15000,
+    "maxSwitchesPerTrial": 1,
+    "disableVisibilityDerivedPriority": true,
+    "startDelayMs": 500
+  },
+  "recovery": {
+    "warmupTurns": 3,
+    "freezeMs": 800,
+    "postFreezeMs": 500,
+    "reloadTarget": true,
+    "resumeTimeoutMs": 300000,
+    "measureReplayedTokens": true
+  },
+  "execution": {
+    "maxNewTokens": 128,
+    "temperature": 0,
+    "seed": 20261015,
+    "nCtx": 36864,
+    "nBatch": 128,
+    "nParallel": 9,
+    "leaseBatchSize": 4,
+    "batchHandoff": true,
+    "handoffBatchSize": 2,
+    "preemptOnActivation": true,
+    "handoffPrefillTokens": 64,
+    "l1NodeCap": 9,
+    "l1TokenCapPerSession": 4096,
+    "l2TokenCapPerSession": 4096,
+    "l3ByteCap": 67108864,
+    "repairBudget": 4,
+    "parkCompleted": true,
+    "completedTier": "L2",
+    "taskTimeoutMs": 900000,
+    "loadTimeoutMs": 300000,
+    "startupSettleMs": 800
+  },
+  "modes": {
+    "smoke": {
+      "label": "smoke",
+      "appTabs": 2,
+      "artifexTabs": 1,
+      "pressureTabs": 1,
+      "totalTabs": 3,
+      "repeats": 1,
+      "maxNewTokens": 16,
+      "taskTimeoutMs": 300000,
+      "loadTimeoutMs": 240000,
+      "schedule": "smokeSchedule",
+      "switchIntervalMs": 5000,
+      "maxSwitchesPerTrial": 1,
+      "judge": false
+    },
+    "pilot": {
+      "label": "pilot",
+      "appTabs": 9,
+      "artifexTabs": 1,
+      "pressureTabs": 1,
+      "totalTabs": 10,
+      "repeats": 1,
+      "maxNewTokens": 64,
+      "taskTimeoutMs": 900000,
+      "loadTimeoutMs": 300000,
+      "schedule": "pilotSchedule",
+      "switchIntervalMs": 10000,
+      "maxSwitchesPerTrial": 1,
+      "judge": false
+    },
+    "formal": {
+      "label": "formal",
+      "appTabs": 9,
+      "artifexTabs": 1,
+      "pressureTabs": 1,
+      "totalTabs": 10,
+      "repeats": 3,
+      "maxNewTokens": 128,
+      "taskTimeoutMs": 900000,
+      "loadTimeoutMs": 300000,
+      "schedule": "schedule",
+      "switchIntervalMs": 15000,
+      "maxSwitchesPerTrial": 1,
+      "judge": true
+    }
+  },
+  "judge": {
+    "model": "llama-3.2-3b-instruct",
+    "enabledForExperiments": ["e2e-1", "e2e-2"],
+    "maxNewTokens": 96,
+    "temperature": 0,
+    "seed": 20261015,
+    "minimumValidFraction": 0.9,
+    "qualityMargin": 1.0,
+    "sampleFraction": 0.35,
+    "blindToArm": true
+  },
+  "experiments": {
+    "e2e-1": {
+      "id": "e2e-1",
+      "label": "Priority scheduling under render pressure",
+      "scenario": "priority",
+      "artifactRoot": "artifacts/evaluation/e2e-priority-pressure",
+      "modelSet": "main",
+      "defaultModel": "llama-3.2-1b-instruct",
+      "arms": ["ours", "wllama-per-tab"],
+      "requiresJudge": true,
+      "platformScope": "e2e"
+    },
+    "e2e-2": {
+      "id": "e2e-2",
+      "label": "State recovery under render pressure",
+      "scenario": "recovery",
+      "artifactRoot": "artifacts/evaluation/e2e-recovery-pressure",
+      "modelSet": "main",
+      "defaultModel": "llama-3.2-1b-instruct",
+      "arms": ["ours", "wllama-per-tab"],
+      "requiresJudge": true,
+      "platformScope": "e2e"
+    },
+    "abl-1": {
+      "id": "abl-1",
+      "label": "Ablation: execution controller",
+      "scenario": "priority",
+      "artifactRoot": "artifacts/evaluation/ablation-no-exec",
+      "modelSet": "ablation",
+      "defaultModel": "llama-3.2-1b-instruct",
+      "arms": ["ours-full", "ours-no-exec"],
+      "requiresJudge": false,
+      "platformScope": "ablation"
+    },
+    "abl-2": {
+      "id": "abl-2",
+      "label": "Ablation: priority scheduler",
+      "scenario": "priority",
+      "artifactRoot": "artifacts/evaluation/ablation-no-priority",
+      "modelSet": "ablation",
+      "defaultModel": "llama-3.2-1b-instruct",
+      "arms": ["ours-full", "ours-no-priority"],
+      "requiresJudge": false,
+      "platformScope": "ablation"
+    },
+    "abl-3": {
+      "id": "abl-3",
+      "label": "Ablation: state residency",
+      "scenario": "recovery",
+      "artifactRoot": "artifacts/evaluation/ablation-no-state",
+      "modelSet": "ablation",
+      "defaultModel": "llama-3.2-1b-instruct",
+      "arms": ["ours-full", "ours-no-state"],
+      "requiresJudge": false,
+      "platformScope": "ablation"
+    }
+  },
+  "arms": {
+    "ours": {
+      "label": "ours",
+      "engine": "wllm",
+      "enginePage": "/engines/wllm.html",
+      "priorityMode": "enabled",
+      "initialPriority": "normal",
+      "executionMode": "deadline",
+      "completedTier": "L2",
+      "parkCompleted": true
+    },
+    "wllama-per-tab": {
+      "label": "wllama-per-tab",
+      "engine": "wllama",
+      "enginePage": "/engines/wllama.html",
+      "priorityMode": "disabled",
+      "initialPriority": "normal",
+      "executionMode": "bounded",
+      "completedTier": "L1",
+      "parkCompleted": false
+    },
+    "ours-full": {
+      "label": "ours-full",
+      "engine": "wllm",
+      "enginePage": "/engines/wllm.html",
+      "priorityMode": "enabled",
+      "initialPriority": "normal",
+      "executionMode": "deadline",
+      "completedTier": "L2",
+      "parkCompleted": true
+    },
+    "ours-no-exec": {
+      "label": "ours-no-exec",
+      "engine": "wllm",
+      "enginePage": "/engines/wllm.html",
+      "priorityMode": "enabled",
+      "initialPriority": "normal",
+      "executionMode": "unsliced",
+      "completedTier": "L2",
+      "parkCompleted": true
+    },
+    "ours-no-priority": {
+      "label": "ours-no-priority",
+      "engine": "wllm",
+      "enginePage": "/engines/wllm.html",
+      "priorityMode": "disabled",
+      "initialPriority": "normal",
+      "executionMode": "deadline",
+      "completedTier": "L2",
+      "parkCompleted": true
+    },
+    "ours-no-state": {
+      "label": "ours-no-state",
+      "engine": "wllm",
+      "enginePage": "/engines/wllm.html",
+      "priorityMode": "enabled",
+      "initialPriority": "normal",
+      "executionMode": "deadline",
+      "completedTier": "rebuild",
+      "parkCompleted": false
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/ngxson/wllama.git",
+  "tag": "3.6.1",
+  "commit": "e3972797f9d508887440e9d3fa87dc296f2dec44",
+  "llamaCppRepository": "https://github.com/ggml-org/llama.cpp.git",
+  "llamaCppCommit": "83d855c5a6d70487121edbf4020b25c96b7a04e7",
+  "patches": [
+    "patches/wllama/0001-bounded-serving-api.patch",
+    "patches/llama.cpp/0001-bounded-execution-and-slot-state.patch"
+  ]
+}

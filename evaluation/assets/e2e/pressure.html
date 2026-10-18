@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wllm colorful triangle pressure</title>
+    <style>
+      :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #071018; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #overlay { position: fixed; inset: 0; pointer-events: none; color: #eef8f7; }
+      #panel {
+        position: absolute; left: 28px; top: 28px; min-width: 430px; padding: 18px 20px 16px;
+        border: 1px solid rgba(174, 248, 235, 0.42); border-radius: 8px;
+        background: rgba(4, 13, 22, 0.82); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+        backdrop-filter: blur(8px);
+      }
+      .eyebrow { color: #7ce5d4; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; }
+      h1 { margin: 6px 0 14px; font: 600 22px/1.15 ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.01em; }
+      #status { color: #c8d8db; font-size: 12px; line-height: 1.65; white-space: pre; }
+      #legend {
+        position: absolute; right: 28px; bottom: 24px; display: flex; gap: 18px;
+        padding: 10px 14px; border: 1px solid rgba(174, 248, 235, 0.24); border-radius: 8px;
+        background: rgba(4, 13, 22, 0.74); color: #c8d8db; font-size: 11px;
+      }
+      .legend-item { display: flex; align-items: center; gap: 7px; }
+      .legend-swatch { width: 18px; height: 8px; border-radius: 2px; }
+      .teal { background: #29c7b7; } .amber { background: #f1a83b; } .violet { background: #7878ee; }
+      #error { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #ffb3a7; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="pressure-canvas"></canvas>
+    <div id="overlay">
+      <section id="panel">
+        <div class="eyebrow">VISIBLE RENDER LOAD</div>
+        <h1>Colorful WebGPU triangles</h1>
+        <div id="status">booting</div>
+      </section>
+      <div id="legend">
+        <span class="legend-item"><span class="legend-swatch teal"></span>moving triangles</span>
+        <span class="legend-item"><span class="legend-swatch amber"></span>submitted instances</span>
+        <span class="legend-item"><span class="legend-swatch violet"></span>presented frames</span>
+      </div>
+      <div id="error"></div>
+    </div>
+    <script type="module">
+      const params = new URLSearchParams(location.search);
+      const canvas = document.getElementById("pressure-canvas");
+      const status = document.getElementById("status");
+      const errorElement = document.getElementById("error");
+      const complexity = Math.max(1, Number(params.get("complexity") ?? 128));
+      const maxSamples = 4096;
+      let targetTriangles = Math.max(0, Number(params.get("triangles") ?? 0));
+      let device = null;
+      let context = null;
+      let pipeline = null;
+      let bindGroup = null;
+      let uniformBuffer = null;
+      const uniforms = new Float32Array(8);
+      let mode = "booting";
+      let error = null;
+      let frameCount = 0;
+      let lastFrameAt = null;
+      let lastHudUpdateAt = -Infinity;
+      let samples = [];
+      let longestStallMs = 0;
+      let visibility = document.visibilityState;
+
+      function submittedInstances() {
+        return Math.max(1, Math.floor(targetTriangles * complexity));
+      }
+
+      const stats = () => {
+        const values = [...samples].sort((a, b) => a - b);
+        const percentile = (q) => values.length === 0 ? 0 : values[Math.min(values.length - 1, Math.floor((values.length - 1) * q))];
+        const over33 = values.filter((value) => value > 33).length;
+        const over50 = values.filter((value) => value > 50).length;
+        const overBudget = values.filter((value) => value > 1000 / 60).length;
+        return {
+          source: "presented-frame",
+          mode,
+          error,
+          visibilityState: visibility,
+          targetTriangles,
+          complexity,
+          drawsPerFrame: targetTriangles * complexity,
+          submittedInstancesPerFrame: submittedInstances(),
+          diagnosticPattern: "visible-color-triangles-v1",
+          baseTriangleCount: targetTriangles,
+          instanceCopiesPerTriangle: complexity,
+          frameCount,
+          p50Ms: percentile(0.5),
+          p95Ms: percentile(0.95),
+          p99Ms: percentile(0.99),
+          maxMs: values.length === 0 ? 0 : values[values.length - 1],
+          longestStallMs,
+          overBudgetRatio: values.length === 0 ? 0 : overBudget / values.length,
+          over33Ratio: values.length === 0 ? 0 : over33 / values.length,
+          over50Ratio: values.length === 0 ? 0 : over50 / values.length,
+          refreshHz: 60,
+          pageOwned: true
+        };
+      };
+
+      function updateHud(now = performance.now(), force = false) {
+        if (!force && now - lastHudUpdateAt < 200) return;
+        lastHudUpdateAt = now;
+        const snapshot = stats();
+        const recent = samples.slice(-30);
+        const meanFrameMs = recent.length === 0
+          ? 0
+          : recent.reduce((sum, value) => sum + value, 0) / recent.length;
+        const fps = meanFrameMs > 0 ? 1000 / meanFrameMs : 0;
+        status.textContent = [
+          `mode       ${mode}  visibility ${visibility}`,
+          `load       ${targetTriangles} colorful triangles x ${complexity} copies`,
+          `submitted  ${submittedInstances().toLocaleString("en-US")} triangles / frame`,
+          `observed   ${frameCount.toLocaleString("en-US")} frames  ${fps.toFixed(1)} fps`,
+          `frame time p50 ${snapshot.p50Ms.toFixed(1)} ms  p95 ${snapshot.p95Ms.toFixed(1)} ms`
+        ].join("\n");
+      }
+      function setTriangles(value) {
+        targetTriangles = Math.max(0, Number(value) || 0);
+        updateHud(performance.now(), true);
+      }
+
+      function resetStats() {
+        samples = [];
+        frameCount = 0;
+        longestStallMs = 0;
+        lastFrameAt = null;
+        lastHudUpdateAt = -Infinity;
+        updateHud(performance.now(), true);
+      }
+
+      function showError(message) {
+        mode = "error";
+        error = message;
+        document.body.dataset.mode = mode;
+        errorElement.textContent = message;
+        updateHud(performance.now(), true);
+      }
+
+      window.__wllmPressure = {
+        setTriangles,
+        resetStats,
+        snapshot: stats,
+        get mode() { return mode; },
+        get error() { return error; }
+      };
+
+      function resizeCanvas() {
+        const ratio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+        canvas.width = Math.max(1, Math.floor(window.innerWidth * ratio));
+        canvas.height = Math.max(1, Math.floor(window.innerHeight * ratio));
+      }
+
+      document.addEventListener("visibilitychange", () => {
+        visibility = document.visibilityState;
+        updateHud(performance.now(), true);
+      });
+      window.addEventListener("resize", resizeCanvas);
+
+      async function init() {
+        if (!navigator.gpu) {
+          showError("navigator.gpu is unavailable");
+          return;
+        }
+        const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+        if (!adapter) {
+          showError("WebGPU adapter unavailable");
+          return;
+        }
+        device = await adapter.requestDevice();
+        device.lost.then((info) => {
+          const message = info.message || "WebGPU device lost";
+          mode = "device-lost";
+          error = message;
+          document.body.dataset.mode = mode;
+          errorElement.textContent = message;
+          updateHud(performance.now(), true);
+        });
+        context = canvas.getContext("webgpu");
+        if (!context) {
+          showError("WebGPU canvas context unavailable");
+          return;
+        }
+        resizeCanvas();
+        const format = navigator.gpu.getPreferredCanvasFormat();
+        context.configure({ device, format, alphaMode: "opaque" });
+        const shader = device.createShaderModule({
+          code: `
+            struct Params {
+              timeMs: f32,
+              frameIndex: f32,
+              triangles: f32,
+              complexity: f32,
+              aspect: f32,
+              pad0: f32,
+              pad1: f32,
+              pad2: f32,
+            };
+
+            struct VertexOutput {
+              @builtin(position) position: vec4f,
+              @location(0) color: vec3f,
+              @location(1) barycentric: vec3f,
+              @location(2) glow: f32,
+            };
+
+            @group(0) @binding(0) var<uniform> params: Params;
+
+            fn hash01(value: u32) -> f32 {
+              var x = value;
+              x = (x ^ 61u) ^ (x >> 16u);
+              x = x + (x << 3u);
+              x = x ^ (x >> 4u);
+              x = x * 0x27d4eb2du;
+              x = x ^ (x >> 15u);
+              return f32(x) / 4294967295.0;
+            }
+
+            fn hsv2rgb(c: vec3f) -> vec3f {
+              let p = abs(fract(c.xxx + vec3f(0.0, 0.6666667, 0.3333333)) * 6.0 - 3.0);
+              let rgb = clamp(p - vec3f(1.0), vec3f(0.0), vec3f(1.0));
+              return c.z * mix(vec3f(1.0), rgb, c.y);
+            }
+
+            @vertex
+            fn vs(@builtin(vertex_index) vertexIndex: u32,
+                  @builtin(instance_index) instanceIndex: u32) -> VertexOutput {
+              let baseCount = max(1u, u32(params.triangles));
+              let baseIndex = instanceIndex % baseCount;
+              let seed = baseIndex * 1664525u + 1013904223u;
+              let aspect = max(params.aspect, 0.1);
+              let timeSeconds = params.timeMs * 0.001;
+
+              var world = vec2f(hash01(seed ^ 0x9e3779b9u), hash01(seed ^ 0x85ebca6bu));
+              world = world * vec2f(2.0 * aspect, 2.0) - vec2f(aspect, 1.0);
+              let driftPhase = hash01(seed ^ 0xc2b2ae35u) * 6.2831853;
+              world += vec2f(cos(timeSeconds * 0.42 + driftPhase), sin(timeSeconds * 0.31 + driftPhase))
+                * vec2f(0.018, 0.014);
+
+
+              let spin = (hash01(seed ^ 0x27d4eb2du) * 2.0 - 1.0) * 1.15;
+              let angle = hash01(seed ^ 0x165667b1u) * 6.2831853 + timeSeconds * spin;
+              let c = cos(angle);
+              let s = sin(angle);
+              var local: vec2f;
+              var barycentric: vec3f;
+              if (vertexIndex == 0u) {
+                local = vec2f(-0.8660254, -0.5);
+                barycentric = vec3f(1.0, 0.0, 0.0);
+              } else if (vertexIndex == 1u) {
+                local = vec2f(0.8660254, -0.5);
+                barycentric = vec3f(0.0, 1.0, 0.0);
+              } else {
+                local = vec2f(0.0, 1.0);
+                barycentric = vec3f(0.0, 0.0, 1.0);
+              }
+              let scale = 0.022 + hash01(seed ^ 0x1b873593u) * 0.085;
+              let rotated = vec2f(
+                local.x * c - local.y * s,
+                local.x * s + local.y * c
+              ) * scale;
+
+              var output: VertexOutput;
+              output.position = vec4f(
+                (world.x + rotated.x) / aspect,
+                world.y + rotated.y,
+                0.0,
+                1.0
+              );
+              let hue = fract(hash01(seed ^ 0xcc9e2d51u) + timeSeconds * 0.025);
+              output.color = hsv2rgb(vec3f(hue, 0.88, 1.0));
+              output.barycentric = barycentric;
+              output.glow = 0.80 + 0.20 * sin(timeSeconds * 2.1 + f32(baseIndex) * 0.37);
+              return output;
+            }
+
+            @fragment
+            fn fs(input: VertexOutput) -> @location(0) vec4f {
+              let edge = min(min(input.barycentric.x, input.barycentric.y), input.barycentric.z);
+              let edgeGlow = 1.0 - smoothstep(0.0, 0.075, edge);
+              let fill = 0.34 + 0.66 * smoothstep(0.0, 0.17, edge);
+              let rgb = clamp(input.color * (fill + 1.45 * edgeGlow) * input.glow, vec3f(0.0), vec3f(1.0));
+              return vec4f(rgb, 1.0);
+            }
+          `
+        });
+        pipeline = device.createRenderPipeline({
+          layout: "auto",
+          vertex: { module: shader, entryPoint: "vs" },
+          fragment: { module: shader, entryPoint: "fs", targets: [{ format }] },
+          primitive: { topology: "triangle-list" }
+        });
+        uniformBuffer = device.createBuffer({
+          size: uniforms.byteLength,
+          usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        bindGroup = device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: { buffer: uniformBuffer } }]
+        });
+        mode = "webgpu";
+        document.body.dataset.mode = mode;
+        updateHud(performance.now(), true);
+        requestAnimationFrame(frame);
+      }
+
+      function frame(timestamp) {
+        const elapsed = lastFrameAt === null ? 16.67 : timestamp - lastFrameAt;
+        lastFrameAt = timestamp;
+        if (Number.isFinite(elapsed) && elapsed >= 0) {
+          samples.push(elapsed);
+          longestStallMs = Math.max(longestStallMs, elapsed);
+          if (samples.length > maxSamples) samples.shift();
+          frameCount += 1;
+        }
+        if (device && context && pipeline && bindGroup && uniformBuffer) {
+          uniforms[0] = timestamp;
+          uniforms[1] = frameCount;
+          uniforms[2] = targetTriangles;
+          uniforms[3] = complexity;
+          uniforms[4] = canvas.width / Math.max(1, canvas.height);
+          device.queue.writeBuffer(uniformBuffer, 0, uniforms);
+          const encoder = device.createCommandEncoder();
+          const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+              view: context.getCurrentTexture().createView(),
+              clearValue: { r: 0.02, g: 0.03, b: 0.06, a: 1 },
+              loadOp: "clear",
+              storeOp: "store"
+            }]
+          });
+          pass.setPipeline(pipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(3, submittedInstances());
+          pass.end();
+          device.queue.submit([encoder.finish()]);
+        }
+        updateHud(timestamp);
+        requestAnimationFrame(frame);
+      }
+
+      init().catch((initError) => {
+        showError(initError instanceof Error ? initError.message : String(initError));
+      });
+    </script>
+  </body>
+</html>

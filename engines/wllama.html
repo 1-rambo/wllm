@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>wllama per-tab engine</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #0f1115;
+        color: #e6e8ee;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #9aa3b2;
+      }
+      #engine-status {
+        color: #d7dbe3;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>wllama per-tab engine</h1>
+    <p id="engine-status">Booting engine page.</p>
+    <p><code>window.__wllmEnginePage</code></p>
+    <script type="module" src="/src/engines/wllama-entry.ts"></script>
+  </body>
+</html>

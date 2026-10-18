@@ -1,0 +1,13 @@
+{
+  "name": "@wllama/wllama-compat",
+  "version": "3.6.1",
+  "description": "Pinned Asyncify compatibility build for the wllama fork",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./wasm/*": "./wasm/*",
+    "./package.json": "./package.json"
+  },
+  "license": "MIT"
+}

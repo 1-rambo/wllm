@@ -1,0 +1,11 @@
+{
+  "version": "3.6.1",
+  "wllamaCommit": "e3972797f9d508887440e9d3fa87dc296f2dec44",
+  "llamaCppCommit": "83d855c5a6d70487121edbf4020b25c96b7a04e7",
+  "artifacts": {
+    "wllama/esm/index.js": "9823c5be18ff02d2befae642113de819959fa986f6fddeb07be67b4192a3095b",
+    "wllama/esm/wasm/wllama.wasm": "25634dfb8f1f02c76b986e29868f14d9da64c86957cd3c1863a842cf0b3fff43",
+    "wllama-compat/wasm/wllama.js": "ccc7a506891a9f6befd1d42cdb761f3254d62196279846344e8bdd2fc048407f",
+    "wllama-compat/wasm/wllama.wasm": "2c69cc34afed18fef30bc4b611a8260a00cecc166883142ff81b48241f3ba726"
+  }
+}
