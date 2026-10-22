@@ -137,6 +137,8 @@ node evaluation/scripts/run.mjs --experiment abl-3 --mode smoke --no-judge
 
 `pilot` 用于校准 tab 规模、压力档位、timeout 和切换时序。pilot 不应被当作正式结果；正式运行前确认 `evaluation:check` 和 `evaluation:verify` 仍然通过。
 
+Windows handoff runner 会区分 harness failure 与任务级失败：只有记录完整、且错误全部来自 `wllama-per-tab` 的 `task`/`recovery` 记录时，pilot 或 formal 才会继续；这表示保留 baseline 的可用性边界，不等于原 gate 通过。trial-level failure、ours 侧错误、记录缺失、协议证据无效或文件不完整仍会停止 pipeline。
+
 正式运行前还应运行：
 
 ```bash
@@ -260,6 +262,8 @@ node evaluation/scripts/report.mjs --json
 
 只有在下面条件同时成立时，才把 run 当成正式实验结果：
 
+这是严格 gate pass 的口径。若错误全部是已冻结的 `wllama-per-tab` 任务崩溃或 timeout，Windows runner 会继续完成后续 formal，并把这种 run 标为 `task-failure-outcome`；它只能作为 availability/resource-boundary 结果，不能写成完整 PASS。
+
 1. `summary.json` 的 completeness 达到预期，且 `errorCount === 0`。
 2. 所有 task/recovery 记录都有 terminal 状态。
 3. pressure tab 在测量窗口内为 `visible`。
@@ -338,3 +342,5 @@ impl\artifacts\evaluation\e2e-recovery-pressure\win32\<model-id>\<timestamp>\
 ```
 
 Windows 只运行 `e2e-1` 和 `e2e-2`。如果 10-tab、3B 或 `wllama-per-tab` 触发资源阻塞，保留原始 run 并在 `failure.json`/报告中标记 `platform resource block`；不要减少 tab 数或更换模型后继续同一正式 run。
+
+如果资源阻塞表现为已完成记录中的 `wllama-per-tab` task/recovery crash 或 timeout，runner 会继续 formal，并在最终报告中保留固定分母、错误数和 `task-failure-outcome`。不要为了得到完整 PASS 而删除这些记录；条件性能只使用双方成功任务。

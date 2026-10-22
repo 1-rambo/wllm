@@ -16,6 +16,8 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
+import { assessTaskFailureOutcome } from "./task-failure-policy.mjs";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evaluationRoot = path.resolve(here, "..");
 const implRoot = path.resolve(evaluationRoot, "..");
@@ -116,12 +118,20 @@ try {
     const gateFailures = currentStages.filter(
       (stage) => stage.resultStatus === "gate-fail"
     );
+    const taskFailureOutcomes = currentStages.filter(
+      (stage) =>
+        stage.mode === "formal" && stage.resultStatus === "task-failure-outcome"
+    );
     session.state.overallStatus =
       unfinishedStages.length > 0
         ? "partial"
-        : gateFailures.length > 0
-          ? "completed-with-gate-failures"
-          : "completed";
+        : gateFailures.length > 0 && taskFailureOutcomes.length > 0
+          ? "completed-with-task-and-gate-failures"
+          : gateFailures.length > 0
+            ? "completed-with-gate-failures"
+            : taskFailureOutcomes.length > 0
+              ? "completed-with-task-failures"
+              : "completed";
   }
   session.state.completedAt = new Date().toISOString();
   const packagePath = await finalizeSession(session.state, session.directory);
@@ -361,7 +371,10 @@ async function runE2EStage(session, options) {
         attempt
       )
     }),
-    reusable: (candidate) => candidate.validation?.technicalPass === true
+    reusable: (candidate) =>
+      candidate.validation?.technicalPass === true ||
+      (candidate.mode !== "smoke" &&
+        candidate.validation?.taskFailureOutcome === true)
   });
 
   if (stage.status !== "completed") {
@@ -383,13 +396,17 @@ async function runE2EStage(session, options) {
 
   const validation = await inspectRun(stage.outputDirectory, { experiment, mode });
   stage.validation = validation;
+  const acceptedTaskFailureOutcome =
+    validation.taskFailureOutcome === true && mode !== "smoke";
   stage.resultStatus = validation.technicalPass
     ? validation.formalGatePass
       ? "pass"
       : mode === "formal"
         ? "gate-fail"
         : "technical-pass"
-    : "incomplete";
+    : acceptedTaskFailureOutcome
+      ? "task-failure-outcome"
+      : "incomplete";
   stage.finishedAt = new Date().toISOString();
   await saveState(session);
 
@@ -402,7 +419,7 @@ async function runE2EStage(session, options) {
       stage.attempt
     );
   }
-  if (!validation.technicalPass) {
+  if (!validation.technicalPass && !acceptedTaskFailureOutcome) {
     stage.status = "incomplete";
     stage.resultStatus = "incomplete";
     await saveState(session);
@@ -417,6 +434,12 @@ async function runE2EStage(session, options) {
     `  ${stageId}: records=${validation.recordCount ?? "?"}, ` +
       `complete=${validation.complete}, gates=${formatGateCounts(validation.gateCounts)}`
   );
+  if (acceptedTaskFailureOutcome) {
+    console.log(
+      `  ${stageId}: preserved ${validation.taskFailureAssessment.acceptedTaskFailureCount} ` +
+        "wllama-per-tab task failures as availability outcomes; continuing."
+    );
+  }
 }
 
 async function runLoggedStage(session, options) {
@@ -532,6 +555,7 @@ async function captureReport(session, experiment, model, runDirectory, attempt) 
 async function inspectRun(runDirectory, options = {}) {
   const { experiment = null, mode = null } = options;
   const summary = await readJsonIfPresent(path.join(runDirectory, "summary.json"));
+  const records = await readJsonlIfPresent(path.join(runDirectory, "records.jsonl"));
   const gateReport = await readJsonIfPresent(path.join(runDirectory, "gate-report.json"));
   const runMetadata = await readJsonIfPresent(path.join(runDirectory, "run.json"));
   const failure = await readJsonIfPresent(path.join(runDirectory, "failure.json"));
@@ -554,6 +578,24 @@ async function inspectRun(runDirectory, options = {}) {
     mode !== "formal" ||
     (expectedRecordCount === expectedFormalRecordCount &&
       gates.length === expectedGateCount);
+  const technicalPass =
+    summary !== null &&
+    runMetadata !== null &&
+    complete &&
+    errorCount === 0 &&
+    !failure &&
+    protocolMatches &&
+    (mode !== "formal" || gateReport !== null);
+  const taskFailureAssessment = assessTaskFailureOutcome(records, summary);
+  const taskFailureOutcome =
+    summary !== null &&
+    runMetadata !== null &&
+    complete &&
+    !failure &&
+    protocolMatches &&
+    (mode === "pilot" || mode === "formal") &&
+    taskFailureAssessment.eligible &&
+    gateReport !== null;
   return {
     complete,
     recordCount: summary?.recordCount ?? null,
@@ -577,17 +619,13 @@ async function inspectRun(runDirectory, options = {}) {
     configSha256: runMetadata?.configSha256 ?? null,
     filesPresent: {
       summary: summary !== null,
+      records: records !== null,
       gateReport: gateReport !== null,
       run: runMetadata !== null
     },
-    technicalPass:
-      summary !== null &&
-      runMetadata !== null &&
-      complete &&
-      errorCount === 0 &&
-      !failure &&
-      protocolMatches &&
-      (mode !== "formal" || gateReport !== null)
+    taskFailureAssessment,
+    taskFailureOutcome,
+    technicalPass
   };
 }
 
@@ -698,6 +736,14 @@ async function writeResults(state, resultsFile) {
         `${validation.complete ?? "-"} | ${validation.errorCount ?? "-"} | ` +
         `${formatGateCounts(validation.gateCounts)} | ` +
         `${stage.resultStatus ?? stage.status} | \`${artifact}\` |`
+    );
+  }
+  if (formalStages.some((stage) => stage.resultStatus === "task-failure-outcome")) {
+    lines.push(
+      "",
+      "`task-failure-outcome` preserves task-level wllama-per-tab crashes or timeouts as",
+      "availability outcomes. These runs are not strict gate passes; failed tasks remain in",
+      "the fixed denominator and are excluded from paired successful-task performance."
     );
   }
   lines.push("", "## Gate details", "");
@@ -1029,6 +1075,19 @@ async function readJson(file) {
   return JSON.parse(await readFile(file, "utf8"));
 }
 
+async function readJsonlIfPresent(file) {
+  try {
+    const content = await readFile(file, "utf8");
+    return content
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line));
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function readJsonIfPresent(file) {
   try {
     return await readJson(file);
@@ -1115,7 +1174,7 @@ function printHelp() {
 Options:
   --model-set small     Run Llama-1B and Qwen-1.5B (default)
   --model-set all       Run all four configured models
-  --skip-pilot          Skip pilot runs after smoke
+  --skip-pilot          Skip pilot runs after smoke (not recommended)
   --resume              Resume the latest session without rerunning completed stages
   --session <id>        Select a named session
   --operator <name>     Record the operator name
