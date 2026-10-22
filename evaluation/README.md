@@ -298,6 +298,8 @@ node evaluation/scripts/report.mjs --json
 
 ## 11. Windows 新机器完整步骤
 
+如果实验由外部合作者执行，优先使用仓库根目录的 `Run-Windows-E2E.cmd`。该入口会自动完成环境检查、依赖和模型下载、两个应用构建、smoke/pilot/formal、报告生成和结果打包；完整操作与回传方式见 `Windows-E2E-Handoff.md`。以下手工步骤仅用于调试。
+
 以下步骤在原生 Windows 的 PowerShell 中执行，不使用 WSL：
 
 1. 安装 Node.js 20 LTS、Git 和 Google Chrome，并确认 `node --version`、`npm --version`、`git --version` 可用。

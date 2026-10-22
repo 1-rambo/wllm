@@ -37,6 +37,21 @@ $env:CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 export CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 ```
 
+## Windows Collaborator Handoff
+
+For an external Windows machine, use the one-stop handoff instead of the manual
+setup below:
+
+```text
+Run-Windows-E2E.cmd
+```
+
+It runs the environment checks, pinned model/application preparation,
+verification, smoke/pilot/formal stages, reporting, and result packaging. The
+full checklist and return format are in `Windows-E2E-Handoff.md`. Use
+`Resume-Windows-E2E.cmd` after an infrastructure interruption and
+`Package-Windows-Results.cmd` after editing `FEEDBACK.md`.
+
 ## First Setup
 
 Run all commands below from `impl/`.

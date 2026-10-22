@@ -12,3 +12,4 @@ vendor/artifex-webgame/
 vendor/holtwick-tavern/
 public/models/
 *.log
+handoff/
