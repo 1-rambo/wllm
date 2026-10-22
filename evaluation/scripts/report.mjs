@@ -44,6 +44,7 @@ if (cli.json) {
 printHeader({ runDirectory, experiment, runMetadata, summary, gateReport, records });
 printQuality(summary, records);
 printServing(summary, records);
+printClickResponse(summary);
 printFrames(summary, records);
 printPairwise(summary, experiment);
 printGates(gateReport);
@@ -280,6 +281,36 @@ function printServing(summary, records) {
   console.log("");
 }
 
+function printClickResponse(summary) {
+  console.log("CLICK RESPONSE (EXPLORATORY)");
+  const click = summary.clickResponse;
+  if (!click || !Number.isFinite(click.attempts) || click.attempts === 0) {
+    console.log("no click-response samples");
+    console.log("");
+    return;
+  }
+  console.log(
+    `valid=${click.valid}/${click.attempts} (${formatRatio(click.validFraction)})  tasks=${click.tasksValid}/${click.tasksAttempted}`
+  );
+  for (const row of click.byArmPressure ?? []) {
+    const metrics = row.metrics ?? {};
+    console.log(
+      [
+        `arm=${row.arm}`,
+        `pressure=${row.pressureId ?? "none"}`,
+        `triangles=${row.pressureTriangles ?? "-"}`,
+        `tasks=${row.tasksValid}/${row.tasksAttempted}`,
+        `clicks=${row.valid}/${row.attempts}`,
+        `p50=${formatNumber(metrics.clickResponseMs?.median)}`,
+        `p95=${formatNumber(metrics.clickResponseMs?.p95)}`,
+        `activation_p50=${formatNumber(metrics.clickActivationMs?.median)}`,
+        `frame_p50=${formatNumber(metrics.clickFrameResponseMs?.median)}`
+      ].join("  ")
+    );
+  }
+  console.log("");
+}
+
 function printFrames(summary, records) {
   console.log("FRAME PERFORMANCE");
   for (const group of summary.groups ?? []) {
@@ -316,6 +347,9 @@ function printPairwise(summary, experiment) {
   const metrics = [
     "priorityFirstTokenLatencyMs",
     "priorityCompletionMs",
+    "clickResponseMs",
+    "clickActivationMs",
+    "clickFrameResponseMs",
     "recoveryFirstTokenLatencyMs",
     "recoveryCompletionMs",
     "replayedTokens",

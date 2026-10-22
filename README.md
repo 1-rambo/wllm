@@ -24,7 +24,7 @@ commits by `npm run evaluation:prepare`.
 - Google Chrome or Chromium with WebGPU enabled.
 - At least 20 GiB of free disk space for models, build output, browser cache,
   and artifacts.
-- At least 16 GiB RAM; 24 GiB or more is recommended for the 10-tab, 3B-model
+- At least 16 GiB RAM; 24 GiB or more is recommended for the 11-tab, 3B-model
   cases.
 
 The default Chrome paths are detected automatically. Override them when needed:
@@ -51,6 +51,10 @@ verification, smoke/pilot/formal stages, reporting, and result packaging. The
 full checklist and return format are in `Windows-E2E-Handoff.md`. Use
 `Resume-Windows-E2E.cmd` after an infrastructure interruption and
 `Package-Windows-Results.cmd` after editing `FEEDBACK.md`.
+
+E2E-1 also runs an exploratory, non-gating click-response probe. Seeded
+`page.bringToFront()` tab switches measure activation through the second
+`requestAnimationFrame`; the report shows coverage and latency separately.
 
 ## First Setup
 
@@ -90,7 +94,7 @@ and Windows without shell-specific wrappers:
 ```bash
 node evaluation/scripts/run.mjs --experiment e2e-1 --mode smoke --no-judge
 node evaluation/scripts/run.mjs --experiment e2e-1 --mode pilot --no-judge
-node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal
+node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal --no-judge
 ```
 
 Equivalent convenience commands are available:

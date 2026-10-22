@@ -54,7 +54,7 @@ export function pairedBootstrapDifference(pairs, options = {}) {
   }
   const differences = usable.map(([left, right]) => left - right);
   const iterations = options.iterations ?? 5000;
-  const random = mulberry32(options.seed ?? 20261015);
+  const random = seededRandom(options.seed ?? 20261015);
   const resampled = [];
   for (let iteration = 0; iteration < iterations; iteration += 1) {
     let total = 0;
@@ -84,7 +84,7 @@ export function ratioDifference(numerator, denominator) {
   return (numerator - denominator) / denominator;
 }
 
-function mulberry32(seed) {
+export function seededRandom(seed) {
   return function random() {
     let value = (seed += 0x6d2b79f5);
     value = Math.imul(value ^ (value >>> 15), value | 1);

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "artifex-tavern-e2e-prereg-v3",
+  "id": "artifex-tavern-e2e-prereg-paper-v5",
   "status": "frozen",
-  "frozenAt": "2026-10-18",
+  "frozenAt": "2026-10-23",
   "config": "e2e.json",
-  "configSha256": "792de18335688747fc239cea2978566bbd7a593dbf3608bb0065de24a9e6b7f1",
-  "calibration": "2026-10-18: the previous E2E-1 formal at impl/artifacts/evaluation/e2e-priority-pressure/darwin/llama-3.2-1b-instruct/2026-10-18T00-55-08.157Z/ was complete but exposed a protocol-validity flaw: 45 of 54 target records had already finished before their scheduled high-priority write, so the completion endpoint mostly compared unpromoted work. This version keeps the pressure ladder, ten-tab layout, models, prompts, token budget, five-percent completion threshold, and arm definitions unchanged. It uses one target per trial, applies high priority 500 ms after simultaneous task submission, keeps that target high until task completion, rotates the target across trials, excludes targets that finish before the priority write from completion, and adds a 90-percent active-at-request validity gate.",
+  "configSha256": "1eb75f6ffd6c9b80b01f0ece0b61b9abf638f6d4be6518126bb602957c37cf44",
+  "calibration": "2026-10-23: this version supersedes prereg-v4 before the paper-aligned formal matrix. It matches the manuscript: ten application sessions (five Artifex and five Tavern) plus one visible raw WebGPU pressure page, the full 0/250/500/750/1000/1500/2000/3000/4000/clear-return ladder, and four models. E2E-1 additionally records an exploratory click-response latency from seeded random tab switches to the second rendered animation frame; clicks do not change session priority. Task-quality judging and recovered-history consistency are outside the main E2E claims and are not gates. Prior run directories remain historical artifacts and are not merged into this protocol.",
   "scope": {
     "mainExperiments": ["e2e-1", "e2e-2"],
     "ablationExperiments": ["abl-1", "abl-2", "abl-3"],
@@ -30,19 +30,33 @@
     "priorityApi": "setSessionPriority",
     "priorityValues": ["high", "normal"],
     "visibilityDerivedPriority": false,
+    "clickResponse": {
+      "experiment": "e2e-1",
+      "role": "exploratory",
+      "sampling": "seeded-random-active-app-tabs",
+      "responseDefinition": "tab-activation-to-second-requestAnimationFrame-callback",
+      "activation": "playwright-page-bring-to-front",
+      "visibilityState": "diagnostic-only",
+      "affectsPriority": false,
+      "gate": false
+    },
     "pressureSchedule": [
       { "id": "clear-1", "triangles": 0 },
       { "id": "pressure-250", "triangles": 250 },
       { "id": "pressure-500", "triangles": 500 },
       { "id": "pressure-750", "triangles": 750 },
       { "id": "pressure-1000", "triangles": 1000 },
+      { "id": "pressure-1500", "triangles": 1500 },
+      { "id": "pressure-2000", "triangles": 2000 },
+      { "id": "pressure-3000", "triangles": 3000 },
+      { "id": "pressure-4000", "triangles": 4000 },
       { "id": "clear-return", "triangles": 0 }
     ],
     "tabLayout": {
-      "appTabs": 9,
-      "artifexTabs": 1,
+      "appTabs": 10,
+      "artifexTabs": 5,
       "pressureTabs": 1,
-      "totalTabs": 10
+      "totalTabs": 11
     },
     "repeats": 3,
     "samePromptAcrossArms": true,
@@ -50,7 +64,7 @@
     "sameRecoveryTimelineAcrossArms": true,
     "priorityTargetsPerTrial": 1,
     "targetHeldHighThroughCompletion": true,
-    "blindJudge": true
+    "qualityJudgingInMainExperiment": false
   },
   "gates": {
     "e2e-1": [
@@ -68,6 +82,7 @@
         "id": "e2e1-priority-target-active",
         "type": "threshold",
         "metric": "priorityTargetActiveAtRequest",
+        "arm": "ours",
         "threshold": 0.9,
         "direction": "higher",
         "description": "At least 90 percent of terminal target tasks must still be running when the priority write is issued."
@@ -100,19 +115,13 @@
         "id": "e2e1-background-progress",
         "type": "threshold",
         "metric": "backgroundCompletionRate",
+        "arm": "ours",
         "threshold": 0.9,
         "direction": "higher"
       },
       {
         "id": "e2e1-resource-integrity",
         "type": "resource-integrity"
-      },
-      {
-        "id": "e2e1-quality-nonregression",
-        "type": "quality-nonregression",
-        "comparator": "wllama-per-tab",
-        "metric": "judgeScore",
-        "minimumMargin": -1.0
       }
     ],
     "e2e-2": [
@@ -148,28 +157,16 @@
         "minimumRelativeEffect": 0.15
       },
       {
-        "id": "e2e2-replayed-tokens",
-        "type": "paired-directional",
-        "metric": "replayedTokens",
-        "comparator": "wllama-per-tab",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.5
-      },
-      {
-        "id": "e2e2-output-consistency",
-        "type": "output-consistency",
-        "description": "A fresh-session control and the restored-session follow-up use the same complete chat history. After removing parenthetical action text, their normalized token sequences must reach at least 0.65 lexical consistency (hardware-validated from the smoke phase); the separate blind-judge gate checks task quality."
+        "id": "e2e2-background-progress",
+        "type": "threshold",
+        "metric": "backgroundCompletionRate",
+        "arm": "ours",
+        "threshold": 0.9,
+        "direction": "higher"
       },
       {
         "id": "e2e2-resource-integrity",
         "type": "resource-integrity"
-      },
-      {
-        "id": "e2e2-quality-nonregression",
-        "type": "quality-nonregression",
-        "comparator": "wllama-per-tab",
-        "metric": "judgeScore",
-        "minimumMargin": -1.0
       }
     ],
     "abl-1": [

@@ -219,9 +219,14 @@ function pairedGate(base, definition, { summary, complete }) {
 }
 
 function thresholdGate(base, definition, { records, complete }) {
-  const eligibleRecords = definition.metric === "priorityTargetActiveAtRequest"
-    ? records.filter((record) => record.arm !== "wllama-per-tab")
+  let eligibleRecords = definition.arm
+    ? records.filter((record) => record.arm === definition.arm)
     : records;
+  if (definition.metric === "priorityTargetActiveAtRequest") {
+    eligibleRecords = eligibleRecords.filter(
+      (record) => record.arm !== "wllama-per-tab"
+    );
+  }
   const values = eligibleRecords
     .map((record) => metricValue(record, definition.metric))
     .filter((value) => Number.isFinite(value));
@@ -241,6 +246,10 @@ function thresholdGate(base, definition, { records, complete }) {
   const observed = ratioAggregation
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : median(values);
+  const numerator = ratioAggregation
+    ? values.reduce((sum, value) => sum + value, 0)
+    : null;
+  const denominator = ratioAggregation ? values.length : null;
   const pass =
     definition.direction === "higher"
       ? observed >= definition.threshold
@@ -249,7 +258,10 @@ function thresholdGate(base, definition, { records, complete }) {
     ...base,
     status: complete !== true ? "incomplete" : pass ? "pass" : "fail",
     metric: definition.metric,
+    arm: definition.arm ?? null,
     n: values.length,
+    numerator,
+    denominator,
     observed,
     threshold: definition.threshold,
     direction: definition.direction

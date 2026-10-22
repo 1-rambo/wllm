@@ -1,9 +1,13 @@
 import { median, pairedBootstrapDifference, summarize } from "./statistics.mjs";
+import { isValidClickResponse } from "./click-response.mjs";
 
 const METRICS = [
   "ttftMs",
   "wallMs",
   "decodeTokensPerSecond",
+  "clickResponseMs",
+  "clickActivationMs",
+  "clickFrameResponseMs",
   "priorityFirstTokenLatencyMs",
   "priorityCompletionMs",
   "priorityAdvantageGapMs",
@@ -29,12 +33,14 @@ export function buildSummary(records, options = {}) {
   const pairwise = buildPairwise(taskRecords, options.armPairs ?? []);
   const completeness = buildCompleteness(taskRecords, options.expected ?? null);
   const quality = summarizeQuality(records);
+  const clickResponse = summarizeClickResponse(taskRecords);
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     metrics: METRICS,
     groups,
     pairwise,
+    clickResponse,
     completeness,
     quality,
     errorCount: records.filter(
@@ -149,6 +155,91 @@ function buildCompleteness(records, expected) {
     observed: records.length,
     complete: records.length >= expected
   };
+}
+
+function summarizeClickResponse(records) {
+  const armGroups = new Map();
+  const pressureGroups = new Map();
+  let attempts = 0;
+  let valid = 0;
+  let tasksAttempted = 0;
+  let tasksValid = 0;
+
+  for (const record of records) {
+    const recordAttempts = Number(record.clickResponseAttempts ?? 0);
+    const recordValid = Number(record.clickResponseValid ?? 0);
+    if (!Number.isFinite(recordAttempts) || recordAttempts <= 0) continue;
+
+    const validCount = Number.isFinite(recordValid) ? recordValid : 0;
+    attempts += recordAttempts;
+    valid += validCount;
+    tasksAttempted += 1;
+    if (validCount > 0) tasksValid += 1;
+
+    for (const [collection, key] of [
+      [armGroups, record.arm],
+      [pressureGroups, `${record.arm}|${record.pressureId ?? "none"}`]
+    ]) {
+      const row = collection.get(key) ?? {
+        arm: record.arm,
+        pressureId: record.pressureId ?? null,
+        pressureTriangles: record.pressureTriangles ?? null,
+        tasksAttempted: 0,
+        tasksValid: 0,
+        attempts: 0,
+        valid: 0,
+        samples: {
+          clickResponseMs: [],
+          clickActivationMs: [],
+          clickFrameResponseMs: []
+        },
+        taskMedians: []
+      };
+      row.tasksAttempted += 1;
+      row.tasksValid += validCount > 0 ? 1 : 0;
+      row.attempts += recordAttempts;
+      row.valid += validCount;
+      if (Number.isFinite(record.clickResponseMs)) {
+        row.taskMedians.push(record.clickResponseMs);
+      }
+      for (const sample of Array.isArray(record.clickResponses) ? record.clickResponses : []) {
+        if (!isValidClickResponse(sample)) continue;
+        for (const [metric, values] of Object.entries(row.samples)) {
+          if (Number.isFinite(sample[metric])) values.push(sample[metric]);
+        }
+      }
+      collection.set(key, row);
+    }
+  }
+
+  return {
+    role: "exploratory",
+    gate: false,
+    attempts,
+    valid,
+    validFraction: attempts > 0 ? valid / attempts : null,
+    tasksAttempted,
+    tasksValid,
+    byArm: finalizeClickGroups(armGroups),
+    byArmPressure: finalizeClickGroups(pressureGroups)
+  };
+}
+
+function finalizeClickGroups(groups) {
+  return [...groups.values()].map((row) => ({
+    arm: row.arm,
+    pressureId: row.pressureId,
+    pressureTriangles: row.pressureTriangles,
+    tasksAttempted: row.tasksAttempted,
+    tasksValid: row.tasksValid,
+    attempts: row.attempts,
+    valid: row.valid,
+    validFraction: row.attempts > 0 ? row.valid / row.attempts : null,
+    metrics: Object.fromEntries(
+      Object.entries(row.samples).map(([metric, values]) => [metric, summarize(values)])
+    ),
+    taskMedianClickResponseMs: summarize(row.taskMedians)
+  }));
 }
 
 function summarizeQuality(records) {

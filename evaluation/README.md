@@ -1,7 +1,6 @@
 # E2E 评测运行手册
 
-本手册覆盖 ArtifexWebGame + Holtwick Tavern 的真实应用 E2E 评测，以及三个本机 ablation。实验设计以
-`docs/superpowers/plans/2026-10-15-e2e-artifex-tavern-pressure-plan.md` 为准；本目录中的配置在正式运行前已经冻结，不要在看到结果后修改。
+本手册覆盖 ArtifexWebGame + Holtwick Tavern 的真实应用 E2E 评测，以及三个本机 ablation。主实验使用 10 个应用会话（5 个 Artifex、5 个 Tavern）和 1 个可见的 raw WebGPU 压力页。配置与 preregistration 在正式运行前冻结，不要在看到结果后修改。
 
 ## 1. 范围与分工
 
@@ -26,8 +25,8 @@
 | Llama | `llama-3.2-1b-instruct` | `llama-3.2-3b-instruct` | macOS + Windows | 仅小模型，macOS |
 | Qwen | `qwen2.5-1.5b-instruct` | `qwen2.5-3b-instruct` | macOS + Windows | 仅小模型，macOS |
 
-- `e2e-1`、`e2e-2`：两个平台都运行四个主模型，每个平台分别完成 4 个模型 × 324 条记录。
-- `abl-1`、`abl-2`、`abl-3`：只在 macOS 上运行两个小模型，每个 ablation 为 2 个模型 × 324 条记录。
+- `e2e-1`、`e2e-2`：两个平台都运行四个主模型，每个平台分别完成 4 个模型 × 600 条记录。
+- `abl-1`、`abl-2`、`abl-3`：只在 macOS 上运行两个小模型，每个 ablation 为 2 个模型 × 600 条记录。
 - Windows 不运行 ablation；跨平台不使用同一模型在同一 run 中混跑。
 - WebLLM 不进入当前主实验或 ablation；主对照是 `ours` 与 `wllama-per-tab`。
 
@@ -35,18 +34,18 @@
 
 | 实验 | 每个模型 | 完整模型集 |
 |---|---:|---:|
-| `e2e-1` | 324 task records | 1296 |
-| `e2e-2` | 324 recovery/background records | 1296 |
-| `abl-1` / `abl-2` / `abl-3` | 324 records | 648（两个小模型） |
+| `e2e-1` | 600 task records | 2400 |
+| `e2e-2` | 600 recovery/background records | 2400 |
+| `abl-1` / `abl-2` / `abl-3` | 600 records | 1200（两个小模型） |
 
-计算口径：`2 arms × repeats × pressure levels × app tabs`。judge 分数附加在已有 task 记录上，不另算 task record。
+计算口径：`2 arms × 3 repeats × 10 pressure entries × 10 app tabs = 600`。压力档位为 `0, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, clear-return`。主实验不运行 judge；质量指标不属于当前 E2E 的主结论。
 
 ## 2. 前置条件
 
 - Node.js 20 或更高版本。
 - Google Chrome 或 Chromium，且能够运行 WebGPU。
 - Git 和可用的 C/C++ 构建环境（仅在本地 vendor 依赖尚未准备时需要）。
-- 至少 16 GiB 内存；10-tab、3B 模型和 wllama-per-tab 同时运行时建议 24 GiB 以上。
+- 至少 16 GiB 内存；11-tab、3B 模型和 wllama-per-tab 同时运行时建议 24 GiB 以上。
 - 至少 20 GiB 可用磁盘；四个 GGUF、应用构建产物、浏览器缓存和 artifacts 都会占用空间。
 - macOS 与 Windows 使用同主版本 Chrome。固定电源策略、关闭自动休眠，并避免运行其他 GPU 或浏览器负载。
 - 实验过程使用真实可见 tab。Chrome 不能被最小化；pressure tab 在某些档位会短暂退到后台，但 trial 结束时必须重新处于 `visible`。
@@ -208,7 +207,9 @@ node evaluation/scripts/run.mjs --experiment abl-1 --mode formal --model llama-3
 
 ## 6. 每个 run 的预期数据
 
-E2E-1 每个 trial 有 9 个 app session；E2E-2 每个 trial 有 1 个 recovery target 和 8 个 background session。正式 schedule、重复数和 tab 数由冻结配置控制。
+主实验每个 trial 有 10 个 app session（5 个 Artifex、5 个 Tavern）和 1 个 visible pressure tab。E2E-1 每轮提升 1 个 target session，其余 9 个作为 background；E2E-2 每轮以 1 个 session 为 recovery target，其余 9 个持续作为 background。正式 schedule、重复数和 tab 数由冻结配置控制。
+
+E2E-1 还记录探索性的 click-response：按固定 seed 在仍在运行的应用 tab 中随机切换，首次延迟 1 s、后续间隔 1.5--3.5 s、每 trial 最多 10 次。每次通过 `page.bringToFront()` 激活真实 tab，测到该页第二个 `requestAnimationFrame` callback，随后恢复 pressure tab；该操作不调用 priority API。macOS Chrome 自动化会把同窗口后台页的 Page Visibility API 也报成 `visible`，因此 `visibilityState` 只作为诊断字段，不作为有效样本条件。click-response 不是 gate，也不影响任务分母；样本只写入对应 task record 的 `clickResponses` 和 `events.jsonl`。如果覆盖率不足或效果不稳定，论文可以不报告这一项。
 
 每个 run 目录至少包含：
 
@@ -223,7 +224,7 @@ latest.json
 
 其中：
 
-- `records.jsonl`：任务、恢复、judge 记录。
+- `records.jsonl`：任务与恢复记录；E2E-1 的 `clickResponses` 嵌套在对应 task record 中。
 - `events.jsonl`：priority、pressure、生命周期和 trial 级事件。
 - `summary.json`：按 arm/pressure/app/role 聚合，以及配对 bootstrap 对比。
 - `gate-report.json`：冻结 gate 的 id、status、效应量和分母/分子；只看这一份文件判断 pass/fail。
@@ -256,7 +257,9 @@ node evaluation/scripts/report.mjs --experiment e2e-1 --platform win32 --model l
 node evaluation/scripts/report.mjs --json
 ```
 
-报表会把任务质量、serving/priority、frame 性能和配对差值分开打印，避免把 judge 分数与响应时间混成一列。
+报表把 serving/priority、recovery、frame 性能和配对差值分开打印。
+
+E2E-1 报表另外打印 `CLICK RESPONSE (EXPLORATORY)`：有效 click 样本数、覆盖任务数、按 arm/pressure 的 click-response P50/P95，以及激活和帧响应拆分。这个区块没有 gate 状态。
 
 ## 8. 判定与失败处理
 
@@ -264,20 +267,19 @@ node evaluation/scripts/report.mjs --json
 
 这是严格 gate pass 的口径。若错误全部是已冻结的 `wllama-per-tab` 任务崩溃或 timeout，Windows runner 会继续完成后续 formal，并把这种 run 标为 `task-failure-outcome`；它只能作为 availability/resource-boundary 结果，不能写成完整 PASS。
 
-1. `summary.json` 的 completeness 达到预期，且 `errorCount === 0`。
+1. `summary.json` 的 completeness 达到预期；`errorCount` 单独报告，不能从分母中删除失败任务。
 2. 所有 task/recovery 记录都有 terminal 状态。
 3. pressure tab 在测量窗口内为 `visible`。
 4. E2E-2 的每条 recovery 记录都有 hidden、frozen、reload、active 证据。
 5. `gate-report.json` 没有 `fail` 或 `incomplete`。
 6. 没有 OOM、wasm memory、`Invalid magic number`、memory access 或 device lost。
-7. judge 有效比例达到配置中的 `minimumValidFraction`。
+7. E2E-1 的优先级门和 E2E-2 的恢复门均按固定配对口径计算，并单独报告后台完成率。
 
 以下情况必须保留原 run，记录为 incomplete 或 invalid，不能删除、补记录、挑窗口或降低 tab 数：
 
 - Chrome 崩溃、WASM memory error、`Invalid magic number`、device lost。
-- 10-tab 或 3B 配置在 Windows 上资源不足。
+- 11-tab 或 3B 配置在 Windows 上资源不足。
 - pressure tab 不可见或生命周期证据缺失。
-- judge 输出缺失/无效比例过高。
 - 运行在过程中被中止，或 `summary.json` 不完整。
 
 只有 Vite reload、端口冲突等明确的基础设施瞬态错误，才允许在保留失败目录后使用新的 timestamp 重启。不能把两个 run 拼接为一份结果。
@@ -325,7 +327,7 @@ npm run evaluation:verify
 node evaluation/scripts/prepare-models.mjs --model llama-3.2-1b-instruct
 node evaluation/scripts/run.mjs --experiment e2e-1 --mode smoke --no-judge
 node evaluation/scripts/run.mjs --experiment e2e-1 --mode pilot --model llama-3.2-1b-instruct --no-judge
-node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal --model llama-3.2-1b-instruct
+node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal --model llama-3.2-1b-instruct --no-judge
 ```
 
 6. 查看结果：
@@ -341,6 +343,6 @@ impl\artifacts\evaluation\e2e-priority-pressure\win32\<model-id>\<timestamp>\
 impl\artifacts\evaluation\e2e-recovery-pressure\win32\<model-id>\<timestamp>\
 ```
 
-Windows 只运行 `e2e-1` 和 `e2e-2`。如果 10-tab、3B 或 `wllama-per-tab` 触发资源阻塞，保留原始 run 并在 `failure.json`/报告中标记 `platform resource block`；不要减少 tab 数或更换模型后继续同一正式 run。
+Windows 只运行 `e2e-1` 和 `e2e-2`。如果 11-tab、3B 或 `wllama-per-tab` 触发资源阻塞，保留原始 run 并在 `failure.json`/报告中标记 `platform resource block`；不要减少 tab 数或更换模型后继续同一正式 run。
 
 如果资源阻塞表现为已完成记录中的 `wllama-per-tab` task/recovery crash 或 timeout，runner 会继续 formal，并在最终报告中保留固定分母、错误数和 `task-failure-outcome`。不要为了得到完整 PASS 而删除这些记录；条件性能只使用双方成功任务。

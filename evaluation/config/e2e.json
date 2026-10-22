@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 2,
-  "id": "artifex-tavern-e2e-v2",
-  "description": "Cross-platform end-to-end evaluation for ArtifexWebGame and Holtwick Tavern under explicit session priority, real lifecycle transitions, and raw WebGPU render pressure.",
+  "schemaVersion": 3,
+  "id": "artifex-tavern-e2e-paper-v5",
+  "description": "Paper-aligned end-to-end evaluation with five Artifex sessions, five Holtwick Tavern sessions, and one raw WebGPU pressure page per trial.",
   "modelSets": {
     "main": [
       "llama-3.2-1b-instruct",
@@ -173,10 +173,10 @@
     }
   },
   "layout": {
-    "appTabs": 9,
-    "artifexTabs": 1,
+    "appTabs": 10,
+    "artifexTabs": 5,
     "pressureTabs": 1,
-    "totalTabs": 10
+    "totalTabs": 11
   },
   "pressure": {
     "schedule": [
@@ -185,16 +185,23 @@
       { "id": "pressure-500", "triangles": 500 },
       { "id": "pressure-750", "triangles": 750 },
       { "id": "pressure-1000", "triangles": 1000 },
+      { "id": "pressure-1500", "triangles": 1500 },
+      { "id": "pressure-2000", "triangles": 2000 },
+      { "id": "pressure-3000", "triangles": 3000 },
+      { "id": "pressure-4000", "triangles": 4000 },
       { "id": "clear-return", "triangles": 0 }
     ],
     "pilotSchedule": [
       { "id": "clear-1", "triangles": 0 },
-      { "id": "pressure-500", "triangles": 500 },
       { "id": "pressure-1000", "triangles": 1000 },
+      { "id": "pressure-2000", "triangles": 2000 },
+      { "id": "pressure-4000", "triangles": 4000 },
       { "id": "clear-return", "triangles": 0 }
     ],
     "smokeSchedule": [
-      { "id": "clear-1", "triangles": 0 }
+      { "id": "clear-1", "triangles": 0 },
+      { "id": "pressure-1000", "triangles": 1000 },
+      { "id": "clear-return", "triangles": 0 }
     ],
     "complexity": 128,
     "passes": 1,
@@ -213,27 +220,43 @@
     "disableVisibilityDerivedPriority": true,
     "startDelayMs": 500
   },
+  "clickResponse": {
+    "enabledForExperiments": [
+      "e2e-1"
+    ],
+    "seed": 20261022,
+    "initialDelayMs": 1000,
+    "intervalMinMs": 1500,
+    "intervalMaxMs": 3500,
+    "maxClicksPerTrial": 10,
+    "responseFrames": 2,
+    "clickTimeoutMs": 10000,
+    "frameTimeoutMs": 10000,
+    "restorePressureAfterClick": true,
+    "affectsPriority": false
+  },
   "recovery": {
     "warmupTurns": 3,
     "freezeMs": 800,
     "postFreezeMs": 500,
     "reloadTarget": true,
     "resumeTimeoutMs": 300000,
-    "measureReplayedTokens": true
+    "measureReplayedTokens": true,
+    "measureOutputConsistency": false
   },
   "execution": {
     "maxNewTokens": 128,
     "temperature": 0,
     "seed": 20261015,
-    "nCtx": 36864,
+    "nCtx": 40960,
     "nBatch": 128,
-    "nParallel": 9,
+    "nParallel": 10,
     "leaseBatchSize": 4,
     "batchHandoff": true,
     "handoffBatchSize": 2,
     "preemptOnActivation": true,
     "handoffPrefillTokens": 64,
-    "l1NodeCap": 9,
+    "l1NodeCap": 10,
     "l1TokenCapPerSession": 4096,
     "l2TokenCapPerSession": 4096,
     "l3ByteCap": 67108864,
@@ -262,10 +285,10 @@
     },
     "pilot": {
       "label": "pilot",
-      "appTabs": 9,
-      "artifexTabs": 1,
+      "appTabs": 10,
+      "artifexTabs": 5,
       "pressureTabs": 1,
-      "totalTabs": 10,
+      "totalTabs": 11,
       "repeats": 1,
       "maxNewTokens": 64,
       "taskTimeoutMs": 900000,
@@ -277,10 +300,10 @@
     },
     "formal": {
       "label": "formal",
-      "appTabs": 9,
-      "artifexTabs": 1,
+      "appTabs": 10,
+      "artifexTabs": 5,
       "pressureTabs": 1,
-      "totalTabs": 10,
+      "totalTabs": 11,
       "repeats": 3,
       "maxNewTokens": 128,
       "taskTimeoutMs": 900000,
@@ -288,7 +311,7 @@
       "schedule": "schedule",
       "switchIntervalMs": 15000,
       "maxSwitchesPerTrial": 1,
-      "judge": true
+      "judge": false
     }
   },
   "judge": {
@@ -311,7 +334,7 @@
       "modelSet": "main",
       "defaultModel": "llama-3.2-1b-instruct",
       "arms": ["ours", "wllama-per-tab"],
-      "requiresJudge": true,
+      "requiresJudge": false,
       "platformScope": "e2e"
     },
     "e2e-2": {
@@ -322,7 +345,7 @@
       "modelSet": "main",
       "defaultModel": "llama-3.2-1b-instruct",
       "arms": ["ours", "wllama-per-tab"],
-      "requiresJudge": true,
+      "requiresJudge": false,
       "platformScope": "e2e"
     },
     "abl-1": {

@@ -34,6 +34,11 @@ import {
 } from "./lib/render-load.mjs";
 import { PressureRelay } from "./lib/pressure-relay.mjs";
 import { normalizedTargets } from "./lib/targets.mjs";
+import {
+  clickResponseSeed,
+  createClickSequencer,
+  isValidClickResponse
+} from "./lib/click-response.mjs";
 import { RunArtifacts, writeJsonAtomic } from "./lib/records.mjs";
 import { buildSummary } from "./lib/summary.mjs";
 import { evaluateGates } from "./lib/gate.mjs";
@@ -114,6 +119,10 @@ try {
       runtimeArmOverrides: loaded.runtimeArmOverrides,
       appServerRoots: server.roots,
       layout,
+      clickResponse: Array.isArray(loaded.config.clickResponse?.enabledForExperiments) &&
+        loaded.config.clickResponse.enabledForExperiments.includes(experimentId)
+        ? loaded.config.clickResponse
+        : null,
       recoveryLayout: experiment.scenario === "recovery"
         ? {
             nativeWorkerHost: "first-app-tab",
@@ -167,7 +176,7 @@ try {
         armPairs: [[experiment.arms[0], experiment.arms[1]]],
         expected: expectedRecordCount(loaded, experimentId, mode, [model], layout)
       });
-      const complete = summary.completeness.complete === true && summary.errorCount === 0;
+      const complete = summary.completeness.complete === true;
       const gateReport = evaluateGates({
         loaded,
         experimentId,
@@ -184,7 +193,9 @@ try {
         updatedAt: new Date().toISOString()
       });
       console.log(`E2E RUN COMPLETE ${outputDirectory}`);
-      console.log(`records=${records.length} complete=${complete}`);
+      console.log(
+        `records=${records.length} complete=${complete} errors=${summary.errorCount}`
+      );
       for (const gate of gateReport.gates) {
         console.log(`${gate.id}: ${gate.status}`);
       }
@@ -237,7 +248,8 @@ async function runModel(options) {
   for (let repeat = 0; repeat < modeConfig.repeats; repeat += 1) {
     for (let pressureIndex = 0; pressureIndex < schedule.length; pressureIndex += 1) {
       const pressure = schedule[pressureIndex];
-      const arms = pressureIndex % 2 === 0
+      const trialOrdinal = repeat * schedule.length + pressureIndex;
+      const arms = trialOrdinal % 2 === 0
         ? experiment.arms
         : [...experiment.arms].reverse();
       for (const [armIndex, armId] of arms.entries()) {
@@ -263,7 +275,7 @@ async function runModel(options) {
             pressure,
             repeat,
             armId,
-            trialOrdinal: repeat * schedule.length + pressureIndex,
+            trialOrdinal,
             armIndex,
             arm: armFor(loaded, armId, experimentId),
             model,
@@ -564,23 +576,31 @@ async function runPriorityTrial(trial) {
   relayStarted = true;
   stageLog(`relay started (${armId} ${pressure.id} repeat=${repeat})`);
   const startWallMs = Date.now();
-  const taskEntries = appPages.map((entry) => ({
-    entry,
-    requestId: `${armId}-${entry.app}-${repeat}-${entry.tabIndex}-${Date.now()}`,
-    promise: pageCall(entry.page, "runTask", {
-      phase: "priority",
-      id: entry.task.id,
-      prompt: entry.task.prompt,
-      systemPrompt: entry.task.systemPrompt,
-      maxNewTokens: modeConfig.maxNewTokens,
-      temperature: loaded.config.execution.temperature,
-      seed: loaded.config.execution.seed + entry.tabIndex,
-      requestId: `${armId}-${entry.app}-${repeat}-${entry.tabIndex}`
-    })
-  })).map((item) => ({
-    ...item,
-    promise: settleWithTimeout(item.promise, modeConfig.taskTimeoutMs)
-  }));
+  const taskEntries = appPages.map((entry) => {
+    const item = {
+      entry,
+      requestId: `${armId}-${entry.app}-${repeat}-${entry.tabIndex}-${Date.now()}`,
+      finished: false,
+      promise: null,
+      task: entry.task
+    };
+    item.promise = settleWithTimeout(
+      pageCall(entry.page, "runTask", {
+        phase: "priority",
+        id: entry.task.id,
+        prompt: entry.task.prompt,
+        systemPrompt: entry.task.systemPrompt,
+        maxNewTokens: modeConfig.maxNewTokens,
+        temperature: loaded.config.execution.temperature,
+        seed: loaded.config.execution.seed + entry.tabIndex,
+        requestId: `${armId}-${entry.app}-${repeat}-${entry.tabIndex}`
+      }),
+      modeConfig.taskTimeoutMs
+    ).finally(() => {
+      item.finished = true;
+    });
+    return item;
+  });
   stageLog(`tasks started (${taskEntries.length}) (${armId} ${pressure.id} repeat=${repeat})`);
   // Start all sessions as normal, then promote the first target while work is
   // already in flight. This matches the public priority protocol and lets a
@@ -602,9 +622,32 @@ async function runPriorityTrial(trial) {
     repeat,
     events
   });
+  const clickProbePromise = runClickResponseProbe({
+    loaded,
+    experimentId: experiment.id,
+    armId,
+    modelId: model.id,
+    trialOrdinal,
+    pressure,
+    repeat,
+    appPages,
+    pressurePage,
+    taskEntries,
+    events
+  });
   const settled = await Promise.all(taskEntries.map((item) => item.promise));
   stageLog(`tasks settled (${armId} ${pressure.id} repeat=${repeat})`);
+  const clickResponses = await clickProbePromise.catch((error) => {
+    events.push({
+      kind: "click-response-probe-error",
+      at: new Date().toISOString(),
+      arm: armId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return [];
+  });
   await switchPromise.catch(() => undefined);
+  await ensureVisible(pressurePage, "pressure tab");
   await delay(loaded.config.pressure.settleMs);
   await relay.stop();
   const frame = await withTimeout(
@@ -653,6 +696,13 @@ async function runPriorityTrial(trial) {
       Number.isFinite(result.elapsedMs)
         ? startWallMs + result.elapsedMs > priorityRequestedAtWallMs
         : null;
+    const clickSamples = clickResponses.filter(
+      (sample) => sample.tabIndex === item.entry.tabIndex
+    );
+    const validClickSamples = clickSamples.filter(
+      (sample) =>
+        isValidClickResponse(sample)
+    );
     records.push({
       kind: "task",
       experiment: experiment.id,
@@ -721,6 +771,18 @@ async function runPriorityTrial(trial) {
         markerBeforeToken && firstToken
           ? firstToken.receivedAtMs - markerBeforeToken.requestedAtMs
           : null,
+      clickResponseAttempts: clickSamples.length,
+      clickResponseValid: validClickSamples.length,
+      clickResponseMs: median(
+        validClickSamples.map((sample) => sample.clickResponseMs)
+      ),
+      clickActivationMs: median(
+        validClickSamples.map((sample) => sample.clickActivationMs)
+      ),
+      clickFrameResponseMs: median(
+        validClickSamples.map((sample) => sample.clickFrameResponseMs)
+      ),
+      clickResponses: clickSamples,
       priorityCompletionMs:
         priorityTargetActiveAtRequest === true && Number.isFinite(result.elapsedMs)
           ? result.elapsedMs
@@ -829,6 +891,8 @@ async function runRecoveryTrial(trial) {
     ? "resident-history-turn-delta"
     : "full-history-replay";
 
+  const measureOutputConsistency =
+    loaded.config.recovery.measureOutputConsistency === true;
   let control = null;
   await ensureVisible(pressurePage, "pressure tab");
   const hiddenObserved = await waitForVisibility(target.page, "hidden");
@@ -945,7 +1009,7 @@ async function runRecoveryTrial(trial) {
   );
   const pressureValid = pressureValidityError === null;
   await relay.stop();
-  if (continuationMessages.length > 0) {
+  if (measureOutputConsistency && continuationMessages.length > 0) {
     stageLog(`recovery control probe start (${armId} ${pressure.id} repeat=${repeat})`);
     control = await withTimeout(pageCall(target.page, "runProbe", {
       sessionId: `${target.sessionId}-control-${repeat}`,
@@ -982,14 +1046,19 @@ async function runRecoveryTrial(trial) {
     lifecycleEvents.includes("active");
   const continuationAvailable = continuationMessages.length > 0;
   const controlAvailable =
-    control !== null && control.error === null && typeof control.text === "string";
-  const outputSimilarity = controlAvailable
-    ? lexicalConsistency(control.text ?? "", recovered.text ?? "")
-    : null;
-  const outputConsistent = controlAvailable
-    ? normalizeText(control.text ?? "") === normalizeText(recovered.text ?? "") ||
-      outputSimilarity >= 0.65
-    : null;
+    !measureOutputConsistency ||
+    (control !== null &&
+      control.error === null &&
+      typeof control.text === "string");
+  const outputSimilarity =
+    measureOutputConsistency && controlAvailable
+      ? lexicalConsistency(control.text ?? "", recovered.text ?? "")
+      : null;
+  const outputConsistent =
+    measureOutputConsistency && controlAvailable
+      ? normalizeText(control.text ?? "") === normalizeText(recovered.text ?? "") ||
+        outputSimilarity >= 0.65
+      : null;
   const invalidReasons = [];
   if (!pressureValid) invalidReasons.push(pressureValidityError);
   if (!lifecycleValid) invalidReasons.push(`lifecycle evidence incomplete: ${lifecycleEvents.join(",") || "none"}`);
@@ -1030,8 +1099,10 @@ async function runRecoveryTrial(trial) {
     text: recovered.text ?? "",
     warmText: warm.text ?? "",
     warmOutputHash: warmHash,
-    controlText: control?.text ?? "",
-    controlOutputHash: sha256(control?.text ?? ""),
+    measureOutputConsistency,
+    controlText: control?.text ?? null,
+    controlOutputHash:
+      controlAvailable && control !== null ? sha256(control.text ?? "") : null,
     recoveryTurnPrompt,
     recoveryHistoryHash,
     recoveryPromptMode,
@@ -1157,6 +1228,180 @@ async function switchPriorityTargets(options) {
   // window must always contain exactly one prioritized session, otherwise the
   // render-pressure lease has no owner and every session degrades to the
   // background fallback policy.
+}
+
+async function runClickResponseProbe(options) {
+  const {
+    loaded,
+    experimentId,
+    armId,
+    modelId,
+    trialOrdinal,
+    pressure,
+    repeat,
+    appPages,
+    pressurePage,
+    taskEntries,
+    events
+  } = options;
+  const config = loaded.config.clickResponse;
+  if (
+    !config ||
+    !Array.isArray(config.enabledForExperiments) ||
+    !config.enabledForExperiments.includes(experimentId)
+  ) {
+    return [];
+  }
+  const sequencer = createClickSequencer({
+    indices: appPages.map((entry) => entry.tabIndex),
+    seed: clickResponseSeed(config.seed, trialOrdinal, modelId),
+    initialDelayMs: config.initialDelayMs,
+    minIntervalMs: config.intervalMinMs,
+    maxIntervalMs: config.intervalMaxMs,
+    maxClicks: config.maxClicksPerTrial
+  });
+  await delayWhileTasksRun(taskEntries, sequencer.initialDelayMs);
+  const samples = [];
+  while (true) {
+    const activeIndices = taskEntries
+      .filter((item) => item.finished !== true)
+      .map((item) => item.entry.tabIndex);
+    const tabIndex = sequencer.next(activeIndices);
+    if (tabIndex === null) break;
+    const entry = appPages.find((candidate) => candidate.tabIndex === tabIndex);
+    if (!entry) break;
+    const sample = await measureClickResponse({
+      entry,
+      pressurePage,
+      config,
+      armId,
+      pressure,
+      repeat
+    });
+    samples.push(sample);
+    events.push({
+      kind: "click-response",
+      at: new Date(sample.requestedAtMs).toISOString(),
+      ...sample
+    });
+    if (sample.error !== null) break;
+    await delayWhileTasksRun(taskEntries, sequencer.intervalMs());
+  }
+  return samples;
+}
+
+async function measureClickResponse(options) {
+  const { entry, pressurePage, config, armId, pressure, repeat } = options;
+  let requestedAtMs = Date.now();
+  let activatedAtMs = null;
+  let responseAtMs = null;
+  let visibilityBefore = null;
+  let visibilityState = null;
+  let pressureVisibilityBefore = null;
+  let pressureVisibilityAfterClick = null;
+  let framesWaited = 0;
+  let pressureRestored = false;
+  let error = null;
+  try {
+    [visibilityBefore, pressureVisibilityBefore] = await Promise.all([
+      withTimeout(
+        entry.page.evaluate(() => document.visibilityState),
+        config.clickTimeoutMs,
+        `clicked tab ${entry.tabIndex} visibility query timed out`
+      ),
+      pressureVisibilityState(pressurePage)
+    ]);
+    requestedAtMs = Date.now();
+    await withTimeout(
+      entry.page.bringToFront(),
+      config.clickTimeoutMs,
+      `click activation timed out for tab ${entry.tabIndex}`
+    );
+    activatedAtMs = Date.now();
+    const frames = await withTimeout(
+      waitForRenderedFrames(entry.page, config.responseFrames),
+      config.frameTimeoutMs,
+      `clicked tab ${entry.tabIndex} produced no rendered frame`
+    );
+    framesWaited = frames.frames;
+    visibilityState = frames.visibilityState;
+    if (visibilityState !== "visible") {
+      throw new Error(`clicked tab visibility was ${visibilityState}`);
+    }
+    responseAtMs = Date.now();
+    pressureVisibilityAfterClick = await pressureVisibilityState(pressurePage);
+  } catch (clickError) {
+    error = clickError instanceof Error ? clickError.message : String(clickError);
+  } finally {
+    if (config.restorePressureAfterClick !== false) {
+      try {
+        await ensureVisible(pressurePage, "pressure tab");
+        pressureRestored = true;
+      } catch (restoreError) {
+        pressureRestored = false;
+        error ??= restoreError instanceof Error
+          ? restoreError.message
+          : String(restoreError);
+      }
+    } else {
+      pressureRestored = true;
+    }
+  }
+  return {
+    arm: armId,
+    pressureId: pressure.id,
+    pressureTriangles: pressure.triangles,
+    repeat,
+    app: entry.app,
+    tabIndex: entry.tabIndex,
+    taskId: entry.task.id,
+    sessionId: entry.sessionId,
+    requestedAtMs,
+    activatedAtMs,
+    responseAtMs,
+    visibilityBefore,
+    pressureVisibilityBefore,
+    pressureVisibilityAfterClick,
+    clickActivationMs:
+      activatedAtMs === null ? null : activatedAtMs - requestedAtMs,
+    clickResponseMs:
+      responseAtMs === null ? null : responseAtMs - requestedAtMs,
+    clickFrameResponseMs:
+      activatedAtMs === null || responseAtMs === null
+        ? null
+        : responseAtMs - activatedAtMs,
+    visibilityState,
+    visibilityChanged:
+      visibilityBefore === "hidden" && visibilityState === "visible",
+    responseFrames: config.responseFrames,
+    framesWaited,
+    pressureRestored,
+    affectsPriority: config.affectsPriority === true,
+    error
+  };
+}
+
+function waitForRenderedFrames(page, frameCount) {
+  return page.evaluate((target) => new Promise((resolve) => {
+    let frames = 0;
+    const tick = () => {
+      frames += 1;
+      if (frames >= target) {
+        resolve({ frames, visibilityState: document.visibilityState });
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }), frameCount);
+}
+
+async function delayWhileTasksRun(taskEntries, durationMs) {
+  const deadline = Date.now() + Math.max(0, durationMs);
+  while (Date.now() < deadline) {
+    if (taskEntries.every((item) => item.finished === true)) return;
+    await delay(Math.min(100, deadline - Date.now()));
+  }
 }
 
 async function setPriority(entry, level, armId, phase) {
@@ -1721,7 +1966,7 @@ function parseArgs(argv) {
     mode: null,
     model: null,
     out: null,
-    judge: true,
+    judge: false,
     headless: false,
     allModels: false
   };

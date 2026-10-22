@@ -22,7 +22,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const evaluationRoot = path.resolve(here, "..");
 const implRoot = path.resolve(evaluationRoot, "..");
 const handoffRoot = path.join(implRoot, "handoff", "windows");
-const judgeModel = "llama-3.2-3b-instruct";
 const modelSets = {
   small: ["llama-3.2-1b-instruct", "qwen2.5-1.5b-instruct"],
   all: [
@@ -82,7 +81,7 @@ const requestedModelIds = modelSets[args.modelSet];
 if (!requestedModelIds) {
   throw new Error(`Unknown model set: ${args.modelSet}`);
 }
-const requestedPreparedModels = unique([...requestedModelIds, judgeModel]);
+const requestedPreparedModels = requestedModelIds;
 const session = await createOrResumeSession(
   requestedModelIds,
   requestedPreparedModels
@@ -272,15 +271,13 @@ async function runPipeline(session, selectedModels, modelsToPrepare) {
       await runE2EStage(session, {
         experiment,
         model,
-        mode: "smoke",
-        judge: false
+        mode: "smoke"
       });
       if (!args.skipPilot) {
         await runE2EStage(session, {
           experiment,
           model,
-          mode: "pilot",
-          judge: false
+          mode: "pilot"
         });
       }
     }
@@ -293,8 +290,7 @@ async function runPipeline(session, selectedModels, modelsToPrepare) {
         await runE2EStage(session, {
           experiment,
           model,
-          mode: "formal",
-          judge: true
+          mode: "formal"
         });
       } catch (error) {
         formalCommandFailures += 1;
@@ -334,12 +330,7 @@ function isReusableStage(stage, options) {
 }
 
 async function runE2EStage(session, options) {
-  const {
-    experiment,
-    model,
-    mode,
-    judge
-  } = options;
+  const { experiment, model, mode } = options;
   const stageId = `run:${experiment}:${mode}:${model}`;
   const stage = await runLoggedStage(session, {
     id: stageId,
@@ -355,14 +346,13 @@ async function runE2EStage(session, options) {
       model,
       "--out",
       e2eOutputDirectory(session, experiment, mode, model, attempt),
-      ...(judge ? ["--judge"] : ["--no-judge"])
+      "--no-judge"
     ],
     metadata: (attempt) => ({
       kind: "e2e",
       experiment,
       model,
       mode,
-      judge,
       outputDirectory: e2eOutputDirectory(
         session,
         experiment,
@@ -824,7 +814,7 @@ async function createOrResumeSession(requestedModels, requestedPreparedModels) {
       state.models = modelSets[state.modelSet] ?? [];
     }
     if (!Array.isArray(state.preparedModels) || state.preparedModels.length === 0) {
-      state.preparedModels = unique([...state.models, judgeModel]);
+      state.preparedModels = unique(state.models);
     }
     normalizeStageAttempts(state);
     for (const stage of state.stages) {
@@ -1112,7 +1102,7 @@ function parseArgs(argv) {
     noOpen: false,
     yes: false,
     skipPilot: false,
-    modelSet: "small",
+    modelSet: "all",
     session: null,
     operator: null,
     note: ""
@@ -1156,7 +1146,9 @@ function printDryRun() {
   console.log(`  Platform: ${process.platform}`);
   console.log(`  Model set: ${args.modelSet}`);
   console.log(`  Models: ${models.join(", ")}`);
-  console.log(`  Judge model: ${judgeModel}`);
+  console.log(
+    `  Formal records per experiment/model: ${expectedFormalRecordCount}`
+  );
   console.log("  Stages:");
   for (const experiment of ["e2e-1", "e2e-2"]) {
     for (const model of models) {
@@ -1172,8 +1164,8 @@ function printHelp() {
   Run-Windows-E2E.cmd [options]
 
 Options:
-  --model-set small     Run Llama-1B and Qwen-1.5B (default)
-  --model-set all       Run all four configured models
+  --model-set all       Run all four configured models (default)
+  --model-set small     Run only Llama-1B and Qwen-1.5B for debugging
   --skip-pilot          Skip pilot runs after smoke (not recommended)
   --resume              Resume the latest session without rerunning completed stages
   --session <id>        Select a named session
@@ -1186,8 +1178,9 @@ Options:
   --dry-run             Print the planned stages without running them
   --help                Show this help
 
-The default handoff runs e2e-1 and e2e-2 for two small models. Formal runs
-include the configured judge model. Results are written under:
+The default handoff runs e2e-1 and e2e-2 for all four paper models.
+Formal runs are judge-free and each has a fixed denominator of 600 records.
+Results are written under:
   impl\\handoff\\windows\\`);
 }
 
