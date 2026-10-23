@@ -30,11 +30,8 @@ describe("click-response sequencing", () => {
       affectsPriority: false,
       gate: false
     });
-    expect(
-      preregistration.gates["e2e-1"].some(
-        (gate: { id: string }) => gate.id.includes("click")
-      )
-    ).toBe(false);
+    expect(preregistration.protocol.repeats).toBe(1);
+    expect(preregistration.gates).toBeUndefined();
   });
 
   it("is deterministic and only chooses active tabs without adjacent repeats", () => {

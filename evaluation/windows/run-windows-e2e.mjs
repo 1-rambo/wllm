@@ -16,8 +16,6 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
-import { assessTaskFailureOutcome } from "./task-failure-policy.mjs";
-
 const here = path.dirname(fileURLToPath(import.meta.url));
 const evaluationRoot = path.resolve(here, "..");
 const implRoot = path.resolve(evaluationRoot, "..");
@@ -34,23 +32,16 @@ const modelSets = {
 const e2eConfig = JSON.parse(
   await readFile(path.join(evaluationRoot, "config", "e2e.json"), "utf8")
 );
-const preregistration = JSON.parse(
-  await readFile(
-    path.join(evaluationRoot, "config", "e2e-preregistration.json"),
-    "utf8"
-  )
-);
 const expectedFormalRecordCount =
   2 *
   e2eConfig.modes.formal.repeats *
   e2eConfig.pressure.schedule.length *
-  e2eConfig.layout.appTabs;
-const expectedGateCountByExperiment = Object.fromEntries(
-  ["e2e-1", "e2e-2"].map((experiment) => [
-    experiment,
-    preregistration.gates[experiment].length
-  ])
-);
+  e2eConfig.modes.formal.appTabs;
+const expectedSmokeRecordCount =
+  2 *
+  e2eConfig.modes.smoke.repeats *
+  e2eConfig.pressure.smokeSchedule.length *
+  e2eConfig.modes.smoke.appTabs;
 
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
@@ -114,23 +105,17 @@ try {
     const unfinishedStages = currentStages.filter(
       (stage) => stage.status !== "completed"
     );
-    const gateFailures = currentStages.filter(
-      (stage) => stage.resultStatus === "gate-fail"
-    );
-    const taskFailureOutcomes = currentStages.filter(
+    const formalIssues = currentStages.filter(
       (stage) =>
-        stage.mode === "formal" && stage.resultStatus === "task-failure-outcome"
+        stage.mode === "formal" &&
+        ["completed-with-errors", "incomplete"].includes(stage.resultStatus)
     );
     session.state.overallStatus =
       unfinishedStages.length > 0
         ? "partial"
-        : gateFailures.length > 0 && taskFailureOutcomes.length > 0
-          ? "completed-with-task-and-gate-failures"
-          : gateFailures.length > 0
-            ? "completed-with-gate-failures"
-            : taskFailureOutcomes.length > 0
-              ? "completed-with-task-failures"
-              : "completed";
+        : formalIssues.length > 0 || session.state.formalCommandFailures > 0
+          ? "completed-with-errors"
+          : "completed";
   }
   session.state.completedAt = new Date().toISOString();
   const packagePath = await finalizeSession(session.state, session.directory);
@@ -266,21 +251,13 @@ async function runPipeline(session, selectedModels, modelsToPrepare) {
     await runLoggedStage(session, { id, label, command, args: commandArgs });
   }
 
+  const smokeModel = selectedModels[0];
   for (const experiment of ["e2e-1", "e2e-2"]) {
-    for (const model of selectedModels) {
-      await runE2EStage(session, {
-        experiment,
-        model,
-        mode: "smoke"
-      });
-      if (!args.skipPilot) {
-        await runE2EStage(session, {
-          experiment,
-          model,
-          mode: "pilot"
-        });
-      }
-    }
+    await runE2EStage(session, {
+      experiment,
+      model: smokeModel,
+      mode: "smoke"
+    });
   }
 
   let formalCommandFailures = 0;
@@ -361,42 +338,27 @@ async function runE2EStage(session, options) {
         attempt
       )
     }),
-    reusable: (candidate) =>
-      candidate.validation?.technicalPass === true ||
-      (candidate.mode !== "smoke" &&
-        candidate.validation?.taskFailureOutcome === true)
+    // A completed command is evidence even when its records contain failures.
+    // Resume keeps those artifacts instead of silently producing a fresh run.
+    reusable: (candidate) => candidate.status === "completed"
   });
 
   if (stage.status !== "completed") {
     throw new Error(`${stageId} did not complete successfully. See ${stage.logFile}.`);
   }
 
-  if (stage.validation?.technicalPass === true) {
-    if (mode === "formal") {
-      await captureReport(
-        session,
-        experiment,
-        model,
-        stage.outputDirectory,
-        stage.attempt
-      );
-    }
-    return;
-  }
-
   const validation = await inspectRun(stage.outputDirectory, { experiment, mode });
   stage.validation = validation;
-  const acceptedTaskFailureOutcome =
-    validation.taskFailureOutcome === true && mode !== "smoke";
-  stage.resultStatus = validation.technicalPass
-    ? validation.formalGatePass
-      ? "pass"
-      : mode === "formal"
-        ? "gate-fail"
-        : "technical-pass"
-    : acceptedTaskFailureOutcome
-      ? "task-failure-outcome"
-      : "incomplete";
+  const recordsComplete = validation.complete && validation.failure === null;
+  stage.resultStatus = mode === "smoke"
+    ? recordsComplete && validation.errorCount === 0
+      ? "smoke-complete"
+      : "smoke-failed"
+    : !recordsComplete
+      ? "incomplete"
+      : validation.errorCount > 0
+        ? "completed-with-errors"
+        : "complete";
   stage.finishedAt = new Date().toISOString();
   await saveState(session);
 
@@ -409,25 +371,20 @@ async function runE2EStage(session, options) {
       stage.attempt
     );
   }
-  if (!validation.technicalPass && !acceptedTaskFailureOutcome) {
-    stage.status = "incomplete";
-    stage.resultStatus = "incomplete";
-    await saveState(session);
-    throw new Error(
-      `${stageId} is incomplete: records=${validation.recordCount ?? "?"}, ` +
-        `expected=${validation.expectedRecordCount ?? "?"}, ` +
-        `complete=${validation.complete}, errors=${validation.errorCount ?? "?"}, ` +
-        `gates=${validation.gates.length}/${validation.expectedGateCount ?? "?"}.`
-    );
-  }
   console.log(
-    `  ${stageId}: records=${validation.recordCount ?? "?"}, ` +
-      `complete=${validation.complete}, gates=${formatGateCounts(validation.gateCounts)}`
+    `  ${stageId}: records=${validation.recordCount ?? "?"}/${validation.expectedRecordCount ?? "?"}, ` +
+      `complete=${validation.complete}, errors=${validation.errorCount}, ` +
+      `result=${stage.resultStatus}`
   );
-  if (acceptedTaskFailureOutcome) {
-    console.log(
-      `  ${stageId}: preserved ${validation.taskFailureAssessment.acceptedTaskFailureCount} ` +
-        "wllama-per-tab task failures as availability outcomes; continuing."
+  if (validation.failure) {
+    console.log(`  ${stageId}: failure=${validation.failure}`);
+  }
+
+  if (mode === "smoke" && stage.resultStatus === "smoke-failed") {
+    throw new Error(
+      `${stageId} smoke failed: records=${validation.recordCount ?? "?"}, ` +
+        `expected=${validation.expectedRecordCount ?? "?"}, ` +
+        `complete=${validation.complete}, errors=${validation.errorCount}.`
     );
   }
 }
@@ -543,66 +500,33 @@ async function captureReport(session, experiment, model, runDirectory, attempt) 
 }
 
 async function inspectRun(runDirectory, options = {}) {
-  const { experiment = null, mode = null } = options;
+  const { mode = null } = options;
   const summary = await readJsonIfPresent(path.join(runDirectory, "summary.json"));
   const records = await readJsonlIfPresent(path.join(runDirectory, "records.jsonl"));
-  const gateReport = await readJsonIfPresent(path.join(runDirectory, "gate-report.json"));
   const runMetadata = await readJsonIfPresent(path.join(runDirectory, "run.json"));
   const failure = await readJsonIfPresent(path.join(runDirectory, "failure.json"));
-  const gates = Array.isArray(gateReport?.gates) ? gateReport.gates : [];
-  const gateCounts = { pass: 0, fail: 0, incomplete: 0, skipped: 0, other: 0 };
-  for (const gate of gates) {
-    const status = String(gate.status ?? "").toLowerCase();
-    if (Object.hasOwn(gateCounts, status) && status !== "other") {
-      gateCounts[status] += 1;
-    } else {
-      gateCounts.other += 1;
-    }
-  }
   const complete = summary?.completeness?.complete === true;
-  const errorCount = Number(summary?.errorCount ?? 0);
-  const expectedRecordCount = summary?.completeness?.expected ?? null;
-  const expectedGateCount =
-    mode === "formal" ? expectedGateCountByExperiment[experiment] ?? null : null;
-  const protocolMatches =
-    mode !== "formal" ||
-    (expectedRecordCount === expectedFormalRecordCount &&
-      gates.length === expectedGateCount);
-  const technicalPass =
-    summary !== null &&
-    runMetadata !== null &&
-    complete &&
-    errorCount === 0 &&
-    !failure &&
-    protocolMatches &&
-    (mode !== "formal" || gateReport !== null);
-  const taskFailureAssessment = assessTaskFailureOutcome(records, summary);
-  const taskFailureOutcome =
-    summary !== null &&
-    runMetadata !== null &&
-    complete &&
-    !failure &&
-    protocolMatches &&
-    (mode === "pilot" || mode === "formal") &&
-    taskFailureAssessment.eligible &&
-    gateReport !== null;
+  const observedRecordErrors = Array.isArray(records)
+    ? records.filter(
+        (record) =>
+          record?.kind === "failure" ||
+          (record?.error !== null && record?.error !== undefined)
+      ).length
+    : 0;
+  const errorCount = Number(summary?.errorCount ?? observedRecordErrors);
+  const expectedRecordCount =
+    summary?.completeness?.expected ??
+    (mode === "formal"
+      ? expectedFormalRecordCount
+      : mode === "smoke"
+        ? expectedSmokeRecordCount
+        : null);
   return {
     complete,
-    recordCount: summary?.recordCount ?? null,
+    recordCount: summary?.recordCount ?? records?.length ?? null,
     expectedRecordCount,
-    expectedGateCount,
     errorCount,
     failure: failure?.error ?? null,
-    gateCounts,
-    formalGatePass:
-      gates.length > 0 &&
-      gates.every((gate) => String(gate.status).toLowerCase() === "pass"),
-    gates: gates.map((gate) => ({
-      id: gate.id,
-      status: gate.status,
-      numerator: gate.numerator ?? null,
-      denominator: gate.denominator ?? null
-    })),
     quality: summary?.quality ?? null,
     platform: runMetadata?.platform ?? null,
     runtimeConfigSha256: runMetadata?.runtimeConfigSha256 ?? null,
@@ -610,12 +534,8 @@ async function inspectRun(runDirectory, options = {}) {
     filesPresent: {
       summary: summary !== null,
       records: records !== null,
-      gateReport: gateReport !== null,
       run: runMetadata !== null
-    },
-    taskFailureAssessment,
-    taskFailureOutcome,
-    technicalPass
+    }
   };
 }
 
@@ -678,6 +598,7 @@ async function writeResults(state, resultsFile) {
   const stages = state.stages ?? [];
   const currentStages = latestStages(stages);
   const e2eStages = currentStages.filter((stage) => stage.kind === "e2e");
+  const smokeStages = e2eStages.filter((stage) => stage.mode === "smoke");
   const formalStages = e2eStages.filter((stage) => stage.mode === "formal");
   const lines = [
     "# wLLM Windows E2E handoff",
@@ -709,13 +630,32 @@ async function writeResults(state, resultsFile) {
     ""
   );
   lines.push(
+    "## Smoke results",
+    "",
+    "| Experiment | Model | Records | Expected | Complete | Errors | Result | Artifact |",
+    "|---|---|---:|---:|---|---:|---|---|"
+  );
+  if (smokeStages.length === 0) {
+    lines.push("| none | none | - | - | - | - | no smoke run | - |");
+  }
+  for (const stage of smokeStages) {
+    const validation = stage.validation ?? {};
+    const artifact = relativeOrAbsolute(stage.outputDirectory, path.dirname(resultsFile));
+    lines.push(
+      `| ${stage.experiment} | ${stage.model} | ${validation.recordCount ?? "-"} | ` +
+        `${validation.expectedRecordCount ?? "-"} | ${validation.complete ?? "-"} | ` +
+        `${validation.errorCount ?? "-"} | ${stage.resultStatus ?? stage.status} | \`${artifact}\` |`
+    );
+  }
+  lines.push(
+    "",
     "## Formal results",
     "",
-    "| Experiment | Model | Attempt | Records | Expected | Complete | Errors | Gates | Result | Artifact |",
-    "|---|---|---:|---:|---:|---|---:|---|---|---|"
+    "| Experiment | Model | Attempt | Records | Expected | Complete | Errors | Result | Artifact |",
+    "|---|---|---:|---:|---:|---|---:|---|---|"
   );
   if (formalStages.length === 0) {
-    lines.push("| none | none | - | - | - | - | - | - | no formal run | - |");
+    lines.push("| none | none | - | - | - | - | - | no formal run | - |");
   }
   for (const stage of formalStages) {
     const validation = stage.validation ?? {};
@@ -724,35 +664,19 @@ async function writeResults(state, resultsFile) {
       `| ${stage.experiment} | ${stage.model} | ${stage.attempt ?? 1} | ` +
         `${validation.recordCount ?? "-"} | ${validation.expectedRecordCount ?? "-"} | ` +
         `${validation.complete ?? "-"} | ${validation.errorCount ?? "-"} | ` +
-        `${formatGateCounts(validation.gateCounts)} | ` +
         `${stage.resultStatus ?? stage.status} | \`${artifact}\` |`
     );
   }
-  if (formalStages.some((stage) => stage.resultStatus === "task-failure-outcome")) {
+  if (
+    formalStages.some((stage) =>
+      ["completed-with-errors", "incomplete"].includes(stage.resultStatus)
+    )
+  ) {
     lines.push(
       "",
-      "`task-failure-outcome` preserves task-level wllama-per-tab crashes or timeouts as",
-      "availability outcomes. These runs are not strict gate passes; failed tasks remain in",
-      "the fixed denominator and are excluded from paired successful-task performance."
+      "Runs marked `completed-with-errors` or `incomplete` are reported directly.",
+      "Their raw records and logs are preserved; failed tasks remain in the fixed denominator."
     );
-  }
-  lines.push("", "## Gate details", "");
-  for (const stage of formalStages) {
-    lines.push(
-      `### ${stage.experiment} / ${stage.model} / attempt ${stage.attempt ?? 1}`,
-      ""
-    );
-    if (!stage.validation?.gates?.length) {
-      lines.push(
-        `No gate report was produced. Stage status: ${stage.status}.`,
-        ""
-      );
-      continue;
-    }
-    for (const gate of stage.validation.gates) {
-      lines.push(`- \`${gate.id}\`: **${gate.status}**`);
-    }
-    lines.push("");
   }
 
   const attemptHistory = stages.filter(
@@ -789,7 +713,7 @@ async function writeResults(state, resultsFile) {
     "## Send back",
     "",
     `Send the sibling file \`${state.runId}-results.zip\` to the experiment owner.`,
-    "The zip contains this report, logs, raw records, summaries, gate reports, and every attempt.",
+    "The zip contains this report, logs, raw records, summaries, and every attempt.",
     "Do not delete or merge partial runs.",
     "For comments, edit `FEEDBACK.md` and rerun `Package-Windows-Results.cmd`.",
     ""
@@ -1101,7 +1025,6 @@ function parseArgs(argv) {
     noPackage: false,
     noOpen: false,
     yes: false,
-    skipPilot: false,
     modelSet: "all",
     session: null,
     operator: null,
@@ -1116,7 +1039,6 @@ function parseArgs(argv) {
     else if (value === "--no-package") result.noPackage = true;
     else if (value === "--no-open") result.noOpen = true;
     else if (value === "--yes") result.yes = true;
-    else if (value === "--skip-pilot") result.skipPilot = true;
     else if (value === "--model-set") {
       result.modelSet = requireOptionValue(argv, ++index, value);
     } else if (value === "--session") {
@@ -1151,9 +1073,10 @@ function printDryRun() {
   );
   console.log("  Stages:");
   for (const experiment of ["e2e-1", "e2e-2"]) {
+    console.log(`    ${experiment} smoke ${models[0]}`);
+  }
+  for (const experiment of ["e2e-1", "e2e-2"]) {
     for (const model of models) {
-      console.log(`    ${experiment} smoke ${model}`);
-      if (!args.skipPilot) console.log(`    ${experiment} pilot ${model}`);
       console.log(`    ${experiment} formal ${model}`);
     }
   }
@@ -1166,7 +1089,6 @@ function printHelp() {
 Options:
   --model-set all       Run all four configured models (default)
   --model-set small     Run only Llama-1B and Qwen-1.5B for debugging
-  --skip-pilot          Skip pilot runs after smoke (not recommended)
   --resume              Resume the latest session without rerunning completed stages
   --session <id>        Select a named session
   --operator <name>     Record the operator name
@@ -1178,8 +1100,9 @@ Options:
   --dry-run             Print the planned stages without running them
   --help                Show this help
 
-The default handoff runs e2e-1 and e2e-2 for all four paper models.
-Formal runs are judge-free and each has a fixed denominator of 600 records.
+The default handoff runs one simple smoke for each experiment, followed by
+one formal repeat for e2e-1 and e2e-2 across all four paper models.
+Each formal run is judge-free and has a fixed denominator of ${expectedFormalRecordCount} records.
 Results are written under:
   impl\\handoff\\windows\\`);
 }
@@ -1203,11 +1126,6 @@ function quotePowerShell(value) {
 function relativeOrAbsolute(target, from) {
   if (!target) return "";
   return path.relative(from, target).replaceAll("\\", "/");
-}
-
-function formatGateCounts(counts) {
-  if (!counts) return "n/a";
-  return `${counts.pass}P/${counts.fail}F/${counts.incomplete}I/${counts.skipped}S`;
 }
 
 function formatNumber(value) {

@@ -30,7 +30,25 @@ if (!loaded.config.experiments["e2e-1"]) {
 }
 for (const id of ["e2e-1", "e2e-2", "abl-1", "abl-2", "abl-3"]) {
   if (!loaded.config.experiments[id]) errors.push(`missing experiment ${id}`);
-  if (!loaded.preregistration.gates[id]) errors.push(`missing preregistered gates for ${id}`);
+}
+
+if (loaded.config.modes.pilot) {
+  errors.push("pilot mode must not be configured");
+}
+if (loaded.config.modes.formal?.repeats !== 1) {
+  errors.push("formal mode must use exactly one repeat");
+}
+if (loaded.config.modes.smoke?.repeats !== 1) {
+  errors.push("smoke mode must use exactly one repeat");
+}
+if (!Array.isArray(loaded.config.pressure.smokeSchedule) || loaded.config.pressure.smokeSchedule.length !== 1) {
+  errors.push("smoke must use exactly one pressure schedule entry");
+}
+if (Object.hasOwn(loaded.preregistration, "gates")) {
+  errors.push("acceptance gates must not be defined");
+}
+if (loaded.preregistration.protocol?.repeats !== loaded.config.modes.formal?.repeats) {
+  errors.push("preregistered repeats must match formal mode");
 }
 
 const forbiddenPaths = [

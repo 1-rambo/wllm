@@ -24,7 +24,7 @@ commits by `npm run evaluation:prepare`.
 - Google Chrome or Chromium with WebGPU enabled.
 - At least 20 GiB of free disk space for models, build output, browser cache,
   and artifacts.
-- At least 16 GiB RAM; 24 GiB or more is recommended for the 11-tab, 3B-model
+- At least 16 GiB RAM; 24 GiB or more is recommended for the 7-tab, 3B-model
   cases.
 
 The default Chrome paths are detected automatically. Override them when needed:
@@ -47,7 +47,7 @@ Run-Windows-E2E.cmd
 ```
 
 It runs the environment checks, pinned model/application preparation,
-verification, smoke/pilot/formal stages, reporting, and result packaging. The
+verification, one smoke per E2E, the one-repeat formal matrix, reporting, and result packaging. The
 full checklist and return format are in `Windows-E2E-Handoff.md`. Use
 `Resume-Windows-E2E.cmd` after an infrastructure interruption and
 `Package-Windows-Results.cmd` after editing `FEEDBACK.md`.
@@ -93,7 +93,6 @@ and Windows without shell-specific wrappers:
 
 ```bash
 node evaluation/scripts/run.mjs --experiment e2e-1 --mode smoke --no-judge
-node evaluation/scripts/run.mjs --experiment e2e-1 --mode pilot --no-judge
 node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal --no-judge
 ```
 
@@ -101,7 +100,6 @@ Equivalent convenience commands are available:
 
 ```bash
 npm run evaluation:e2e-1:smoke
-npm run evaluation:e2e-1:pilot
 npm run evaluation:e2e-1
 ```
 
@@ -147,9 +145,9 @@ Machine-readable output:
 node evaluation/scripts/report.mjs --json
 ```
 
-Each run contains `records.jsonl`, `events.jsonl`, `summary.json`,
-`gate-report.json`, `run.json`, and `latest.json`. Treat
-`gate-report.json` as the source of truth for pass/fail and completeness.
+Each run contains `records.jsonl`, `events.jsonl`, `summary.json`, `run.json`,
+and `latest.json`. Formal mode is fixed at one repeat. Incomplete records and
+execution errors are reported directly; there are no acceptance gates.
 
 ## Development Checks
 

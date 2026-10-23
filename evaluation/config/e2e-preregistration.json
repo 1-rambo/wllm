@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "artifex-tavern-e2e-prereg-paper-v5",
+  "id": "artifex-tavern-e2e-rapid-r1",
   "status": "frozen",
   "frozenAt": "2026-10-23",
   "config": "e2e.json",
-  "configSha256": "1eb75f6ffd6c9b80b01f0ece0b61b9abf638f6d4be6518126bb602957c37cf44",
-  "calibration": "2026-10-23: this version supersedes prereg-v4 before the paper-aligned formal matrix. It matches the manuscript: ten application sessions (five Artifex and five Tavern) plus one visible raw WebGPU pressure page, the full 0/250/500/750/1000/1500/2000/3000/4000/clear-return ladder, and four models. E2E-1 additionally records an exploratory click-response latency from seeded random tab switches to the second rendered animation frame; clicks do not change session priority. Task-quality judging and recovered-history consistency are outside the main E2E claims and are not gates. Prior run directories remain historical artifacts and are not merged into this protocol.",
+  "configSha256": "1f765a5edd7f73184be7762f5bb587a4fb9129ad26925acb18cb9475b7b3266a",
+  "calibration": "2026-10-23: rapid iteration protocol. Each E2E experiment runs one simple Llama-1B smoke and one formal repeat for each of four models. Formal trials retain six application sessions (three Artifex and three Tavern), one visible raw WebGPU pressure page, and the full 0/250/500/1000/1500/2000/3000/4000/clear-return ladder. There are no pilot stages or acceptance gates. Incomplete records and execution errors are preserved and reported directly. E2E-1 additionally records exploratory click-response latency from seeded random tab switches; clicks do not change session priority.",
   "scope": {
     "mainExperiments": ["e2e-1", "e2e-2"],
     "ablationExperiments": ["abl-1", "abl-2", "abl-3"],
@@ -44,7 +44,6 @@
       { "id": "clear-1", "triangles": 0 },
       { "id": "pressure-250", "triangles": 250 },
       { "id": "pressure-500", "triangles": 500 },
-      { "id": "pressure-750", "triangles": 750 },
       { "id": "pressure-1000", "triangles": 1000 },
       { "id": "pressure-1500", "triangles": 1500 },
       { "id": "pressure-2000", "triangles": 2000 },
@@ -53,202 +52,18 @@
       { "id": "clear-return", "triangles": 0 }
     ],
     "tabLayout": {
-      "appTabs": 10,
-      "artifexTabs": 5,
+      "appTabs": 6,
+      "artifexTabs": 3,
       "pressureTabs": 1,
-      "totalTabs": 11
+      "totalTabs": 7
     },
-    "repeats": 3,
+    "repeats": 1,
     "samePromptAcrossArms": true,
     "samePressureAcrossArms": true,
     "sameRecoveryTimelineAcrossArms": true,
     "priorityTargetsPerTrial": 1,
     "targetHeldHighThroughCompletion": true,
-    "qualityJudgingInMainExperiment": false
-  },
-  "gates": {
-    "e2e-1": [
-      {
-        "id": "e2e1-completeness",
-        "type": "completeness",
-        "description": "Every scheduled arm, pressure level, repeat, model, app, and target must have a terminal task record."
-      },
-      {
-        "id": "e2e1-priority-applied",
-        "type": "priority-applied",
-        "description": "The explicit priority API must reach the exported coordinator policy on every ours trial."
-      },
-      {
-        "id": "e2e1-priority-target-active",
-        "type": "threshold",
-        "metric": "priorityTargetActiveAtRequest",
-        "arm": "ours",
-        "threshold": 0.9,
-        "direction": "higher",
-        "description": "At least 90 percent of terminal target tasks must still be running when the priority write is issued."
-      },
-      {
-        "id": "e2e1-priority-ttft",
-        "type": "paired-directional",
-        "metric": "priorityFirstTokenLatencyMs",
-        "comparator": "wllama-per-tab",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.08
-      },
-      {
-        "id": "e2e1-priority-completion",
-        "type": "paired-directional",
-        "metric": "priorityCompletionMs",
-        "comparator": "wllama-per-tab",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.05
-      },
-      {
-        "id": "e2e1-frame-tail",
-        "type": "paired-directional",
-        "metric": "frameP95Ms",
-        "comparator": "wllama-per-tab",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.0
-      },
-      {
-        "id": "e2e1-background-progress",
-        "type": "threshold",
-        "metric": "backgroundCompletionRate",
-        "arm": "ours",
-        "threshold": 0.9,
-        "direction": "higher"
-      },
-      {
-        "id": "e2e1-resource-integrity",
-        "type": "resource-integrity"
-      }
-    ],
-    "e2e-2": [
-      {
-        "id": "e2e2-completeness",
-        "type": "completeness",
-        "description": "Every scheduled recovery trial must have warm, hidden, frozen, reload, restore, and recovery records."
-      },
-      {
-        "id": "e2e2-lifecycle-observed",
-        "type": "lifecycle-observed",
-        "description": "Each target must expose hidden, frozen, reload, and active observations."
-      },
-      {
-        "id": "e2e2-priority-applied",
-        "type": "priority-applied",
-        "description": "Each ours recovery target must promote its restored session through the public priority API before the recovery turn is submitted."
-      },
-      {
-        "id": "e2e2-recovery-ttft",
-        "type": "paired-directional",
-        "metric": "recoveryFirstTokenLatencyMs",
-        "comparator": "wllama-per-tab",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.2
-      },
-      {
-        "id": "e2e2-recovery-completion",
-        "type": "paired-directional",
-        "metric": "recoveryCompletionMs",
-        "comparator": "wllama-per-tab",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.15
-      },
-      {
-        "id": "e2e2-background-progress",
-        "type": "threshold",
-        "metric": "backgroundCompletionRate",
-        "arm": "ours",
-        "threshold": 0.9,
-        "direction": "higher"
-      },
-      {
-        "id": "e2e2-resource-integrity",
-        "type": "resource-integrity"
-      }
-    ],
-    "abl-1": [
-      {
-        "id": "abl1-completeness",
-        "type": "completeness"
-      },
-      {
-        "id": "abl1-frame-tail",
-        "type": "paired-directional",
-        "metric": "frameP95Ms",
-        "comparator": "ours-no-exec",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.2
-      },
-      {
-        "id": "abl1-priority-latency",
-        "type": "paired-directional",
-        "metric": "priorityFirstTokenLatencyMs",
-        "comparator": "ours-no-exec",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.1
-      },
-      {
-        "id": "abl1-resource-integrity",
-        "type": "resource-integrity"
-      }
-    ],
-    "abl-2": [
-      {
-        "id": "abl2-completeness",
-        "type": "completeness"
-      },
-      {
-        "id": "abl2-priority-gap",
-        "type": "paired-directional",
-        "metric": "priorityAdvantageGapMs",
-        "comparator": "ours-no-priority",
-        "direction": "higher",
-        "minimumRelativeEffect": 0.1
-      },
-      {
-        "id": "abl2-background-progress",
-        "type": "threshold",
-        "metric": "backgroundCompletionRate",
-        "threshold": 0.9,
-        "direction": "higher"
-      },
-      {
-        "id": "abl2-resource-integrity",
-        "type": "resource-integrity"
-      }
-    ],
-    "abl-3": [
-      {
-        "id": "abl3-completeness",
-        "type": "completeness"
-      },
-      {
-        "id": "abl3-recovery-ttft",
-        "type": "paired-directional",
-        "metric": "recoveryFirstTokenLatencyMs",
-        "comparator": "ours-no-state",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.2
-      },
-      {
-        "id": "abl3-replayed-tokens",
-        "type": "paired-directional",
-        "metric": "replayedTokens",
-        "comparator": "ours-no-state",
-        "direction": "lower",
-        "minimumRelativeEffect": 0.5
-      },
-      {
-        "id": "abl3-output-consistency",
-        "type": "output-consistency"
-      },
-      {
-        "id": "abl3-resource-integrity",
-        "type": "resource-integrity"
-      }
-    ]
+    "qualityJudgingInMainExperiment": false,
+    "acceptanceGates": false
   }
 }

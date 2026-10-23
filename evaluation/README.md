@@ -1,251 +1,131 @@
 # E2E 评测运行手册
 
-本手册覆盖 ArtifexWebGame + Holtwick Tavern 的真实应用 E2E 评测，以及三个本机 ablation。主实验使用 10 个应用会话（5 个 Artifex、5 个 Tavern）和 1 个可见的 raw WebGPU 压力页。配置与 preregistration 在正式运行前冻结，不要在看到结果后修改。
+本手册覆盖 ArtifexWebGame + Holtwick Tavern 的快速 E2E 评测。当前协议面向快速迭代：每个 E2E 只做一个简单 smoke，正式实验只跑一次，不设置 pilot、acceptance gate 或自动判定 pass/fail。
 
-## 1. 范围与分工
+## 1. 当前矩阵
 
-| 平台 | 主实验 | 模型 | Ablation |
+主比较固定为 `ours` 对 `wllama-per-tab`。WebLLM 不参与。
+
+| 平台 | 实验 | 模型 | 正式规模 |
 |---|---|---|---|
-| macOS | `e2e-1`、`e2e-2` 全量 | 四个主模型 | `abl-1`、`abl-2`、`abl-3` |
-| Windows | `e2e-1`、`e2e-2` 全量 | 四个主模型 | 不运行 |
+| macOS / Windows | `e2e-1` | 4 个主模型 | 432 task records |
+| macOS / Windows | `e2e-2` | 4 个主模型 | 432 recovery/background records |
 
-四个主模型均为 `Q4_K_M`：
+四个主模型：
 
 - `llama-3.2-1b-instruct`
 - `llama-3.2-3b-instruct`
 - `qwen2.5-1.5b-instruct`
 - `qwen2.5-3b-instruct`
 
-同一个 run 的 Artifex 和 Tavern 必须使用同一个模型。主实验按 OS、模型和实验分别保存；跨平台只比较效应方向，不直接合并绝对延迟。
+正式 trial 使用 6 个应用会话（3 个 Artifex、3 个 Tavern）和 1 个可见 raw WebGPU pressure tab。压力档位为 `0, 250, 500, 1000, 1500, 2000, 3000, 4000, clear-return`。
 
-模型族与尺寸的冻结映射如下：
+记录数口径：
 
-| 模型族 | 小模型 | 大模型 | 主实验平台 | Ablation 平台 |
-|---|---|---|---|---|
-| Llama | `llama-3.2-1b-instruct` | `llama-3.2-3b-instruct` | macOS + Windows | 仅小模型，macOS |
-| Qwen | `qwen2.5-1.5b-instruct` | `qwen2.5-3b-instruct` | macOS + Windows | 仅小模型，macOS |
+```text
+单个模型/实验：2 arms × 1 repeat × 9 pressures × 6 app tabs = 108
+单个实验四模型：4 × 108 = 432
+```
 
-- `e2e-1`、`e2e-2`：两个平台都运行四个主模型，每个平台分别完成 4 个模型 × 600 条记录。
-- `abl-1`、`abl-2`、`abl-3`：只在 macOS 上运行两个小模型，每个 ablation 为 2 个模型 × 600 条记录。
-- Windows 不运行 ablation；跨平台不使用同一模型在同一 run 中混跑。
-- WebLLM 不进入当前主实验或 ablation；主对照是 `ours` 与 `wllama-per-tab`。
+smoke 每个实验只跑一次，固定使用第一个主模型（Llama-1B），使用 1 Artifex + 1 Tavern + 1 pressure tab：
 
-每个模型的正式记录数是固定的：
+```text
+2 arms × 1 repeat × 1 pressure × 2 app tabs = 4
+```
 
-| 实验 | 每个模型 | 完整模型集 |
-|---|---:|---:|
-| `e2e-1` | 600 task records | 2400 |
-| `e2e-2` | 600 recovery/background records | 2400 |
-| `abl-1` / `abl-2` / `abl-3` | 600 records | 1200（两个小模型） |
+## 2. 前置准备
 
-计算口径：`2 arms × 3 repeats × 10 pressure entries × 10 app tabs = 600`。压力档位为 `0, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, clear-return`。主实验不运行 judge；质量指标不属于当前 E2E 的主结论。
+从 `impl/` 目录执行：
 
-## 2. 前置条件
+```bash
+npm ci
+npm run evaluation:models
+npm run evaluation:prepare
+npm run evaluation:check
+npm run evaluation:verify
+```
+
+要求：
 
 - Node.js 20 或更高版本。
-- Google Chrome 或 Chromium，且能够运行 WebGPU。
-- Git 和可用的 C/C++ 构建环境（仅在本地 vendor 依赖尚未准备时需要）。
-- 至少 16 GiB 内存；11-tab、3B 模型和 wllama-per-tab 同时运行时建议 24 GiB 以上。
-- 至少 20 GiB 可用磁盘；四个 GGUF、应用构建产物、浏览器缓存和 artifacts 都会占用空间。
-- macOS 与 Windows 使用同主版本 Chrome。固定电源策略、关闭自动休眠，并避免运行其他 GPU 或浏览器负载。
-- 实验过程使用真实可见 tab。Chrome 不能被最小化；pressure tab 在某些档位会短暂退到后台，但 trial 结束时必须重新处于 `visible`。
+- Git、Google Chrome 和可用的硬件加速 WebGPU。
+- 至少 16 GiB 内存；7-tab、3B 模型和 `wllama-per-tab` 同时运行时建议 24 GiB 以上。
+- 至少 20 GiB 可用磁盘。
+- 保持电源连接、关闭自动休眠；实验时不要让 Chrome 最小化。
 
-Windows 上如 Chrome 不在标准位置，设置 `CHROME_PATH`：
+Chrome 不在默认位置时设置 `CHROME_PATH`。完整模型准备与 manifest 校验仍由 `evaluation:models`、`evaluation:check` 负责。
 
-```powershell
-$env:CHROME_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-```
+## 3. 快速运行
 
-macOS 上如使用非默认 Chrome：
-
-```bash
-export CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-```
-
-## 3. 首次准备
-
-以下命令都从 `impl/` 目录执行。
-
-### macOS / Linux shell
-
-```bash
-cd impl
-npm ci
-npm run evaluation:models
-npm run evaluation:prepare
-npm run evaluation:check
-npm run evaluation:verify
-```
-
-### Windows PowerShell
-
-```powershell
-cd impl
-npm ci
-npm run evaluation:models
-npm run evaluation:prepare
-npm run evaluation:check
-npm run evaluation:verify
-```
-
-以上四步也可合并为 `npm run evaluation:setup`。
-
-如果本机重建了 `vendor/wllama`，用 `npm run sync:wllama-prebuilt` 刷新预编译包；该命令是 Node 脚本，macOS 和 Windows 都能直接运行。
-
-首次模型下载约 6 GiB，脚本会校验字节数和 SHA-256。若只需要一个模型：
-
-```bash
-node evaluation/scripts/prepare-models.mjs --model llama-3.2-1b-instruct
-```
-
-列出模型 ID：
-
-```bash
-node evaluation/scripts/prepare-models.mjs --list
-```
-
-`evaluation:check` 会检查 Chrome、构建产物、Artifex、Tavern 和模型文件。模型缺失只是 warning；正式运行前必须把对应模型补齐。当前矩阵中尤其要确认
-`qwen2.5-3b-instruct` 已经下载。
-
-`evaluation:prepare` 会读取 `vendor/apps-pins.json`：目录不存在时按固定 repository/commit 获取 Artifex 和 Tavern；目录已存在时会校验当前 commit。commit 不匹配会直接失败，不会悄悄使用另一个版本。
-
-## 4. 运行前门禁
-
-先运行 smoke。smoke 使用 2 个 app tab（1 Artifex + 1 Tavern）和 1 个 pressure tab，只验证适配器、页面加载、priority API 和基本执行链：
+先各跑一个 smoke：
 
 ```bash
 npm run evaluation:e2e-1:smoke
-npm run evaluation:e2e-1:pilot
-```
-
-`e2e-2` 也必须先 smoke 和 pilot：
-
-```bash
 npm run evaluation:e2e-2:smoke
-npm run evaluation:e2e-2:pilot
 ```
 
-Ablation 在正式运行前可用统一 runner 做 smoke；`--no-judge` 已在当前 package 命令中固定：
-
-```bash
-node evaluation/scripts/run.mjs --experiment abl-1 --mode smoke --no-judge
-node evaluation/scripts/run.mjs --experiment abl-2 --mode smoke --no-judge
-node evaluation/scripts/run.mjs --experiment abl-3 --mode smoke --no-judge
-```
-
-
-`pilot` 用于校准 tab 规模、压力档位、timeout 和切换时序。pilot 不应被当作正式结果；正式运行前确认 `evaluation:check` 和 `evaluation:verify` 仍然通过。
-
-Windows handoff runner 会区分 harness failure 与任务级失败：只有记录完整、且错误全部来自 `wllama-per-tab` 的 `task`/`recovery` 记录时，pilot 或 formal 才会继续；这表示保留 baseline 的可用性边界，不等于原 gate 通过。trial-level failure、ours 侧错误、记录缺失、协议证据无效或文件不完整仍会停止 pipeline。
-
-正式运行前还应运行：
-
-```bash
-npm run typecheck
-npm run evaluation:verify
-npm test
-npm run build
-npm run model:check
-npm run verify:runtime
-npm run smoke:browser
-```
-
-## 5. 正式运行
-
-同一时间只运行一个正式实验。不要并行跑 `e2e-1`、`e2e-2` 或 ablation。
-
-### E2E-1：优先级调度 + 渲染压力
+再运行正式实验：
 
 ```bash
 npm run evaluation:e2e-1
-```
-
-### E2E-2：状态恢复 + 渲染压力
-
-```bash
 npm run evaluation:e2e-2
 ```
 
-两个正式实验都会按当前平台选择主模型集合。正式运行结果分别写入：
+正式命令默认运行四个主模型。只重跑一个模型时：
+
+```bash
+node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal --model qwen2.5-1.5b-instruct --no-judge
+node evaluation/scripts/run.mjs --experiment e2e-2 --mode formal --model llama-3.2-3b-instruct --no-judge
+```
+
+`--out` 只能与单个 `--model` 一起使用。不要覆盖、拼接或挑选已有 run。
+
+配置中的 `modes.formal.repeats` 固定为 `1`；不要为了当前结果临时增加重复次数。
+
+## 4. 输出
+
+结果分别写入：
 
 ```text
 impl/artifacts/evaluation/e2e-priority-pressure/<os>/<model-id>/<timestamp>/
 impl/artifacts/evaluation/e2e-recovery-pressure/<os>/<model-id>/<timestamp>/
 ```
 
-### Ablation（仅 macOS）
-
-```bash
-npm run evaluation:abl-1
-npm run evaluation:abl-2
-npm run evaluation:abl-3
-```
-
-Ablation 默认只用两个小模型：
-
-```text
-llama-3.2-1b-instruct
-qwen2.5-1.5b-instruct
-```
-
-Windows 上运行 ablation 会被配置拒绝，这是预期行为。
-
-### 只重跑一个模型
-
-
-推荐直接调用跨平台 runner，避免 Windows 上 npm 参数分隔符差异：
-
-```bash
-node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal --model qwen2.5-1.5b-instruct
-node evaluation/scripts/run.mjs --experiment e2e-2 --mode formal --model llama-3.2-3b-instruct
-node evaluation/scripts/run.mjs --experiment abl-1 --mode formal --model llama-3.2-1b-instruct
-```
-
-`--out` 只能和 `--model` 一起使用；多模型 formal run 会按 `<platform>/<model>/<timestamp>` 自动分开目录。
-
-单个模型的正式 run 仍然独立写入它自己的 timestamp 目录；不要覆盖或合并以前的结果。
-
-## 6. 每个 run 的预期数据
-
-主实验每个 trial 有 10 个 app session（5 个 Artifex、5 个 Tavern）和 1 个 visible pressure tab。E2E-1 每轮提升 1 个 target session，其余 9 个作为 background；E2E-2 每轮以 1 个 session 为 recovery target，其余 9 个持续作为 background。正式 schedule、重复数和 tab 数由冻结配置控制。
-
-E2E-1 还记录探索性的 click-response：按固定 seed 在仍在运行的应用 tab 中随机切换，首次延迟 1 s、后续间隔 1.5--3.5 s、每 trial 最多 10 次。每次通过 `page.bringToFront()` 激活真实 tab，测到该页第二个 `requestAnimationFrame` callback，随后恢复 pressure tab；该操作不调用 priority API。macOS Chrome 自动化会把同窗口后台页的 Page Visibility API 也报成 `visible`，因此 `visibilityState` 只作为诊断字段，不作为有效样本条件。click-response 不是 gate，也不影响任务分母；样本只写入对应 task record 的 `clickResponses` 和 `events.jsonl`。如果覆盖率不足或效果不稳定，论文可以不报告这一项。
-
-每个 run 目录至少包含：
+每个 run 目录包含：
 
 ```text
 records.jsonl
 events.jsonl
 summary.json
-gate-report.json
 run.json
 latest.json
 ```
 
-其中：
+发生 harness 级失败时还会有：
 
-- `records.jsonl`：任务与恢复记录；E2E-1 的 `clickResponses` 嵌套在对应 task record 中。
-- `events.jsonl`：priority、pressure、生命周期和 trial 级事件。
-- `summary.json`：按 arm/pressure/app/role 聚合，以及配对 bootstrap 对比。
-- `gate-report.json`：冻结 gate 的 id、status、效应量和分母/分子；只看这一份文件判断 pass/fail。
-- `run.json`：平台、模型、config hash、preregistration 和 artifact 路径。
+```text
+failure.json
+```
 
-## 7. 查看与验证结果
+当前 E2E runner 不生成 `gate-report.json`。`summary.json` 的 completeness、`errorCount`、实际记录数和原始 `records.jsonl` 是报告依据。smoke 的 4 条记录或正式 run 的 108 条记录如果不完整，必须直接报告为 incomplete；出现执行错误时保留原始错误记录，不删除失败任务，也不用 gate 把结果改写成 pass。
 
-查看最新 run：
+E2E-1 另外记录探索性的 click-response：按固定 seed 激活仍在运行的应用 tab，测到第二个 `requestAnimationFrame` callback，再恢复 pressure tab。该操作不调用 priority API，也不改变任务分母。它没有 gate；如果覆盖不足或结果不稳定，可以不进入论文主表。
+
+## 5. 报告
+
+查看最新结果：
 
 ```bash
 npm run evaluation:report
 ```
 
-指定 run 目录或 `latest.json`：
+指定 run：
 
 ```bash
-node evaluation/scripts/report.mjs impl/artifacts/evaluation/e2e-priority-pressure/darwin/llama-3.2-1b-instruct/2026-10-15T00-00-00.000Z
-node evaluation/scripts/report.mjs impl/artifacts/evaluation/e2e-priority-pressure/latest.json
+node evaluation/scripts/report.mjs artifacts/evaluation/e2e-priority-pressure/darwin/llama-3.2-1b-instruct/2026-10-23T00-00-00.000Z
 ```
 
-如果最新指针包含多个模型，按字段筛选：
+筛选：
 
 ```bash
 node evaluation/scripts/report.mjs --experiment e2e-1 --platform win32 --model llama-3.2-1b-instruct
@@ -257,92 +137,42 @@ node evaluation/scripts/report.mjs --experiment e2e-1 --platform win32 --model l
 node evaluation/scripts/report.mjs --json
 ```
 
-报表把 serving/priority、recovery、frame 性能和配对差值分开打印。
+报告把 task quality、serving/priority、recovery、click-response、frame performance 和 paired contrasts 分开输出。
 
-E2E-1 报表另外打印 `CLICK RESPONSE (EXPLORATORY)`：有效 click 样本数、覆盖任务数、按 arm/pressure 的 click-response P50/P95，以及激活和帧响应拆分。这个区块没有 gate 状态。
+## 6. 失败处理
 
-## 8. 判定与失败处理
+- Smoke 失败时先检查环境、模型、应用构建和页面适配器，再重新运行 smoke。
+- 正式 run 失败时保留整个 run 目录和日志；修复明确的基础设施问题后使用新的 timestamp 重跑该组合。
+- Windows 一键 runner 在某个正式模型组合失败时会记录错误并继续下一个组合，不会因为 `wllama-per-tab` 的错误或缺少 gate 而停止整批实验。
+- 不能删除失败记录、缩小 7-tab 规模、降低压力档位或把 partial run 拼成完整结果。
+- 只有 Vite reload、端口冲突等明确瞬态错误可以在保留旧目录后重启；崩溃、WASM memory error、`Invalid magic number`、device lost 都应作为真实结果报告。
 
-只有在下面条件同时成立时，才把 run 当成正式实验结果：
+## 7. 静态验证
 
-这是严格 gate pass 的口径。若错误全部是已冻结的 `wllama-per-tab` 任务崩溃或 timeout，Windows runner 会继续完成后续 formal，并把这种 run 标为 `task-failure-outcome`；它只能作为 availability/resource-boundary 结果，不能写成完整 PASS。
+提交或交付前执行：
 
-1. `summary.json` 的 completeness 达到预期；`errorCount` 单独报告，不能从分母中删除失败任务。
-2. 所有 task/recovery 记录都有 terminal 状态。
-3. pressure tab 在测量窗口内为 `visible`。
-4. E2E-2 的每条 recovery 记录都有 hidden、frozen、reload、active 证据。
-5. `gate-report.json` 没有 `fail` 或 `incomplete`。
-6. 没有 OOM、wasm memory、`Invalid magic number`、memory access 或 device lost。
-7. E2E-1 的优先级门和 E2E-2 的恢复门均按固定配对口径计算，并单独报告后台完成率。
-
-以下情况必须保留原 run，记录为 incomplete 或 invalid，不能删除、补记录、挑窗口或降低 tab 数：
-
-- Chrome 崩溃、WASM memory error、`Invalid magic number`、device lost。
-- 11-tab 或 3B 配置在 Windows 上资源不足。
-- pressure tab 不可见或生命周期证据缺失。
-- 运行在过程中被中止，或 `summary.json` 不完整。
-
-只有 Vite reload、端口冲突等明确的基础设施瞬态错误，才允许在保留失败目录后使用新的 timestamp 重启。不能把两个 run 拼接为一份结果。
-
-## 9. 结果归档
-
-每个 OS、模型和实验组独立归档。至少保留：
-
-- `run.json` 中的 platform、模型 hash、config hash、Artifex/Tavern commit。
-- `records.jsonl` 和 `events.jsonl` 原始数据。
-- `summary.json`、`gate-report.json` 和失败 run 的 `failure.json`。
-- Chrome、GPU driver、电源模式和异常情况的简短记录。
-
-跨平台比较只写“效应方向是否一致”，不写跨 OS 的绝对 TTFT、wall time 或 FPS 差值。模型族比较只在同一 OS、同一实验组内做。
-
-## 10. 代码约束
-
-- evaluation harness 不得 import `impl/src`。
-- 不修改 `sections/*.tex`、`references.bib`、`deprecated/` 或 archived WebArena artifacts。
-- 不在正式实验运行中调整策略参数、模型、prompt、压力 schedule 或统计口径。
-- 旧 E1-E5 结果只作为历史 artifact 保留，不并入本次 E2E 结果。
-
-## 11. Windows 新机器完整步骤
-
-如果实验由外部合作者执行，优先使用仓库根目录的 `Run-Windows-E2E.cmd`。该入口会自动完成环境检查、依赖和模型下载、两个应用构建、smoke/pilot/formal、报告生成和结果打包；完整操作与回传方式见 `Windows-E2E-Handoff.md`。以下手工步骤仅用于调试。
-
-以下步骤在原生 Windows 的 PowerShell 中执行，不使用 WSL：
-
-1. 安装 Node.js 20 LTS、Git 和 Google Chrome，并确认 `node --version`、`npm --version`、`git --version` 可用。
-2. 克隆或复制完整仓库，保持 `impl/vendor/`、`impl/vendor/wllama-prebuilt/`、`impl/package-lock.json` 和 `impl/evaluation/config/` 的相对位置不变。
-3. 打开 PowerShell，进入 `impl` 目录。
-4. 如果 Chrome 不在标准路径，设置 `CHROME_PATH`。
-5. 执行：
-
-```powershell
-npm ci
-npm run evaluation:setup
-npm run evaluation:check
+```bash
+npm run typecheck
 npm run evaluation:verify
+npm test
+npm run build
 ```
 
-`evaluation:setup` 会下载模型、按 pin 准备 Artifex/Tavern、构建 engine pages 并检查环境。首次运行下载量约 6 GiB；如果只想先验证一个小模型：
+`evaluation:verify` 检查 harness 不导入 `impl/src`，并确认当前配置没有 pilot、正式重复数为 1、smoke schedule 只有一项且 preregistration 不含 acceptance gates。
 
-```powershell
-node evaluation/scripts/prepare-models.mjs --model llama-3.2-1b-instruct
-node evaluation/scripts/run.mjs --experiment e2e-1 --mode smoke --no-judge
-node evaluation/scripts/run.mjs --experiment e2e-1 --mode pilot --model llama-3.2-1b-instruct --no-judge
-node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal --model llama-3.2-1b-instruct --no-judge
-```
+## 8. Windows 一键运行
 
-6. 查看结果：
-
-```powershell
-node evaluation/scripts/report.mjs --experiment e2e-1 --model llama-3.2-1b-instruct
-```
-
-7. 结果位于：
+外部 Windows 机器使用仓库根目录的一站式入口：
 
 ```text
-impl\artifacts\evaluation\e2e-priority-pressure\win32\<model-id>\<timestamp>\
-impl\artifacts\evaluation\e2e-recovery-pressure\win32\<model-id>\<timestamp>\
+Run-Windows-E2E.cmd
 ```
 
-Windows 只运行 `e2e-1` 和 `e2e-2`。如果 11-tab、3B 或 `wllama-per-tab` 触发资源阻塞，保留原始 run 并在 `failure.json`/报告中标记 `platform resource block`；不要减少 tab 数或更换模型后继续同一正式 run。
+它会完成环境检查、依赖与模型准备、两个应用构建、静态验证、2 个 smoke、8 个正式 run（2 个实验 × 4 个模型）以及结果打包。具体回传方式见 `Windows-E2E-Handoff.md`。
 
-如果资源阻塞表现为已完成记录中的 `wllama-per-tab` task/recovery crash 或 timeout，runner 会继续 formal，并在最终报告中保留固定分母、错误数和 `task-failure-outcome`。不要为了得到完整 PASS 而删除这些记录；条件性能只使用双方成功任务。
+## 9. 约束
+
+- Evaluation harness 不得 import `impl/src`。
+- 不修改 `sections/*.tex`、`references.bib`、`deprecated/` 或 archived WebArena artifacts。
+- 正式实验期间不改变模型、prompt、tab 数、pressure schedule 或统计口径。
+- 旧实验结果只作为历史 artifact 保留，不并入当前快速 E2E 结果。

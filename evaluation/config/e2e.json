@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "id": "artifex-tavern-e2e-paper-v5",
-  "description": "Paper-aligned end-to-end evaluation with five Artifex sessions, five Holtwick Tavern sessions, and one raw WebGPU pressure page per trial.",
+  "id": "artifex-tavern-e2e-rapid-r1",
+  "description": "Rapid one-repeat end-to-end evaluation with three Artifex sessions, three Holtwick Tavern sessions, and one raw WebGPU pressure page per formal trial.",
   "modelSets": {
     "main": [
       "llama-3.2-1b-instruct",
@@ -173,17 +173,16 @@
     }
   },
   "layout": {
-    "appTabs": 10,
-    "artifexTabs": 5,
+    "appTabs": 6,
+    "artifexTabs": 3,
     "pressureTabs": 1,
-    "totalTabs": 11
+    "totalTabs": 7
   },
   "pressure": {
     "schedule": [
       { "id": "clear-1", "triangles": 0 },
       { "id": "pressure-250", "triangles": 250 },
       { "id": "pressure-500", "triangles": 500 },
-      { "id": "pressure-750", "triangles": 750 },
       { "id": "pressure-1000", "triangles": 1000 },
       { "id": "pressure-1500", "triangles": 1500 },
       { "id": "pressure-2000", "triangles": 2000 },
@@ -191,17 +190,8 @@
       { "id": "pressure-4000", "triangles": 4000 },
       { "id": "clear-return", "triangles": 0 }
     ],
-    "pilotSchedule": [
-      { "id": "clear-1", "triangles": 0 },
-      { "id": "pressure-1000", "triangles": 1000 },
-      { "id": "pressure-2000", "triangles": 2000 },
-      { "id": "pressure-4000", "triangles": 4000 },
-      { "id": "clear-return", "triangles": 0 }
-    ],
     "smokeSchedule": [
-      { "id": "clear-1", "triangles": 0 },
-      { "id": "pressure-1000", "triangles": 1000 },
-      { "id": "clear-return", "triangles": 0 }
+      { "id": "clear-1", "triangles": 0 }
     ],
     "complexity": 128,
     "passes": 1,
@@ -214,7 +204,7 @@
   "priority": {
     "api": "setSessionPriority",
     "initial": "normal",
-    "sequence": [0, 4, 7, 2, 9, 1, 6, 3, 8, 5],
+    "sequence": [0, 3, 1, 4, 2, 5],
     "switchIntervalMs": 15000,
     "maxSwitchesPerTrial": 1,
     "disableVisibilityDerivedPriority": true,
@@ -283,28 +273,13 @@
       "maxSwitchesPerTrial": 1,
       "judge": false
     },
-    "pilot": {
-      "label": "pilot",
-      "appTabs": 10,
-      "artifexTabs": 5,
-      "pressureTabs": 1,
-      "totalTabs": 11,
-      "repeats": 1,
-      "maxNewTokens": 64,
-      "taskTimeoutMs": 900000,
-      "loadTimeoutMs": 300000,
-      "schedule": "pilotSchedule",
-      "switchIntervalMs": 10000,
-      "maxSwitchesPerTrial": 1,
-      "judge": false
-    },
     "formal": {
       "label": "formal",
-      "appTabs": 10,
-      "artifexTabs": 5,
+      "appTabs": 6,
+      "artifexTabs": 3,
       "pressureTabs": 1,
-      "totalTabs": 11,
-      "repeats": 3,
+      "totalTabs": 7,
+      "repeats": 1,
       "maxNewTokens": 128,
       "taskTimeoutMs": 900000,
       "loadTimeoutMs": 300000,

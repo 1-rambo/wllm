@@ -8,15 +8,14 @@ import { buildSummary } from "../lib/summary.mjs";
 const cli = parseArgs(process.argv.slice(2));
 const loaded = await loadEvaluationConfig();
 const runDirectory = await resolveRunDirectory(cli, loaded);
-const [records, summaryFile, gateReport, runMetadata] = await Promise.all([
+const [records, summaryFile, runMetadata] = await Promise.all([
   readRecords(path.join(runDirectory, "records.jsonl")),
   readJsonIfPresent(path.join(runDirectory, "summary.json")),
-  readJsonIfPresent(path.join(runDirectory, "gate-report.json")),
   readJsonIfPresent(path.join(runDirectory, "run.json"))
 ]);
 
 const experimentId =
-  runMetadata?.experiment ?? gateReport?.experiment ?? cli.experiment ?? "e2e-1";
+  runMetadata?.experiment ?? cli.experiment ?? "e2e-1";
 const experiment = experimentFor(loaded, experimentId);
 const summary =
   summaryFile ??
@@ -31,7 +30,6 @@ if (cli.json) {
         runDirectory,
         run: runMetadata,
         summary,
-        gates: gateReport,
         records
       },
       null,
@@ -41,13 +39,12 @@ if (cli.json) {
   process.exit(0);
 }
 
-printHeader({ runDirectory, experiment, runMetadata, summary, gateReport, records });
+printHeader({ runDirectory, experiment, runMetadata, summary, records });
 printQuality(summary, records);
 printServing(summary, records);
 printClickResponse(summary);
 printFrames(summary, records);
 printPairwise(summary, experiment);
-printGates(gateReport);
 
 function parseArgs(argv) {
   const options = { json: false };
@@ -187,7 +184,6 @@ function printHeader({
   experiment,
   runMetadata,
   summary,
-  gateReport,
   records
 }) {
   const taskRecords = records.filter(
@@ -211,12 +207,6 @@ function printHeader({
   if (summary.completeness) {
     console.log(
       `completeness: observed=${summary.completeness.observed ?? "-"} expected=${summary.completeness.expected ?? "-"} complete=${summary.completeness.complete ?? "unknown"}`
-    );
-  }
-  if (gateReport) {
-    const failed = gateReport.gates?.filter((gate) => gate.status !== "pass") ?? [];
-    console.log(
-      `gates: ${gateReport.gates?.length ?? 0} total, ${failed.length} not pass`
     );
   }
   console.log("");
@@ -370,28 +360,6 @@ function printPairwise(summary, experiment) {
   }
   console.log("");
 }
-
-function printGates(gateReport) {
-  console.log("GATES");
-  if (!gateReport) {
-    console.log("gate-report.json is missing");
-    console.log("");
-    return;
-  }
-  for (const gate of gateReport.gates ?? []) {
-    console.log(`${gate.id}: ${gate.status}`);
-    const fields = Object.entries(gate)
-      .filter(([key]) => !["id", "status", "type", "description"].includes(key))
-      .filter(([, value]) => ["string", "number", "boolean"].includes(typeof value));
-    if (fields.length > 0) {
-      console.log(
-        `  ${fields.map(([key, value]) => `${key}=${String(value)}`).join("  ")}`
-      );
-    }
-  }
-  console.log("");
-}
-
 
 function leaseSummary(records, group) {
   const matching = records.filter(

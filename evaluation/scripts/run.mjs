@@ -59,11 +59,11 @@ function normalizeArgs(args) {
 
 function printHelp() {
   console.log(`Usage:
-  node evaluation/scripts/run.mjs --experiment <id> --mode <smoke|pilot|formal> [options]
+  node evaluation/scripts/run.mjs --experiment <id> --mode <smoke|formal> [options]
 
 Options:
   --experiment <id>       e2e-1, e2e-2, abl-1, abl-2, abl-3
-  --mode <mode>           smoke, pilot, or formal
+  --mode <mode>           smoke or formal
   --model <id>            run one model from the experiment's model set
   --all-models            run every model in the experiment's model set
   --headless              run Chrome without a visible window
@@ -72,7 +72,6 @@ Options:
 
 Examples:
   node evaluation/scripts/run.mjs --experiment e2e-1 --mode smoke --no-judge
-  node evaluation/scripts/run.mjs --experiment e2e-1 --mode pilot --model llama-3.2-1b-instruct
   node evaluation/scripts/run.mjs --experiment e2e-1 --mode formal
   node evaluation/scripts/run.mjs --experiment e2e-2 --mode formal --model qwen2.5-1.5b-instruct`);
 }

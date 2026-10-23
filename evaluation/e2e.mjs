@@ -41,7 +41,6 @@ import {
 } from "./lib/click-response.mjs";
 import { RunArtifacts, writeJsonAtomic } from "./lib/records.mjs";
 import { buildSummary } from "./lib/summary.mjs";
-import { evaluateGates } from "./lib/gate.mjs";
 import { createJudgeRunner, scoreRecords } from "./lib/judge.mjs";
 import { median } from "./lib/statistics.mjs";
 
@@ -52,6 +51,21 @@ const mode = cli.mode ?? "smoke";
 await assertExperimentRunnable(loaded, experimentId, mode);
 const experiment = experimentFor(loaded, experimentId);
 const modeConfig = effectiveMode(loaded, mode);
+const registeredModeConfig = modeConfig;
+if (
+  cli.repeats !== null &&
+  (!Number.isInteger(cli.repeats) ||
+    cli.repeats < 1 ||
+    cli.repeats > registeredModeConfig.repeats)
+) {
+  throw new Error(
+    `--repeats must be an integer between 1 and ${registeredModeConfig.repeats}`
+  );
+}
+const effectiveModeConfig = cli.repeats === null
+  ? modeConfig
+  : { ...modeConfig, repeats: cli.repeats };
+const artifactMode = cli.repeats === null ? mode : `${mode}-r${cli.repeats}`;
 const schedule = pressureSchedule(loaded, mode);
 const layout = experimentAppTabs(loaded, mode);
 const selectedModels = selectModels(loaded, experimentId, mode, cli);
@@ -90,8 +104,19 @@ try {
       schemaVersion: 2,
       experiment: experimentId,
       experimentLabel: experiment.label,
-      mode,
+      mode: artifactMode,
       platform: platformId(),
+      registeredMode: mode,
+      repeats: effectiveModeConfig.repeats,
+      registeredRepeats: registeredModeConfig.repeats,
+      protocolOverride:
+        cli.repeats === null
+          ? null
+          : {
+              type: "reduced-repeats",
+              repeats: cli.repeats,
+              registeredRepeats: registeredModeConfig.repeats
+            },
       platformLabel: loaded.config.platforms[platformId()]?.label ?? platformId(),
       model: model.id,
       modelHash: model.sha256,
@@ -105,6 +130,8 @@ try {
         ])
       ),
       browserProfile: "isolated-persistent",
+      armOrderPolicy: "fixed-config-order",
+      armOrder: experiment.arms,
       execution: loaded.config.execution,
       executionByArm: Object.fromEntries(
         experiment.arms.map((armId) => [
@@ -148,8 +175,8 @@ try {
       const modelRecords = await runModel({
         loaded,
         experiment,
-        mode,
-        modeConfig,
+        mode: artifactMode,
+        modeConfig: effectiveModeConfig,
         schedule,
         layout,
         model,
@@ -174,18 +201,17 @@ try {
       }
       const summary = buildSummary(records, {
         armPairs: [[experiment.arms[0], experiment.arms[1]]],
-        expected: expectedRecordCount(loaded, experimentId, mode, [model], layout)
+        expected: expectedRecordCount(
+          loaded,
+          experimentId,
+          effectiveModeConfig,
+          schedule,
+          [model],
+          layout
+        )
       });
       const complete = summary.completeness.complete === true;
-      const gateReport = evaluateGates({
-        loaded,
-        experimentId,
-        records,
-        summary,
-        complete
-      });
       await artifacts.writeJson("summary.json", summary);
-      await artifacts.writeJson("gate-report.json", gateReport);
       await artifacts.writeJson("latest.json", {
         experiment: experimentId,
         model: model.id,
@@ -196,9 +222,6 @@ try {
       console.log(
         `records=${records.length} complete=${complete} errors=${summary.errorCount}`
       );
-      for (const gate of gateReport.gates) {
-        console.log(`${gate.id}: ${gate.status}`);
-      }
     } finally {
       await artifacts.close();
     }
@@ -213,7 +236,7 @@ try {
   await mkdir(failureDirectory, { recursive: true });
   await writeJsonAtomic(path.join(failureDirectory, "failure.json"), {
     experiment: experimentId,
-    mode,
+    mode: artifactMode,
     at: new Date().toISOString(),
     error: error instanceof Error ? error.stack ?? error.message : String(error)
   });
@@ -249,9 +272,10 @@ async function runModel(options) {
     for (let pressureIndex = 0; pressureIndex < schedule.length; pressureIndex += 1) {
       const pressure = schedule[pressureIndex];
       const trialOrdinal = repeat * schedule.length + pressureIndex;
-      const arms = trialOrdinal % 2 === 0
-        ? experiment.arms
-        : [...experiment.arms].reverse();
+      // Keep the arm order fixed across every pressure cell. Alternating order
+      // can leave GPU-process or native-runtime residue from the preceding
+      // arm in the next measurement and makes pressure cells incomparable.
+      const arms = experiment.arms;
       for (const [armIndex, armId] of arms.entries()) {
         const stage = `${armId} ${pressure.id} repeat=${repeat}`;
         stageLog(`trial start ${stage}`);
@@ -361,9 +385,10 @@ async function waitForAppReady(page, timeoutMs) {
   const startedAtMs = Date.now();
   let lastState = null;
   let loggedDiagnostics = false;
+  let readinessProbe = null;
   while (Date.now() - startedAtMs < timeoutMs) {
     try {
-      lastState = await page.evaluate(() => ({
+      readinessProbe ??= page.evaluate(() => ({
         ready: window.__wllmE2E?.ready?.() === true,
         snapshot: window.__wllmE2E?.snapshot?.() ?? null,
         iframes: [...document.querySelectorAll("iframe")].map((frame) => {
@@ -380,6 +405,13 @@ async function waitForAppReady(page, timeoutMs) {
           }
         })
       }));
+      const remainingMs = Math.max(1, timeoutMs - (Date.now() - startedAtMs));
+      lastState = await withTimeout(
+        readinessProbe,
+        Math.min(5_000, remainingMs),
+        "application readiness probe timed out"
+      );
+      readinessProbe = null;
       if (lastState.ready) return;
       const adapterError = lastState.snapshot?.error ?? null;
       if (adapterError !== null) {
@@ -398,6 +430,9 @@ async function waitForAppReady(page, timeoutMs) {
           error.message.startsWith("engine page failed:"))
       ) {
         throw error;
+      }
+      if (!(error instanceof Error) || error.message !== "application readiness probe timed out") {
+        readinessProbe = null;
       }
     }
     if (!loggedDiagnostics && Date.now() - startedAtMs >= 15_000) {
@@ -1882,12 +1917,19 @@ function resolveRunDirectory(experiment, model, startedAt) {
   return path.join(root, platformId(), model.id, timestampId(startedAt));
 }
 
-function expectedRecordCount(loaded, experimentId, mode, selectedModels, layout) {
+function expectedRecordCount(
+  loaded,
+  experimentId,
+  modeConfig,
+  schedule,
+  selectedModels,
+  layout
+) {
   const experiment = experimentFor(loaded, experimentId);
   return selectedModels.length
     * experiment.arms.length
-    * effectiveMode(loaded, mode).repeats
-    * pressureSchedule(loaded, mode).length
+    * modeConfig.repeats
+    * schedule.length
     * layout.appTabs;
 }
 
@@ -1899,7 +1941,7 @@ function selectModels(loaded, experimentId, mode, cli) {
     if (!selected) throw new Error(`model ${cli.model} is not in ${experimentId}'s model set`);
     return [selected];
   }
-  if (mode === "smoke" || mode === "pilot") {
+  if (mode === "smoke") {
     return [available[0]];
   }
   return cli.allModels || mode === "formal" ? available : [available[0]];
@@ -1968,7 +2010,8 @@ function parseArgs(argv) {
     out: null,
     judge: false,
     headless: false,
-    allModels: false
+    allModels: false,
+    repeats: null
   };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -1981,6 +2024,7 @@ function parseArgs(argv) {
     else if (value === "--headless") result.headless = true;
     else if (value === "--headed") result.headless = false;
     else if (value === "--all-models") result.allModels = true;
+    else if (value === "--repeats") result.repeats = Number(argv[++index]);
   }
   return result;
 }
