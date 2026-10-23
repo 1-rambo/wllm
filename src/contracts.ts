@@ -470,6 +470,9 @@ export interface NativeSlotStats {
   inUse: boolean;
   tokens: number;
   state: NativeStage | 'idle';
+  // A bound slot can still be empty before its first native stream starts.
+  // Only parkable slots may be exported or moved out of L1.
+  parkable?: boolean;
 }
 
 export type NativeRuntimePhase = 'download' | 'load' | 'ready' | 'error';

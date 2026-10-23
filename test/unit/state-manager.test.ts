@@ -261,7 +261,7 @@ describe('MultiTierStateManager', () => {
     expect(manager.getResidency('next')?.level).toBe('L1');
   });
 
-  it('accepts a zero-token victim when only the resident-node cap is exceeded', async () => {
+  it('rebuilds an uninitialized zero-token victim when the resident-node cap is exceeded', async () => {
     const native = new FakeNativeEngine({ slotCount: 4 });
     await native.submit({
       requestId: 'native-zero',
@@ -312,7 +312,7 @@ describe('MultiTierStateManager', () => {
       success: true,
       victims: ['zero'],
     });
-    expect(manager.getResidency('zero')?.level).toBe('L2');
+    expect(manager.getResidency('zero')?.level).toBe('rebuild');
     expect(manager.getResidency('live')?.level).toBe('L1');
     expect(manager.getResidency('next')?.level).toBe('L1');
   });

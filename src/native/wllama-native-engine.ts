@@ -165,6 +165,10 @@ interface WllamaRequestState {
   // Set when a lifecycle cut arrives before this request owns the stream,
   // which is what happens to every queued member of a cooperative group.
   interruptPending: boolean;
+  // A host-bound slot is not a native checkpoint yet. The prompt/KV becomes
+  // addressable only after the native stream starts producing chunks; an
+  // interrupt before that point must rebuild instead of parking an empty slot.
+  nativeSlotEstablished: boolean;
 }
 
 interface SerializedContinuation {
@@ -430,6 +434,7 @@ export class WllamaNativeEngine implements NativeEngine {
       cancelled: false,
       abortController: null,
       interruptPending: false,
+      nativeSlotEstablished: resumed?.nativeSlotEstablished ?? false,
     };
     this.states.set(request.requestId, state);
     this.slots.set(slotId, request.requestId);
@@ -549,6 +554,9 @@ export class WllamaNativeEngine implements NativeEngine {
       });
 
       for await (const chunk of stream) {
+        // Receiving a native chunk proves the serving context has installed
+        // the sequence. Successful submission alone only binds host state.
+        state.nativeSlotEstablished = true;
         const promptProgress = chunk.prompt_progress;
         if (promptProgress) {
           prefillSeen = true;
@@ -766,6 +774,12 @@ export class WllamaNativeEngine implements NativeEngine {
 
   async slotExport(slotId: number): Promise<NativeSlotCheckpoint> {
     const state = this.requireSlotState(slotId);
+    if (!state.nativeSlotEstablished) {
+      throw new WllmError(
+        'native slot has no established prompt state',
+        'slot_state_empty'
+      );
+    }
     const bytes = this.continuationBytes(state);
 
     // Bounded serving: pull the real sequence KV out of the serving context and
@@ -798,6 +812,12 @@ export class WllamaNativeEngine implements NativeEngine {
 
   async slotSnapshot(slotId: number): Promise<NativeSlotCheckpoint> {
     const state = this.requireSlotState(slotId);
+    if (!state.nativeSlotEstablished) {
+      throw new WllmError(
+        'native slot has no established prompt state',
+        'slot_state_empty'
+      );
+    }
     const bytes = this.continuationBytes(state);
     if (typeof this.runtime.exportSlotState === 'function') {
       const exported = await this.runtime.exportSlotState(slotId, {
@@ -828,12 +848,31 @@ export class WllamaNativeEngine implements NativeEngine {
   // continuation metadata and the handle, never the KV bytes.
   async slotPark(slotId: number): Promise<NativeSlotCheckpoint> {
     const state = this.requireSlotState(slotId);
+    if (!state.nativeSlotEstablished) {
+      throw new WllmError(
+        'native slot has no established prompt state',
+        'slot_state_empty'
+      );
+    }
     if (typeof this.runtime.parkSlotState !== 'function') {
       // backend without a park bank: fall back to exporting the bytes
       return this.slotExport(slotId);
     }
     const bytes = this.continuationBytes(state);
-    const parked = await this.runtime.parkSlotState(slotId);
+    let parked: Awaited<ReturnType<NonNullable<WllamaRuntime['parkSlotState']>>>;
+    try {
+      parked = await this.runtime.parkSlotState(slotId);
+    } catch (error) {
+      // The pinned native fork reports SERVER_SLOT_STATE_EMPTY as status 3.
+      // Convert that to a state-machine signal so callers rebuild safely.
+      if (isNativeSlotEmptyError(error)) {
+        throw new WllmError(
+          'native slot has no established prompt state',
+          'slot_state_empty'
+        );
+      }
+      throw error;
+    }
     this.states.delete(state.requestId);
     this.slots.set(slotId, null);
     return {
@@ -1017,6 +1056,7 @@ export class WllamaNativeEngine implements NativeEngine {
       cancelled: false,
       abortController: null,
       interruptPending: false,
+      nativeSlotEstablished: true,
     });
     this.slots.set(slotId, requestId);
     return {
@@ -1052,6 +1092,7 @@ export class WllamaNativeEngine implements NativeEngine {
         inUse: true,
         tokens: state.promptTokens.length + state.decodeGenerated,
         state: state.done ? 'done' : state.stage,
+        parkable: state.nativeSlotEstablished,
       };
     });
   }
@@ -1440,6 +1481,13 @@ function isAbortError(error: unknown): boolean {
       error !== null &&
       'name' in error &&
       (error as { name?: unknown }).name === 'WllamaAbortError')
+  );
+}
+
+function isNativeSlotEmptyError(error: unknown): boolean {
+  return (
+    (error instanceof WllmError && error.code === 'slot_state_empty') ||
+    (error instanceof Error && /\(status 3\)/.test(error.message))
   );
 }
 

@@ -1265,7 +1265,10 @@ export class SharedWorkerCoordinator {
     }
     const stats = await this.native.slotStats().catch(() => []);
     const live = stats.some(
-      (entry) => entry.slotId === residency.slotId && entry.inUse
+      (entry) =>
+        entry.slotId === residency.slotId &&
+        entry.inUse &&
+        entry.parkable !== false
     );
     if (!live) {
       await this.stateManager.dropLiveNode(node.nodeId);
@@ -1991,29 +1994,51 @@ export class SharedWorkerCoordinator {
       if (busy) {
         continue;
       }
+      const slot = (await this.native.slotStats().catch(() => [])).find(
+        (entry) => entry.slotId === candidate.slotId
+      );
+      if (!slot?.inUse || slot.parkable === false) {
+        await this.stateManager.dropLiveNode(candidate.nodeId);
+        this.resetNativeRequestBindings(candidate.nodeId);
+        const victim = this.lastRequestByNode.get(candidate.nodeId);
+        if (victim) {
+          this.emitResidency(victim, candidate.nodeId, {
+            action: 'drop',
+            previousLevel: 'L1',
+          });
+        }
+        continue;
+      }
       await this.stateManager.demote(candidate.nodeId, 'L2');
       // slotPark releases the native request identity. Clear every request
       // bound to this node so the next admission submits against the imported
       // slot instead of advancing a now-deleted native id.
-      for (const [requestId, nodeId] of this.requestNodes) {
-        if (nodeId !== candidate.nodeId) {
-          continue;
-        }
-        const parked = this.scheduler.get(requestId);
-        if (!parked) {
-          continue;
-        }
-        parked.nativeRequestId = null;
-        parked.slotId = null;
-        parked.resumeSlotId = null;
-      }
+      this.resetNativeRequestBindings(candidate.nodeId);
       const victim = this.lastRequestByNode.get(candidate.nodeId);
       if (victim) {
         this.emitResidency(victim, candidate.nodeId, {
-          action: 'park',
+          action:
+            this.stateManager.getResidency(candidate.nodeId)?.level === 'L2'
+              ? 'park'
+              : 'drop',
           previousLevel: 'L1',
         });
       }
+    }
+  }
+
+  private resetNativeRequestBindings(nodeId: NodeId): void {
+    for (const [requestId, boundNodeId] of this.requestNodes) {
+      if (boundNodeId !== nodeId) {
+        continue;
+      }
+      const parked = this.scheduler.get(requestId);
+      if (!parked) {
+        continue;
+      }
+      parked.nativeRequestId = null;
+      parked.slotId = null;
+      parked.resumeSlotId = null;
     }
   }
 

@@ -11,7 +11,12 @@ import type {
   StateAdmissionResult,
   StateManagerConfig,
 } from '../contracts';
-import { CheckpointError, systemClock, sessionKeyString } from '../contracts';
+import {
+  CheckpointError,
+  systemClock,
+  sessionKeyString,
+  WllmError,
+} from '../contracts';
 import type { NativeEngine } from '../native/native-engine';
 import {
   checkpointChecksum,
@@ -711,40 +716,57 @@ export class MultiTierStateManager {
       return;
     }
     if (current.level === 'L1' && current.slotId !== null) {
-      if (targetLevel === 'L2') {
-        // tier two: the state stays in the native heap behind a handle and the
-        // live slot is released, so the coordinator never copies KV bytes
-        const checkpoint = await this.native.slotPark(current.slotId);
-        this.l2Checkpoints.set(nodeId, checkpoint);
-        this.synchronizeNodeWithCheckpoint(nodeId, checkpoint);
-        this.setResidency(nodeId, 'L2', null, residentTokenCount(node));
-        await this.enforceL2Capacity(nodeId);
-      } else if (targetLevel === 'L3') {
-        const checkpoint = await this.native.slotExport(current.slotId);
-        this.synchronizeNodeWithCheckpoint(nodeId, checkpoint);
-        const envelope = makeCheckpointEnvelope(checkpoint, {
-          checkpointKey: `${nodeId}:${this.clock.now()}`,
-          nodeId,
-          session: node.session,
-          parentNodeId: node.parentNodeId,
-          modelHash: this.modelHashFor(node),
-          createdAt: this.clock.now(),
-        });
-        await this.store.put(
-          envelope.checkpointKey,
-          serializeCheckpoint(envelope)
-        );
-        await this.native.slotDrop(current.slotId);
-        this.setResidency(
-          nodeId,
-          'L3',
-          null,
-          residentTokenCount(node),
-          envelope.checkpointKey
-        );
+      // A priority cut can land after host submit but before llama.cpp has
+      // installed the prompt. That slot has no checkpoint to park or export,
+      // so preserve correctness by rebuilding it from the logical history.
+      const parkable =
+        targetLevel === 'rebuild' ||
+        (await this.nativeSlotParkable(current.slotId));
+      if (!parkable) {
+        await this.dropLiveNode(nodeId);
       } else {
-        await this.native.slotDrop(current.slotId);
-        this.setResidency(nodeId, targetLevel, null, residentTokenCount(node));
+        try {
+          if (targetLevel === 'L2') {
+            // tier two: the state stays in the native heap behind a handle and the
+            // live slot is released, so the coordinator never copies KV bytes
+            const checkpoint = await this.native.slotPark(current.slotId);
+            this.l2Checkpoints.set(nodeId, checkpoint);
+            this.synchronizeNodeWithCheckpoint(nodeId, checkpoint);
+            this.setResidency(nodeId, 'L2', null, residentTokenCount(node));
+            await this.enforceL2Capacity(nodeId);
+          } else if (targetLevel === 'L3') {
+            const checkpoint = await this.native.slotExport(current.slotId);
+            this.synchronizeNodeWithCheckpoint(nodeId, checkpoint);
+            const envelope = makeCheckpointEnvelope(checkpoint, {
+              checkpointKey: `${nodeId}:${this.clock.now()}`,
+              nodeId,
+              session: node.session,
+              parentNodeId: node.parentNodeId,
+              modelHash: this.modelHashFor(node),
+              createdAt: this.clock.now(),
+            });
+            await this.store.put(
+              envelope.checkpointKey,
+              serializeCheckpoint(envelope)
+            );
+            await this.native.slotDrop(current.slotId);
+            this.setResidency(
+              nodeId,
+              'L3',
+              null,
+              residentTokenCount(node),
+              envelope.checkpointKey
+            );
+          } else {
+            await this.native.slotDrop(current.slotId);
+            this.setResidency(nodeId, targetLevel, null, residentTokenCount(node));
+          }
+        } catch (error) {
+          if (!isNativeSlotStateEmpty(error)) {
+            throw error;
+          }
+          await this.dropLiveNode(nodeId);
+        }
       }
     } else if (current.level === 'L2' && targetLevel === 'L3') {
       const checkpoint = this.l2Checkpoints.get(nodeId);
@@ -790,6 +812,12 @@ export class MultiTierStateManager {
   }
 
   // the backend released the live slot without giving us a checkpoint
+  private async nativeSlotParkable(slotId: number): Promise<boolean> {
+    const stats = await this.native.slotStats().catch(() => []);
+    const slot = stats.find((entry) => entry.slotId === slotId);
+    return slot?.inUse === true && slot.parkable !== false;
+  }
+
   async dropLiveNode(nodeId: string): Promise<void> {
     const record = this.residency.get(nodeId);
     if (!record) {
@@ -1196,6 +1224,13 @@ export class MultiTierStateManager {
       .filter((record) => record.level === 'L3')
       .reduce((sum, record) => sum + record.tokenCount * 4, 0);
   }
+}
+
+function isNativeSlotStateEmpty(error: unknown): boolean {
+  return (
+    (error instanceof WllmError && error.code === 'slot_state_empty') ||
+    (error instanceof Error && /\(status 3\)/.test(error.message))
+  );
 }
 
 function residentTokenCount(node: SessionNode): number {

@@ -28,6 +28,8 @@ interface FakeRequestState {
   failure: boolean;
   prefillCached: number;
   outputChunks: string[];
+  nativeStateEstablished: boolean;
+  interruptPending: boolean;
 }
 
 export interface FakeNativeEngineOptions {
@@ -116,6 +118,10 @@ export class FakeNativeEngine implements NativeEngine {
       cancelled: false,
       failure: false,
       outputChunks: [],
+      // submit merely binds host bookkeeping; the native prompt is created
+      // when the first advance actually enters the model runtime.
+      nativeStateEstablished: previous?.nativeStateEstablished ?? false,
+      interruptPending: false,
     };
     this.requests.set(request.requestId, state);
     return this.progress(state, [], 0);
@@ -132,6 +138,13 @@ export class FakeNativeEngine implements NativeEngine {
     }
     if (state.stage === 'done') {
       return this.progress(state, [], 0);
+    }
+    if (state.interruptPending) {
+      state.interruptPending = false;
+      return {
+        ...this.progress(state, [], 0),
+        unitStop: 'host-abort',
+      };
     }
     if (state.failure) {
       state.failure = false;
@@ -167,6 +180,9 @@ export class FakeNativeEngine implements NativeEngine {
       );
       state.prefillProcessed += accepted;
       elapsedMs += accepted * this.prefillMsPerToken;
+      if (accepted > 0) {
+        state.nativeStateEstablished = true;
+      }
       if (state.prefillProcessed < state.promptTokens.length) {
         return this.progress(state, chunks, this.measure(start, elapsedMs));
       }
@@ -192,6 +208,7 @@ export class FakeNativeEngine implements NativeEngine {
 
     for (let index = 0; index < acceptedDecode; index += 1) {
       state.decodeGenerated += 1;
+      state.nativeStateEstablished = true;
       const generatedTokenNumber = state.decodeGenerated;
       const piece =
         generatedTokenNumber % 7 === 0
@@ -225,6 +242,8 @@ export class FakeNativeEngine implements NativeEngine {
     // The fake advance completes synchronously, so there is no in-flight
     // stream to cut short; tests that need preemption assert on the
     // scheduler trace instead.
+    const state = this.requireRequest(_nativeRequestId);
+    state.interruptPending = true;
   }
 
   async slotExport(slotId: number): Promise<NativeSlotCheckpoint> {
@@ -233,6 +252,12 @@ export class FakeNativeEngine implements NativeEngine {
       throw new WllmError(`slot is empty: ${slotId}`, 'empty_slot');
     }
     const state = this.requireRequest(requestId);
+    if (!state.nativeStateEstablished) {
+      throw new WllmError(
+        'Failed to export slot state (status 3)',
+        'inference_error'
+      );
+    }
     const tokens = [
       ...state.promptTokens.slice(0, state.prefillProcessed),
     ];
@@ -311,6 +336,8 @@ export class FakeNativeEngine implements NativeEngine {
       cancelled: false,
       failure: false,
       outputChunks: [],
+      nativeStateEstablished: true,
+      interruptPending: false,
     });
     this.slots.set(slotId, requestId);
     return {
@@ -407,6 +434,7 @@ export class FakeNativeEngine implements NativeEngine {
         inUse: true,
         tokens: state.prefillProcessed + state.decodeGenerated,
         state: state.stage,
+        parkable: state.nativeStateEstablished,
       };
     });
   }

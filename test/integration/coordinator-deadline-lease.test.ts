@@ -369,6 +369,102 @@ describe('SharedWorkerCoordinator deadline lease', () => {
     await pumping;
   });
 
+  it('rebuilds a peer cut before its native prompt exists instead of parking an empty slot', async () => {
+    const native = new FakeNativeEngine();
+    let releaseAdvance: () => void = () => undefined;
+    const advanceReleased = new Promise<void>((resolve) => {
+      releaseAdvance = resolve;
+    });
+    let signalAdvanceEntered: () => void = () => undefined;
+    const advanceEntered = new Promise<void>((resolve) => {
+      signalAdvanceEntered = resolve;
+    });
+    let holdAdvance = true;
+    const baseAdvance = native.advance.bind(native);
+    native.advance = async (nativeRequestId, budget) => {
+      if (holdAdvance && nativeRequestId === 'c1:peer') {
+        holdAdvance = false;
+        signalAdvanceEntered();
+        await advanceReleased;
+      }
+      return baseAdvance(nativeRequestId, budget);
+    };
+
+    const { coordinator } = deadlineCoordinator(native, {
+      leaseBatchSize: 1,
+      preemptOnActivation: true,
+    });
+    const failures: string[] = [];
+    const stateTransitions: Array<{
+      nodeId: string;
+      action: string;
+      level: string;
+    }> = [];
+    coordinator.subscribe((event) => {
+      if (event.type === 'failed') {
+        failures.push(event.error);
+      }
+      if (event.type === 'residency') {
+        stateTransitions.push({
+          nodeId: event.nodeId,
+          action: event.state.action,
+          level: event.level,
+        });
+      }
+    });
+
+    await coordinator.attach(
+      'c1',
+      lifecycle('c1', { foreground: false, state: 'hidden' })
+    );
+    await coordinator.attach(
+      'c2',
+      lifecycle('c2', { foreground: false, state: 'hidden' })
+    );
+    await coordinator.submit(
+      request('c1:peer', { maxNewTokens: 2 })
+    );
+
+    const pumping = coordinator.pump(1);
+    await advanceEntered;
+
+    // The promoted request arrives after submit() has bound the peer's host
+    // slot but before the native runtime has installed its prompt.
+    await coordinator.updateLifecycle(
+      lifecycle('c2', { epoch: 2, foreground: true, state: 'active' })
+    );
+    await coordinator.submit(
+      request('c2:priority', {
+        maxNewTokens: 2,
+        lifecycle: lifecycle('c2', {
+          epoch: 2,
+          foreground: true,
+          state: 'active',
+        }),
+      })
+    );
+    const peerSlot = (await native.slotStats()).find(
+      (slot) => slot.inUse
+    );
+    expect(peerSlot?.parkable).toBe(false);
+
+    releaseAdvance();
+    await pumping;
+    await coordinator.pump(12);
+
+    expect(failures).toEqual([]);
+    expect(
+      stateTransitions.some(
+        (transition) =>
+          transition.nodeId === 'c1:main' &&
+          transition.action === 'drop' &&
+          transition.level === 'rebuild'
+      )
+    ).toBe(true);
+    expect(await coordinator.status('c1:peer')).toBeNull();
+    expect(await coordinator.status('c2:priority')).toBeNull();
+  });
+
   it('retries activation preemption after a running batch binds native ids', async () => {
     const native = new FakeNativeEngine();
     const interrupts: string[] = [];
