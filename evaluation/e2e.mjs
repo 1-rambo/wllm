@@ -1056,8 +1056,14 @@ async function runRecoveryTrial(trial) {
     if (control.error !== null) throw new Error(`recovery control failed: ${control.error}`);
     stageLog(`recovery control probe complete (${armId} ${pressure.id} repeat=${repeat})`);
   }
-  const targetDiagnostics = await pageCall(target.page, "diagnostics", null).catch(() => null);
-  const targetSnapshot = await pageCall(target.page, "snapshot", null).catch(() => null);
+  const targetDiagnostics = await pageCall(target.page, "diagnostics", null, 10_000).catch((error) => {
+    stageLog(`recovery target diagnostics unavailable: ${error.message}`);
+    return null;
+  });
+  const targetSnapshot = await pageCall(target.page, "snapshot", null, 10_000).catch((error) => {
+    stageLog(`recovery target snapshot unavailable: ${error.message}`);
+    return null;
+  });
   const recoveryFirstToken =
     recovered.progress?.find((event) => event.type === "token") ?? null;
   const recoveryHighMarkers = (targetSnapshot?.priorityMarkers ?? []).filter(
@@ -1072,7 +1078,10 @@ async function runRecoveryTrial(trial) {
     : null;
   const recoveryPriorityRequested = recoveryPriority !== null;
   const recoveryPriorityApplied = recoveryHighMarkers.length > 0;
-  const lifecycleLog = await pageCall(target.page, "getLifecycleLog", null).catch(() => []);
+  const lifecycleLog = await pageCall(target.page, "getLifecycleLog", null, 10_000).catch((error) => {
+    stageLog(`recovery target lifecycle log unavailable: ${error.message}`);
+    return [];
+  });
   const lifecycleEvents = lifecycleEventTypes(lifecycleLog);
   const lifecycleValid =
     lifecycleEvents.includes("hidden") &&
@@ -1195,7 +1204,10 @@ async function runRecoveryTrial(trial) {
   }];
   for (const [index, item] of background.entries()) {
     const result = backgroundSettled[index];
-    const diagnostics = await pageCall(item.entry.page, "diagnostics", null).catch(() => null);
+    const diagnostics = await pageCall(item.entry.page, "diagnostics", null, 10_000).catch((error) => {
+      stageLog(`recovery background diagnostics unavailable for tab ${item.entry.tabIndex}: ${error.message}`);
+      return null;
+    });
     records.push({
       kind: "task",
       experiment: experiment.id,
